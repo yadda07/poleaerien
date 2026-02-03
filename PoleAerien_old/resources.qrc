@@ -1,8 +1,0 @@
-<RCC>
-    <qresource prefix="/plugins/PoleAerien" >
-        <file>icon.png</file>
-        <file>icon2.png</file>
-        <file>images/icon_grand.png</file>
-        <file>images/logo_NGE.png</file>
-    </qresource>
-</RCC>
