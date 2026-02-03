@@ -5,12 +5,13 @@ Orchestre la vérification, l'importation et l'analyse des données Police C6.
 Note: Ce workflow s'exécute principalement sur le thread principal car il manipule intensivement des objets QGIS non thread-safe.
 """
 
-from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsVectorLayer
+from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
+from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsVectorLayer, NULL
 from ..PoliceC6 import PoliceC6
 from ..qgis_utils import get_layer_safe
 import os
 import time
+import glob
 
 class PoliceWorkflow(QObject):
     """
@@ -120,6 +121,211 @@ class PoliceWorkflow(QObject):
     def apply_style(self, style_name):
         """Applique un style QGIS via la logique métier"""
         self.police_logic.appliquerstyle(style_name)
+
+    def detect_etude_field(self, layer):
+        """
+        Auto-détecte le champ étude dans une couche CAP FT.
+        
+        Args:
+            layer: QgsVectorLayer
+            
+        Returns:
+            str: Nom du champ détecté ou None
+        """
+        if not layer or not layer.isValid():
+            return None
+        
+        candidates = ['nom_etudes', 'etudes', 'nom_etude', 'nom', 'decoupage', 'zone', 'ref_fci']
+        for field in layer.fields():
+            if field.name().lower() in [c.lower() for c in candidates]:
+                return field.name()
+        return None
+
+    def find_c6_file(self, repertoire_c6, nom_etude):
+        """
+        Trouve le fichier C6 correspondant à une étude.
+        Cherche récursivement dans les sous-dossiers (CMD 1, CMD 2, etc.)
+        
+        Args:
+            repertoire_c6: Répertoire racine des C6
+            nom_etude: Nom de l'étude
+            
+        Returns:
+            str: Chemin du fichier C6 ou None
+        """
+        if not repertoire_c6 or not nom_etude:
+            return None
+        
+        # Patterns de recherche (priorité décroissante)
+        patterns = [
+            # Pattern principal: **/nom_etude/nom_etude.xlsx (récursif)
+            os.path.join(repertoire_c6, "**", nom_etude, f"{nom_etude}.xlsx"),
+            # Sous-dossier direct avec nom étude
+            os.path.join(repertoire_c6, nom_etude, f"{nom_etude}.xlsx"),
+            os.path.join(repertoire_c6, nom_etude, "*Annexe*C6*.xlsx"),
+            os.path.join(repertoire_c6, nom_etude, "*C6*.xlsx"),
+            # Récursif: chercher dans tous les sous-dossiers
+            os.path.join(repertoire_c6, "**", nom_etude, "*Annexe*C6*.xlsx"),
+            os.path.join(repertoire_c6, "**", nom_etude, "*C6*.xlsx"),
+            os.path.join(repertoire_c6, "**", f"{nom_etude}.xlsx"),
+            # Fichier direct avec nom étude
+            os.path.join(repertoire_c6, f"*{nom_etude}*.xlsx"),
+        ]
+        
+        for pattern in patterns:
+            # recursive=True pour supporter **
+            matches = glob.glob(pattern, recursive=True)
+            # Filtrer les fichiers non-C6 (FicheAppui, C7, GESPOT)
+            for match in matches:
+                fname = os.path.basename(match).lower()
+                if 'ficheappui' in fname or 'c7' in fname or 'gespot' in fname:
+                    continue
+                return match
+        
+        return None
+
+    def get_etudes_from_layer(self, table_etude, colonne_etude):
+        """
+        Récupère la liste des études depuis la couche etude_cap_ft.
+        
+        Args:
+            table_etude: Nom de la couche
+            colonne_etude: Nom de la colonne contenant les noms d'études
+            
+        Returns:
+            list: Liste des noms d'études uniques
+        """
+        try:
+            layer = get_layer_safe(table_etude, "Police_C6")
+        except ValueError as e:
+            QgsMessageLog.logMessage(f"get_etudes_from_layer: {e}", "PoleAerien", Qgis.Warning)
+            return []
+        
+        etudes = set()
+        idx = layer.fields().indexFromName(colonne_etude)
+        if idx < 0:
+            return []
+        
+        for feat in layer.getFeatures():
+            val = feat[colonne_etude]
+            if val and val != NULL:
+                etudes.add(str(val).strip())
+        
+        return sorted(list(etudes))
+
+    def run_analysis_auto_browse(self, params):
+        """
+        Lance l'analyse Police C6 en mode auto-browse.
+        Parcourt automatiquement les études depuis etude_cap_ft et trouve les C6 correspondants.
+        
+        Args:
+            params (dict): Paramètres d'analyse
+                - repertoire_c6: Répertoire contenant les fichiers C6
+                - bpe: Nom couche BPE
+                - attaches: Nom couche Attaches
+                - table_etude: Nom couche Etudes
+                - colonne_etude: Colonne Etudes
+                - zone_layer_name: Nom couche Zone (optionnel)
+        """
+        repertoire_c6 = params.get('repertoire_c6', '')
+        table_etude = params['table_etude']
+        colonne_etude = params['colonne_etude']
+        
+        # 1. Récupérer les études
+        etudes = self.get_etudes_from_layer(table_etude, colonne_etude)
+        if not etudes:
+            self.error_occurred.emit("Aucune étude trouvée dans la couche")
+            return
+        
+        self.message_received.emit(f"Parcours de {len(etudes)} études...", "blue")
+        self.progress_changed.emit(5)
+        
+        # 2. Pour chaque étude, trouver le C6 et lancer l'analyse
+        etudes_sans_c6 = []
+        etudes_traitees = 0
+        
+        for i, etude in enumerate(etudes):
+            progress = 5 + int((i / len(etudes)) * 90)
+            self.progress_changed.emit(progress)
+            
+            # Trouver le fichier C6
+            c6_file = self.find_c6_file(repertoire_c6, etude)
+            
+            if not c6_file:
+                etudes_sans_c6.append(etude)
+                self.message_received.emit(f"[!] {etude}: Fichier C6 introuvable", "orange")
+                continue
+            
+            self.message_received.emit(f"[>] {etude}: {os.path.basename(c6_file)}", "blue")
+            
+            # Préparer les params pour cette étude
+            etude_params = params.copy()
+            etude_params['fname'] = c6_file
+            etude_params['filterValeur'] = etude
+            
+            # Lancer l'analyse pour cette étude
+            try:
+                self.police_logic._reset_state()
+                self._run_single_analysis(etude_params)
+                etudes_traitees += 1
+            except Exception as e:
+                self.message_received.emit(f"[X] {etude}: Erreur - {e}", "red")
+                QgsMessageLog.logMessage(f"Erreur analyse {etude}: {e}", "PoleAerien", Qgis.Warning)
+        
+        # 3. Rapport final
+        self.progress_changed.emit(100)
+        self.message_received.emit("=" * 50, "grey")
+        self.message_received.emit(f"Études traitées: {etudes_traitees}/{len(etudes)}", "green" if etudes_traitees > 0 else "orange")
+        
+        if etudes_sans_c6:
+            self.message_received.emit(f"Études sans C6: {', '.join(etudes_sans_c6)}", "orange")
+        
+        # Émettre le résultat final
+        result = {
+            'success': True,
+            'mode': 'auto_browse',
+            'etudes_traitees': etudes_traitees,
+            'etudes_sans_c6': etudes_sans_c6
+        }
+        self.analysis_finished.emit(result)
+
+    def _run_single_analysis(self, params):
+        """Exécute l'analyse pour une seule étude (sans signaux de fin)."""
+        fname = params['fname']
+        table = params['table_etude']
+        colonne = params['colonne_etude']
+        filterValeur = params['filterValeur']
+        bpe = params['bpe']
+        attaches = params['attaches']
+        zone_layer_name = params.get('zone_layer_name')
+
+        # lireFichiers retourne (liste_cable_appui_OD, infNumPoteauAbsent)
+        self.police_logic.lireFichiers(
+            fname, table, colonne, filterValeur, bpe, attaches, zone_layer_name
+        )
+        
+        self.police_logic.removeGroup(f"ERROR_{filterValeur}")
+
+        # Rapport correspondances
+        if self.police_logic.nb_appui_corresp >= 1:
+            self.message_received.emit(f"  [OK] {self.police_logic.nb_appui_corresp} correspondance(s)", "green")
+        
+        # Rapport absents C6 -> QGIS (appuis dans C6 mais pas dans QGIS)
+        if self.police_logic.nb_appui_absentPot >= 1:
+            refs = self.police_logic.absence[:10]  # Max 10 pour lisibilite
+            refs_str = ", ".join(str(r) for r in refs)
+            suffix = f" (+{self.police_logic.nb_appui_absentPot - 10} autres)" if self.police_logic.nb_appui_absentPot > 10 else ""
+            self.message_received.emit(f"  [!] {self.police_logic.nb_appui_absentPot} appui(s) C6 absent(s) de QGIS: {refs_str}{suffix}", "orange")
+        
+        # Rapport absents QGIS -> C6 (appuis dans QGIS mais pas dans C6)
+        if self.police_logic.nb_appui_absent > 0:
+            # Recuperer les numeros des appuis QGIS absents du C6
+            refs = self.police_logic.potInfNumPresent[-self.police_logic.nb_appui_absent:][:10] if hasattr(self.police_logic, 'potInfNumPresent') else []
+            if not refs and hasattr(self.police_logic, 'idPotAbsent'):
+                refs = [f"ID:{id}" for id in self.police_logic.idPotAbsent[:10]]
+            refs_str = ", ".join(str(r) for r in refs) if refs else "voir couche erreur"
+            suffix = f" (+{self.police_logic.nb_appui_absent - 10} autres)" if self.police_logic.nb_appui_absent > 10 else ""
+            self.message_received.emit(f"  [!] {self.police_logic.nb_appui_absent} appui(s) QGIS absent(s) du C6: {refs_str}{suffix}", "orange")
 
     def run_analysis(self, params):
         """

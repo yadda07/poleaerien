@@ -533,13 +533,25 @@ class PoliceC6:
             infra_pt_pot = get_layer_safe(LYR_INFRA_PT_POT, "Police_C6")
             infra_pt_chb = get_layer_safe(LYR_INFRA_PT_CHB, "Police_C6")
             etude_cap_ft = get_layer_safe(table, "Police_C6")
-            t_cheminement_copy = get_layer_safe(LYR_T_CHEMINEMENT_COPY, "Police_C6")
         except ValueError as e:
             QgsMessageLog.logMessage(
                 f"PoliceC6.lireFichiers: {e}",
                 "POLICE_C6", Qgis.Critical
             )
             return [], []
+        
+        # t_cheminement_copy est optionnel (pour détection appuis adjacents)
+        t_cheminement_copy = None
+        try:
+            t_cheminement_copy = get_layer_safe(LYR_T_CHEMINEMENT_COPY, "Police_C6")
+        except ValueError:
+            # Log uniquement si pas déjà fait (évite spam en mode auto-browse)
+            if not getattr(self, '_t_chem_warning_logged', False):
+                QgsMessageLog.logMessage(
+                    "t_cheminement_copy absent - détection appuis adjacents désactivée",
+                    "POLICE_C6", Qgis.Warning
+                )
+                self._t_chem_warning_logged = True
 
         zone_layer = None
         zone_index = None
@@ -560,7 +572,8 @@ class PoliceC6:
             validate_same_crs(infra_pt_pot, bpe, "Police_C6")
             validate_same_crs(infra_pt_pot, attaches, "Police_C6")
             validate_same_crs(infra_pt_pot, infra_pt_chb, "Police_C6")
-            validate_same_crs(infra_pt_pot, t_cheminement_copy, "Police_C6")
+            if t_cheminement_copy is not None:
+                validate_same_crs(infra_pt_pot, t_cheminement_copy, "Police_C6")
             if zone_layer is not None:
                 validate_same_crs(infra_pt_pot, zone_layer, "Police_C6")
         except ValueError as e:
@@ -625,99 +638,100 @@ class PoliceC6:
         
         op_count = 0  # Operation counter for processEvents
 
-        # Pour les appuis adjacents, hors de la zone d'étude
-        for idx_chem, feat_t_chem in enumerate(t_cheminement_copy.getFeatures()):
-            if idx_chem % 10 == 0:
-                QApplication.processEvents()  # Keep UI responsive
-            adjacent = False  # Par défaut pas d'adjacent de trouvé
+        # Pour les appuis adjacents, hors de la zone d'étude (si t_cheminement_copy disponible)
+        if t_cheminement_copy is not None:
+            for idx_chem, feat_t_chem in enumerate(t_cheminement_copy.getFeatures()):
+                if idx_chem % 10 == 0:
+                    QApplication.processEvents()  # Keep UI responsive
+                adjacent = False  # Par défaut pas d'adjacent de trouvé
 
-            if not feat_t_chem.hasGeometry():
-                continue
-
-            tchem_geom = feat_t_chem.geometry()
-            tchem_bbox = tchem_geom.boundingBox()
-            etude_candidates = etude_index.intersects(tchem_bbox)
-
-            for fid in etude_candidates:
-                feat_cap_ft = etude_cache.get(fid)
-                if not feat_cap_ft:
+                if not feat_t_chem.hasGeometry():
                     continue
-                # Le cheminement doit intersecter la zone d'étude ...
-                if tchem_geom.intersects(feat_cap_ft.geometry()):
 
-                    if tchem_geom.contains(feat_cap_ft.geometry()):
-                        pass
+                tchem_geom = feat_t_chem.geometry()
+                tchem_bbox = tchem_geom.boundingBox()
+                etude_candidates = etude_index.intersects(tchem_bbox)
 
-                    # ... mais il ne doit pas être contenu dans la zone d'étude
-                    else:
-                        geom = tchem_geom.asMultiPolyline()  # .asMultiPolyline  ou  asPolyline
-                        start_point = QgsPointXY(geom[0][0])  # l'origine du cable
-                        chem_geom_start_point = QgsGeometry.fromPointXY(start_point).buffer(bufferDist, 0)
+                for fid in etude_candidates:
+                    feat_cap_ft = etude_cache.get(fid)
+                    if not feat_cap_ft:
+                        continue
+                    # Le cheminement doit intersecter la zone d'étude ...
+                    if tchem_geom.intersects(feat_cap_ft.geometry()):
 
-                        # Si
-                        if chem_geom_start_point.intersects(feat_cap_ft.geometry()):
+                        if tchem_geom.contains(feat_cap_ft.geometry()):
                             pass
 
+                        # ... mais il ne doit pas être contenu dans la zone d'étude
                         else:
-                            # Use spatial index instead of full scan
-                            pot_candidates = pot_index.intersects(chem_geom_start_point.boundingBox())
-                            for pot_id in pot_candidates:
-                                feat_pot_origine = pot_cache.get(pot_id)
-                                if not feat_pot_origine or not feat_pot_origine.geometry():
-                                    continue
-                                
-                                op_count += 1
-                                if op_count % 100 == 0:
-                                    QApplication.processEvents()
+                            geom = tchem_geom.asMultiPolyline()  # .asMultiPolyline  ou  asPolyline
+                            start_point = QgsPointXY(geom[0][0])  # l'origine du cable
+                            chem_geom_start_point = QgsGeometry.fromPointXY(start_point).buffer(bufferDist, 0)
 
-                                if feat_pot_origine.geometry().intersects(chem_geom_start_point):
-                                    if feat_pot_origine[idx_inf_num] != NULL:
-                                        chaine = self._norm_inf_num(feat_pot_origine[idx_inf_num])
-                                        if not chaine:
-                                            continue
-                                        valeursmanquant.append(chaine)
-
-                                        if chaine in champs_xlsx and chaine not in self.potInfNumPresent:
-                                            self.nb_appui_corresp += 1
-                                            self.potInfNumPresent.append(chaine)
-                                            self.idPotPresent.append(feat_pot_origine.id())
-                                            adjacent = True
-
-                        if not adjacent:
-                            # L'intermité destination du cheminement
-                            end_point = QgsPointXY(geom[-1][0])  # l'origine du cable
-                            chem_geom_end_point = QgsGeometry.fromPointXY(end_point).buffer(bufferDist, 0)
-
-                            if chem_geom_end_point.intersects(feat_cap_ft.geometry()):
+                            # Si
+                            if chem_geom_start_point.intersects(feat_cap_ft.geometry()):
                                 pass
 
                             else:
                                 # Use spatial index instead of full scan
-                                pot_dest_candidates = pot_index.intersects(chem_geom_end_point.boundingBox())
-                                for pot_dest_id in pot_dest_candidates:
-                                    feat_pot_destination = pot_cache.get(pot_dest_id)
-                                    if not feat_pot_destination or not feat_pot_destination.geometry():
+                                pot_candidates = pot_index.intersects(chem_geom_start_point.boundingBox())
+                                for pot_id in pot_candidates:
+                                    feat_pot_origine = pot_cache.get(pot_id)
+                                    if not feat_pot_origine or not feat_pot_origine.geometry():
                                         continue
                                     
                                     op_count += 1
                                     if op_count % 100 == 0:
                                         QApplication.processEvents()
 
-                                    if feat_pot_destination.geometry().intersects(chem_geom_end_point):
-                                        if feat_pot_destination[idx_inf_num] != NULL and re.match('POT', feat_pot_destination[idx_inf_num]) is None:
-                                            chaine = self._norm_inf_num(feat_pot_destination[idx_inf_num])
+                                    if feat_pot_origine.geometry().intersects(chem_geom_start_point):
+                                        if feat_pot_origine[idx_inf_num] != NULL:
+                                            chaine = self._norm_inf_num(feat_pot_origine[idx_inf_num])
                                             if not chaine:
                                                 continue
-
-                                            # Toutes les valeurs trouvées sont ici stockées pour servir de comparaison aux valeurs qui n'existent pas
                                             valeursmanquant.append(chaine)
 
                                             if chaine in champs_xlsx and chaine not in self.potInfNumPresent:
                                                 self.nb_appui_corresp += 1
-                                                # Pour éviter des doublons lors du renseignement des appuis à remplacer
                                                 self.potInfNumPresent.append(chaine)
-                                                self.idPotPresent.append(feat_pot_destination.id())
+                                                self.idPotPresent.append(feat_pot_origine.id())
                                                 adjacent = True
+
+                            if not adjacent:
+                                # L'intermité destination du cheminement
+                                end_point = QgsPointXY(geom[-1][0])  # l'origine du cable
+                                chem_geom_end_point = QgsGeometry.fromPointXY(end_point).buffer(bufferDist, 0)
+
+                                if chem_geom_end_point.intersects(feat_cap_ft.geometry()):
+                                    pass
+
+                                else:
+                                    # Use spatial index instead of full scan
+                                    pot_dest_candidates = pot_index.intersects(chem_geom_end_point.boundingBox())
+                                    for pot_dest_id in pot_dest_candidates:
+                                        feat_pot_destination = pot_cache.get(pot_dest_id)
+                                        if not feat_pot_destination or not feat_pot_destination.geometry():
+                                            continue
+                                        
+                                        op_count += 1
+                                        if op_count % 100 == 0:
+                                            QApplication.processEvents()
+
+                                        if feat_pot_destination.geometry().intersects(chem_geom_end_point):
+                                            if feat_pot_destination[idx_inf_num] != NULL and re.match('POT', feat_pot_destination[idx_inf_num]) is None:
+                                                chaine = self._norm_inf_num(feat_pot_destination[idx_inf_num])
+                                                if not chaine:
+                                                    continue
+
+                                                # Toutes les valeurs trouvées sont ici stockées pour servir de comparaison aux valeurs qui n'existent pas
+                                                valeursmanquant.append(chaine)
+
+                                                if chaine in champs_xlsx and chaine not in self.potInfNumPresent:
+                                                    self.nb_appui_corresp += 1
+                                                    # Pour éviter des doublons lors du renseignement des appuis à remplacer
+                                                    self.potInfNumPresent.append(chaine)
+                                                    self.idPotPresent.append(feat_pot_destination.id())
+                                                    adjacent = True
 
         # Réquete sur la table géométrie
         # Filtrage de la table polygone (etude_cap_ft) pour ne choisir que la zone géographique qui nous concerne.

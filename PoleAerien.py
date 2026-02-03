@@ -1041,14 +1041,17 @@ class PoleAerien:
 
         source_gracethd_ok = gthd_valide or sqlite_ok
         
-        if (not self.dlg.c6ComboBoxCoucheBpe.currentText() or not self.dlg.c6ComboBoxCoucheEtudes.currentText() or
+        # Vérif chemin C6 (fichier ou répertoire pour auto-browse)
+        chemin_c6 = self.dlg.C6LienCheminImportFichier.text().strip()
+        chemin_c6_ok = chemin_c6 and (os.path.isdir(chemin_c6) or os.path.isfile(chemin_c6))
+        
+        if (not self.dlg.c6ComboBoxCoucheBpe.currentText() or 
+            not self.dlg.c6ComboBoxCoucheEtudes.currentText() or
             not self.dlg.c6ComboBoxCoucheAttaches.currentText() or
-                not self.dlg.c6comboBoxColonneDecoupage.currentText() or
-                not self.dlg.c6ComboBoxValeur.currentText() or
-                not os.path.exists(self.dlg.C6LienCheminImportFichier.text()) or
-                not source_gracethd_ok):
+            not self.dlg.c6comboBoxColonneDecoupage.currentText() or
+            not chemin_c6_ok or
+            not source_gracethd_ok):
             self.dlg.c6Lanceur.setEnabled(False)
-
         else:
             self.dlg.c6Lanceur.setEnabled(True)
 
@@ -1114,17 +1117,16 @@ class PoleAerien:
                 return
 
     def choixDossierImportFichierC6(self):
-        """Fonction pour choisir le fichier qui doit être analysé (fallback manuel)"""
+        """Fonction pour choisir le répertoire contenant les fichiers C6"""
         self.dlg.smooth_progress.reset()
-        fname = QFileDialog.getOpenFileName(None, f"Veuillez sélectionner le fichier EXCEL à analyser", "",
-                                            "Fichier (*.xlsx)")[0]
-
-        # Pour changer le dossier de travail par défaut
-        if os.access(fname, os.W_OK):
-            self.dlg.C6LienCheminImportFichier.setText(fname)
-            dossier = os.path.dirname(fname)
-            os.chdir(dossier)
-            return
+        repertoire = QFileDialog.getExistingDirectory(
+            self.dlg,
+            "Sélectionner le répertoire contenant les fichiers C6",
+            ""
+        )
+        if repertoire and os.access(repertoire, os.W_OK):
+            self.dlg.C6LienCheminImportFichier.setText(repertoire)
+            os.chdir(repertoire)
 
     def plc6ChoixDossierRepertoireGraceTHD(self):
         """Fonction pour choisir le repertoire à partir duquel je souhaite IMPORTER des couches"""
@@ -1290,29 +1292,18 @@ class PoleAerien:
         self.dlg.smooth_progress.reset()
         self.dlg.smooth_progress.set_target(5)
 
-        # 2. Importation Données
+        # 2. Importation Données GraceTHD
         if not self.Plc6ImportationDonneesDansQgis():
             # Error handled inside
             return
 
-        # 3. Preparation parametres
-        filterValeur = self.dlg.c6ComboBoxValeur.currentText()
+        # 3. Déterminer le mode (auto-browse ou single file)
+        chemin_c6 = self.dlg.C6LienCheminImportFichier.text().strip()
+        is_auto_browse = os.path.isdir(chemin_c6)
         
-        # Validation specifique (caracteres speciaux)
-        voyelles = f"àâäéèêëîïôöùûüÿ'ÀÂÄÉÈÊËÎÏÔÖÙÛÜŸ"
-        for car in voyelles:
-            if car in filterValeur:
-                alerte = (f"Le nom de l'étude ne doit pas contenir de caractères spéciaux, "
-                          f"accentués ou apostrophes:")
-                self.alerteInfos(alerte)
-                self.dlg.smooth_progress.reset()
-                self.dlg.end_processing_error('c6Lanceur', 'Erreur')
-                return
-
+        # 4. Preparation parametres communs
         params = {
-            'fname': self.dlg.C6LienCheminImportFichier.text(),
             'bpe': self.dlg.c6ComboBoxCoucheBpe.currentText(),
-            'filterValeur': filterValeur,
             'attaches': self.dlg.c6ComboBoxCoucheAttaches.currentText(),
             'table_etude': self.dlg.c6ComboBoxCoucheEtudes.currentText(),
             'colonne_etude': self.dlg.c6comboBoxColonneDecoupage.currentText()
@@ -1323,14 +1314,32 @@ class PoleAerien:
             if zone_lyr and zone_lyr.isValid():
                 params['zone_layer_name'] = zone_lyr.name()
 
-        # 4. Lancement Analyse (Main Thread avec events)
+        # 5. Lancement Analyse
         self.police_workflow.reset_logic()
         
-        # Enregistrement pour annulation (simulation car pas de QgsTask ici, mais permet de gerer l'etat)
-        # Note: PoliceWorkflow n'est pas une QgsTask, donc on ne peut pas l'annuler via taskManager.
-        # Mais on garde le statut "processing"
-        
-        self.police_workflow.run_analysis(params)
+        if is_auto_browse:
+            # Mode auto-browse: parcourir toutes les études depuis etude_cap_ft
+            params['repertoire_c6'] = chemin_c6
+            self.alerteInfos("Mode auto-browse: parcours des études depuis CAP FT...", couleur="blue")
+            self.police_workflow.run_analysis_auto_browse(params)
+        else:
+            # Mode single: analyse d'une seule étude
+            filterValeur = self.dlg.c6ComboBoxValeur.currentText()
+            
+            # Validation specifique (caracteres speciaux)
+            voyelles = f"àâäéèêëîïôöùûüÿ'ÀÂÄÉÈÊËÎÏÔÖÙÛÜŸ"
+            for car in voyelles:
+                if car in filterValeur:
+                    alerte = (f"Le nom de l'étude ne doit pas contenir de caractères spéciaux, "
+                              f"accentués ou apostrophes:")
+                    self.alerteInfos(alerte)
+                    self.dlg.smooth_progress.reset()
+                    self.dlg.end_processing_error('c6Lanceur', 'Erreur')
+                    return
+            
+            params['fname'] = chemin_c6
+            params['filterValeur'] = filterValeur
+            self.police_workflow.run_analysis(params)
 
     def _onPoliceProgress(self, value):
         """Callback progression Police C6"""
@@ -1352,6 +1361,16 @@ class PoleAerien:
         if not self._dlg_alive():
             return
         
+        # Mode auto-browse: affichage simplifié
+        if result.get('mode') == 'auto_browse':
+            etape = "Fin du parcours automatique des études"
+            self.alerteInfos(etape, couleur="grey")
+            self.msgexporter += f"\n{etape}"
+            self.dlg.smooth_progress.set_target(100)
+            self.dlg.end_processing_success('c6Lanceur', 'Terminé')
+            return
+        
+        # Mode single: gestion couches erreurs
         filterValeur = result.get('filterValeur')
         
         # Création couches erreurs via SecondFile (sc)
@@ -1369,8 +1388,6 @@ class PoleAerien:
         ebp_non_appui = result.get('ebp_non_appui', [])
         fied_id_Ebp = result.get('fied_id_Ebp', 'gid')
         if ebp_non_appui:
-            # Note: On suppose couche 'bpe' par défaut ou on devrait la passer dans result
-            # Pour l'instant on utilise 'bpe' hardcodé comme dans le code original implicitement via variable locale
             bpe_layer_name = self.dlg.c6ComboBoxCoucheBpe.currentText() or "bpe"
             condition = tuple(ebp_non_appui) if len(ebp_non_appui) > 1 else f"({ebp_non_appui[0]})"
             self.sc.createNewLayer(fied_id_Ebp, condition, bpe_layer_name, "Point", "pas_intersect", filterValeur)

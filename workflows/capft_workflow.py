@@ -52,6 +52,14 @@ class CapFtWorkflow(QObject):
             self.error_occurred.emit("Répertoire CAP_FT invalide")
             return
 
+        # Construire chemin fichier export (avec extension .xlsx)
+        if os.path.isdir(chemin_export):
+            fichier_export = os.path.join(chemin_export, "analyse_cap_ft.xlsx")
+        elif not chemin_export.endswith('.xlsx'):
+            fichier_export = chemin_export + ".xlsx"
+        else:
+            fichier_export = chemin_export
+
         # 1. Extraction des données (Main Thread)
         try:
             doublons, hors_etude = self.cap_logic.verificationsDonneesCapft(
@@ -71,7 +79,7 @@ class CapFtWorkflow(QObject):
         # 2. Préparation des données pour la Task
         params = {
             'chemin_cap_ft': chemin_cap,
-            'fichier_export': chemin_export
+            'fichier_export': fichier_export
         }
         
         # Deep copy pour éviter mutation

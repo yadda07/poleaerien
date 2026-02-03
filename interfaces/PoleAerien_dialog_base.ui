@@ -1120,13 +1120,13 @@
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_8">
          <item>
-          <!-- GraceTHD masqué - chemin fixe interne GraceTHD/GraceTHD/shapes -->
+          <!-- GraceTHD - sélection répertoire -->
           <widget class="QLabel" name="repertoireGTHD">
            <property name="visible">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
            <property name="enabled">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1142,7 +1142,7 @@
          <item>
           <widget class="QLineEdit" name="c6LienCheminGraceThd">
            <property name="visible">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
            <property name="enabled">
             <bool>true</bool>
@@ -1161,7 +1161,7 @@
          <item>
           <widget class="QPushButton" name="boutonCheminGraceThd">
            <property name="visible">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1188,7 +1188,7 @@
          <item>
           <widget class="QLabel" name="label_1">
            <property name="enabled">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1197,7 +1197,7 @@
             </sizepolicy>
            </property>
            <property name="text">
-            <string>Fichier C6 *</string>
+            <string>Répertoire C6 *</string>
            </property>
           </widget>
          </item>
@@ -1213,7 +1213,7 @@
             </sizepolicy>
            </property>
            <property name="placeholderText">
-            <string>Annexe C6 (.xlsx)</string>
+            <string>Dossier contenant les C6 (.xlsx)</string>
            </property>
           </widget>
          </item>
@@ -1401,6 +1401,9 @@
         <layout class="QHBoxLayout" name="horizontalLayout_5">
          <item>
           <widget class="QLabel" name="label_12">
+           <property name="visible">
+            <bool>false</bool>
+           </property>
            <property name="text">
             <string>Filtre Valeur *</string>
            </property>
@@ -1421,6 +1424,9 @@
          </item>
          <item>
           <widget class="QComboBox" name="c6ComboBoxValeur">
+           <property name="visible">
+            <bool>false</bool>
+           </property>
            <property name="enabled">
             <bool>true</bool>
            </property>
