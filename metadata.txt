@@ -1,0 +1,76 @@
+# This file contains metadata for your plugin.
+# Mandatory items:
+
+[general]
+name=Pôle Aérien
+qgisMinimumVersion=3.28
+qgisMaximumVersion=3.99
+description=Contrôle qualité et mise à jour des poteaux aériens ENEDIS (FT/BT) pour projets FTTH
+version=2.3.0
+author=NGE-ES
+email=yadda@nge-es.fr
+
+about=Plugin de contrôle qualité et de mise à jour des données de poteaux aériens ENEDIS dans le cadre des projets FTTH.
+
+    Fonctionnalités principales :
+    - MAJ FT/BT : Mise à jour automatique des attributs poteaux depuis fichiers Excel
+    - Vérification CAP_FT : Comparaison poteaux FT QGIS vs Fiches Appuis sous-traitants
+    - Vérification COMAC : Comparaison poteaux BT QGIS vs fichiers ExportComac
+    - C6 vs BD : Comparaison annexes C6 avec base de données QGIS
+    - C6/C3A/C7 vs BD : Analyse croisée des annexes contractuelles
+    - Police C6 : Analyse détaillée avec données GraceTHD
+
+    Tables requises : infra_pt_pot, etude_cap_ft, etude_comac, tables GraceTHD
+
+tracker=https://github.com/asoumare/PoleAerien/issues
+repository=https://github.com/asoumare/PoleAerien
+
+# End of mandatory metadata
+
+# Recommended items:
+hasProcessingProvider=no
+
+changelog=
+    2.3.0 (2026-02-01) - Corrections Performance & Qualité
+        - CRITICAL: Filtres spatiaux getFeatures() (-80% temps, -70% mémoire)
+        - CRITICAL: Cleanup mémoire explicite (évite fuite 500 MB)
+        - CRITICAL: Guards division par zéro (security_rules.py)
+        - CRITICAL: Transactions atomiques avec rollback (Maj_Ft_Bt.py)
+        - CRITICAL: Fix injection SQL (PoliceC6.py)
+        - Architecture Workflows: Déconstruction God Object PoleAerien.py
+        - Création couche workflows/ (6 orchestrateurs dédiés)
+        - Utils scindé: qgis_utils.py + core_utils.py
+    2.2.2 (2026-01) - Refonte Architecturale
+        - Threading QGIS conforme : extraction données sur main thread
+        - Index spatial QgsSpatialIndex (CapFt, Comac, C6_vs_Bd)
+        - Protection injection SQL/Expression
+        - Accès couches sécurisé via get_layer_safe()
+    2.2.1 (2026-01)
+        - Refonte UI : police Corbel, labels, suppression boutons Actualiser
+    2.0.1 (2026-01)
+        - Correction compatibilité QGIS 3.28 à 3.42 (protection NULL/QVariant)
+        - Optimisation spatiale avec QgsSpatialIndex
+        - Exécution asynchrone MAJ FT/BT (QgsTask)
+    2.0.0 (2025)
+        - Refonte complète de l'interface
+        - Ajout module Police C6
+        - Ajout comparaison C6/C3A/C7
+    1.0.0 (2022-03)
+        - Version initiale (Vérification COMAC/CAP_FT)
+
+# Tags are comma separated with spaces allowed
+tags=poteau, poteaux, ENEDIS, FTTH, fibre optique, CAP_FT, COMAC, C6, C3A, contrôle qualité, BT, FT, GraceTHD, aérien, sous-traitant, Excel, analyse
+
+homepage=https://github.com/asoumare/PoleAerien
+category=Vector
+icon=icon.png
+
+# experimental flag
+experimental=False
+
+# deprecated flag (applies to the whole plugin, not just a single version)
+deprecated=False
+
+# If the plugin can run on QGIS Server.
+server=False
+
