@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Documentation du plugin QGIS Pôle Aérien - Contrôle et analyse des données COMAC">
-    <title>Pôle Aérien - Documentation</title>
+    <meta name="description" content="Documentation complète du plugin QGIS Pôle Aérien - Contrôle qualité et analyse des poteaux aériens ENEDIS pour projets FTTH">
+    <meta name="keywords" content="QGIS, Pôle Aérien, FTTH, ENEDIS, C6, CAP FT, COMAC, Police C6">
+    <title>Pôle Aérien - Documentation Technique Complète</title>
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -765,7 +766,7 @@
 
         .accordion-item.active .accordion-content {
             padding: 0 1.5rem 1.5rem;
-            max-height: 200px;
+            max-height: 1000px;
             opacity: 1;
             transform: translateY(0);
             transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
@@ -1310,6 +1311,8 @@
             </a>
             <ul class="nav-links">
                 <li><a href="#features" class="active">Fonctionnalites</a></li>
+                <li><a href="#onglet-c6bd" style="color: #ec4899; font-weight: 600;">O-1: C6 vs BD</a></li>
+                <li><a href="#onglet-capft" style="color: #34d399; font-weight: 600;">O-2: CAP FT</a></li>
                 <li><a href="#timeline">Timeline</a></li>
                 <li><a href="#lifecycle">Cycle de vie</a></li>
                 <li><a href="#analytics">Architecture</a></li>
@@ -1390,7 +1393,7 @@
                         <img src="../images/icon-search.svg" alt="Search" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Police C6 <span class="badge badge-orange" style="font-size: 0.7rem; margin-left: 0.5rem;">v2.2.4</span></h3>
-                    <p>Vérification de conformité avec GraceTHD intégré en interne + auto-détection du fichier C6 basée sur nom_etudes.</p>
+                    <p>Vérification de conformité avec import GraceTHD (shp/SQLite) + auto-détection du fichier C6 basée sur nom_etudes.</p>
                 </article>
 
                 <article class="card animate-in delay-1">
@@ -3202,6 +3205,468 @@
             <div id="diagram-tooltip" class="info-tooltip"></div>
         </section>
 
+        <!-- Onglet 1: C6 vs BD - Architecture détaillée -->
+        <section id="onglet-c6bd" style="margin-top: 5rem;">
+            <div class="section-header">
+                <h2>
+                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; background: linear-gradient(135deg, #ec4899, #db2777); border-radius: 10px; margin-right: 12px; color: white; font-weight: 700; font-size: 18px;">1</span>
+                    Onglet 1 : C6 vs BD - Architecture complète
+                </h2>
+                <p>Comparaison intelligente des fichiers Excel C6 avec la base de données QGIS</p>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid" style="margin-bottom: 3rem;">
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #ec4899;">422</div>
+                    <div class="stat-label">Lignes C6_vs_Bd.py</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #3b82f6;">246</div>
+                    <div class="stat-label">Lignes c6bd_workflow.py</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #10b981;">7s</div>
+                    <div class="stat-label">Temps analyse (19 études)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #f59e0b;">-84%</div>
+                    <div class="stat-label">Gain performance</div>
+                </div>
+            </div>
+
+            <!-- Architecture Diagram C6 vs BD -->
+            <div class="diagram-container" style="background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%);">
+                <h3 class="diagram-title" style="color: #831843;">Architecture asynchrone non-bloquante</h3>
+                <svg class="architecture-svg" viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <marker id="arrow-c6" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                            <polygon points="0 0, 8 3, 0 6" fill="#ec4899"/>
+                        </marker>
+                        <marker id="arrow-c6-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                            <polygon points="0 0, 8 3, 0 6" fill="#10b981"/>
+                        </marker>
+                        <linearGradient id="grad-c6-1" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#ec4899;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#db2777;stop-opacity:1" />
+                        </linearGradient>
+                        <filter id="shadow-c6" x="-10%" y="-10%" width="120%" height="120%">
+                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/>
+                        </filter>
+                    </defs>
+                    
+                    <!-- Background -->
+                    <rect width="900" height="520" fill="transparent"/>
+                    
+                    <!-- Main Thread Zone -->
+                    <rect x="20" y="50" width="540" height="200" rx="16" fill="rgba(255,255,255,0.6)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6 3"/>
+                    <text x="40" y="75" fill="#1e40af" font-size="11" font-weight="700">MAIN THREAD</text>
+                    
+                    <!-- Step 0: START -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="40" y="95" width="120" height="70" rx="10" fill="white" stroke="#ec4899" stroke-width="2"/>
+                        <rect x="40" y="95" width="120" height="24" rx="10" fill="url(#grad-c6-1)"/>
+                        <text x="100" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">START</text>
+                        <text x="100" y="135" text-anchor="middle" fill="#831843" font-size="9" font-weight="600">start_analysis()</text>
+                        <text x="100" y="150" text-anchor="middle" fill="#9d174d" font-size="8">Auto-detect champ</text>
+                    </g>
+                    <text x="100" y="178" text-anchor="middle" fill="#10b981" font-size="8" font-weight="600">5%</text>
+                    
+                    <!-- Arrow 0→1 -->
+                    <line x1="160" y1="130" x2="175" y2="130" stroke="#ec4899" stroke-width="2" marker-end="url(#arrow-c6)"/>
+                    
+                    <!-- Step 1: Extract IN -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="180" y="95" width="120" height="70" rx="10" fill="white" stroke="#3b82f6" stroke-width="2"/>
+                        <rect x="180" y="95" width="120" height="24" rx="10" fill="#3b82f6"/>
+                        <text x="240" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">STEP 1</text>
+                        <text x="240" y="135" text-anchor="middle" fill="#1e40af" font-size="9" font-weight="600">extract_in()</text>
+                        <text x="240" y="150" text-anchor="middle" fill="#2563eb" font-size="8">QgsSpatialIndex</text>
+                    </g>
+                    <text x="240" y="178" text-anchor="middle" fill="#10b981" font-size="8" font-weight="600">25%</text>
+                    
+                    <!-- Arrow 1→2 -->
+                    <line x1="300" y1="130" x2="315" y2="130" stroke="#ec4899" stroke-width="2" marker-end="url(#arrow-c6)"/>
+                    
+                    <!-- Step 2: Extract OUT -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="320" y="95" width="120" height="70" rx="10" fill="white" stroke="#f59e0b" stroke-width="2"/>
+                        <rect x="320" y="95" width="120" height="24" rx="10" fill="#f59e0b"/>
+                        <text x="380" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">STEP 2</text>
+                        <text x="380" y="135" text-anchor="middle" fill="#92400e" font-size="9" font-weight="600">extract_out()</text>
+                        <text x="380" y="150" text-anchor="middle" fill="#a16207" font-size="8">Hors périmètre</text>
+                    </g>
+                    <text x="380" y="178" text-anchor="middle" fill="#10b981" font-size="8" font-weight="600">40%</text>
+                    
+                    <!-- Arrow 2→3 -->
+                    <line x1="440" y1="130" x2="455" y2="130" stroke="#ec4899" stroke-width="2" marker-end="url(#arrow-c6)"/>
+                    
+                    <!-- Step 3: Verify études -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="460" y="95" width="120" height="70" rx="10" fill="white" stroke="#8b5cf6" stroke-width="2"/>
+                        <rect x="460" y="95" width="120" height="24" rx="10" fill="#8b5cf6"/>
+                        <text x="520" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">STEP 3</text>
+                        <text x="520" y="135" text-anchor="middle" fill="#3730a3" font-size="9" font-weight="600">verify_etudes()</text>
+                        <text x="520" y="150" text-anchor="middle" fill="#5b21b6" font-size="8">CAP FT vs C6</text>
+                    </g>
+                    <text x="520" y="178" text-anchor="middle" fill="#10b981" font-size="8" font-weight="600">50%</text>
+                    
+                    <!-- QTimer label -->
+                    <rect x="200" y="188" width="200" height="20" rx="4" fill="#f0fdf4" stroke="#10b981" stroke-width="1"/>
+                    <text x="300" y="202" text-anchor="middle" fill="#065f46" font-size="9" font-weight="600">QTimer 0ms entre chaque étape</text>
+                    
+                    <!-- Arrow Main→Worker -->
+                    <path d="M 520 165 L 520 210 L 600 210 L 600 275" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrow-c6-green)"/>
+                    <text x="570" y="245" text-anchor="middle" fill="#065f46" font-size="9" font-weight="700">QgsTask</text>
+                    
+                    <!-- Worker Thread Zone -->
+                    <rect x="580" y="50" width="300" height="200" rx="16" fill="rgba(209,250,229,0.5)" stroke="#10b981" stroke-width="2"/>
+                    <text x="600" y="75" fill="#065f46" font-size="11" font-weight="700">WORKER THREAD</text>
+                    
+                    <!-- Step 4: Async Task -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="600" y="95" width="260" height="130" rx="12" fill="white" stroke="#10b981" stroke-width="2"/>
+                        <rect x="600" y="95" width="260" height="28" rx="12" fill="#10b981"/>
+                        <text x="730" y="114" text-anchor="middle" fill="white" font-size="11" font-weight="700">STEP 4 - C6BdTask</text>
+                        <text x="730" y="140" text-anchor="middle" fill="#065f46" font-size="10" font-weight="600">Worker Thread Non-bloquant</text>
+                        <text x="620" y="160" fill="#047857" font-size="9">Lecture fichiers Excel C6</text>
+                        <text x="620" y="175" fill="#047857" font-size="9">Filtrage intelligent auto</text>
+                        <text x="620" y="190" fill="#047857" font-size="9">Fusion données QGIS</text>
+                        <text x="620" y="205" fill="#047857" font-size="9">Export Excel 3 feuilles</text>
+                    </g>
+                    <text x="730" y="238" text-anchor="middle" fill="#10b981" font-size="9" font-weight="600">50% → 100%</text>
+                    
+                    <!-- Sources box -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="20" y="280" width="200" height="110" rx="10" fill="white" stroke="#64748b" stroke-width="2"/>
+                        <rect x="20" y="280" width="200" height="24" rx="10" fill="#64748b"/>
+                        <text x="120" y="296" text-anchor="middle" fill="white" font-size="10" font-weight="700">SOURCES</text>
+                        <text x="35" y="320" fill="#475569" font-size="9" font-weight="600">Répertoire C6</text>
+                        <text x="45" y="335" fill="#64748b" font-size="8">Filtrage: FicheAppui, C7, GESPOT</text>
+                        <text x="45" y="350" fill="#64748b" font-size="8">Détection feuille/colonne auto</text>
+                        <text x="35" y="370" fill="#475569" font-size="9" font-weight="600">Couche QGIS: infra_pt_pot</text>
+                    </g>
+                    
+                    <!-- Arrow Sources→Results -->
+                    <line x1="220" y1="335" x2="235" y2="335" stroke="#64748b" stroke-width="2" marker-end="url(#arrow-c6)"/>
+                    
+                    <!-- Results box -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="240" y="280" width="320" height="140" rx="10" fill="white" stroke="#ec4899" stroke-width="2"/>
+                        <rect x="240" y="280" width="320" height="28" rx="10" fill="url(#grad-c6-1)"/>
+                        <text x="400" y="299" text-anchor="middle" fill="white" font-size="11" font-weight="700">RÉSULTATS - Excel Multi-feuilles</text>
+                        <rect x="255" y="320" width="140" height="28" rx="6" fill="#fef3c7"/>
+                        <text x="325" y="339" text-anchor="middle" fill="#92400e" font-size="9" font-weight="600">ANALYSE C6 BD</text>
+                        <text x="255" y="360" fill="#9d174d" font-size="8">Comparaison poteau par poteau</text>
+                        <rect x="405" y="320" width="140" height="28" rx="6" fill="#fee2e2"/>
+                        <text x="475" y="339" text-anchor="middle" fill="#991b1b" font-size="9" font-weight="600">HORS PERIMETRE</text>
+                        <text x="405" y="360" fill="#9d174d" font-size="8">Poteaux FT non couverts</text>
+                        <rect x="255" y="375" width="140" height="28" rx="6" fill="#fed7aa"/>
+                        <text x="325" y="394" text-anchor="middle" fill="#9a3412" font-size="9" font-weight="600">VERIF ETUDES</text>
+                        <text x="255" y="412" fill="#9d174d" font-size="8">Études sans C6 / C6 sans étude</text>
+                    </g>
+                    
+                    <!-- Performance box -->
+                    <g filter="url(#shadow-c6)">
+                        <rect x="580" y="280" width="300" height="140" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+                        <rect x="580" y="280" width="300" height="28" rx="10" fill="#f59e0b"/>
+                        <text x="730" y="299" text-anchor="middle" fill="white" font-size="11" font-weight="700">PERFORMANCE</text>
+                        <text x="730" y="340" text-anchor="middle" fill="#78350f" font-size="28" font-weight="700">7s</text>
+                        <text x="730" y="360" text-anchor="middle" fill="#a16207" font-size="10">pour 19 études</text>
+                        <line x1="620" y1="375" x2="840" y2="375" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="680" y="395" text-anchor="middle" fill="#92400e" font-size="10">Avant: ~45s</text>
+                        <text x="780" y="395" text-anchor="middle" fill="#10b981" font-size="12" font-weight="700">-84%</text>
+                    </g>
+                    
+                    <!-- Progress bar -->
+                    <rect x="20" y="450" width="860" height="30" rx="8" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+                    <rect x="22" y="452" width="42" height="26" rx="6" fill="#ec4899"/>
+                    <rect x="64" y="452" width="170" height="26" rx="0" fill="#3b82f6"/>
+                    <rect x="234" y="452" width="130" height="26" rx="0" fill="#f59e0b"/>
+                    <rect x="364" y="452" width="86" height="26" rx="0" fill="#8b5cf6"/>
+                    <rect x="450" y="452" width="428" height="26" rx="6" fill="#10b981"/>
+                    <text x="43" y="470" text-anchor="middle" fill="white" font-size="8" font-weight="600">5%</text>
+                    <text x="149" y="470" text-anchor="middle" fill="white" font-size="8" font-weight="600">25%</text>
+                    <text x="299" y="470" text-anchor="middle" fill="white" font-size="8" font-weight="600">40%</text>
+                    <text x="407" y="470" text-anchor="middle" fill="white" font-size="8" font-weight="600">50%</text>
+                    <text x="664" y="470" text-anchor="middle" fill="white" font-size="8" font-weight="600">100%</text>
+                    <text x="450" y="500" text-anchor="middle" fill="#64748b" font-size="10">UI reste 100% réactive - Annulation possible à tout moment</text>
+                </svg>
+                
+                <div class="legend" style="margin-top: 1.5rem;">
+                    <div class="legend-item"><div class="legend-color" style="background: #ec4899;"></div><span>Orchestration</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #3b82f6;"></div><span>Extraction QGIS</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #10b981;"></div><span>Worker Thread</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #f59e0b;"></div><span>Performance</span></div>
+                </div>
+            </div>
+
+            <!-- Features Cards -->
+            <div class="cards-grid" style="margin-top: 3rem;">
+                <article class="card">
+                    <div class="card-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    </div>
+                    <h3>Auto-détection champ étude</h3>
+                    <p>Reconnaissance automatique via patterns regex: <code>nom_etudes</code>, <code>etudes</code>, <code>decoupage</code>, <code>zone</code>. Plus besoin de sélection manuelle.</p>
+                </article>
+                <article class="card">
+                    <div class="card-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    </div>
+                    <h3>Filtrage intelligent</h3>
+                    <p>Ignore automatiquement les fichiers non-C6: <code>FicheAppui_*.xlsx</code>, <code>*_C7*.xlsx</code>, <code>GESPOT_*.xlsx</code>. Zéro erreur de parsing.</p>
+                </article>
+                <article class="card">
+                    <div class="card-icon orange">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    </div>
+                    <h3>Index spatial O(n log m)</h3>
+                    <p>Utilise <code>QgsSpatialIndex</code> pour intersections géométriques ultra-rapides. Cache géométries polygones CAP FT.</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- Onglet 2: CAP FT - Architecture détaillée -->
+        <section id="onglet-capft" style="margin-top: 5rem;">
+            <div class="section-header">
+                <h2>
+                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; background: linear-gradient(135deg, #34d399, #10b981); border-radius: 10px; margin-right: 12px; color: white; font-weight: 700; font-size: 18px;">2</span>
+                    Onglet 2 : CAP FT - Architecture complète
+                </h2>
+                <p>Vérification correspondance poteaux FT vs fiches appuis individuelles</p>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid" style="margin-bottom: 3rem;">
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #34d399;">196</div>
+                    <div class="stat-label">Lignes CapFt.py</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #3b82f6;">118</div>
+                    <div class="stat-label">Lignes capft_workflow.py</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #10b981;">O(n+m)</div>
+                    <div class="stat-label">Complexité index rapide</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #f59e0b;">~95%</div>
+                    <div class="stat-label">Gain temps traitement</div>
+                </div>
+            </div>
+
+            <!-- Architecture Diagram CAP FT -->
+            <div class="diagram-container" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);">
+                <h3 class="diagram-title" style="color: #065f46;">Architecture Main Thread + Worker Thread</h3>
+                <svg class="architecture-svg" viewBox="0 0 900 540" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <marker id="arrow-cap" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                            <polygon points="0 0, 8 3, 0 6" fill="#10b981"/>
+                        </marker>
+                        <marker id="arrow-cap-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                            <polygon points="0 0, 8 3, 0 6" fill="#3b82f6"/>
+                        </marker>
+                        <linearGradient id="grad-cap-1" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#34d399;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+                        </linearGradient>
+                        <filter id="shadow-cap" x="-10%" y="-10%" width="120%" height="120%">
+                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/>
+                        </filter>
+                    </defs>
+                    
+                    <!-- Background -->
+                    <rect width="900" height="540" fill="transparent"/>
+                    
+                    <!-- Main Thread Zone -->
+                    <rect x="20" y="50" width="380" height="220" rx="16" fill="rgba(255,255,255,0.6)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6 3"/>
+                    <text x="40" y="75" fill="#1e40af" font-size="11" font-weight="700">MAIN THREAD</text>
+                    
+                    <!-- Step 1: Verification -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="40" y="95" width="160" height="70" rx="10" fill="white" stroke="#3b82f6" stroke-width="2"/>
+                        <rect x="40" y="95" width="160" height="24" rx="10" fill="#3b82f6"/>
+                        <text x="120" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">1. Vérifications</text>
+                        <text x="120" y="135" text-anchor="middle" fill="#1e40af" font-size="8" font-weight="600">verificationsDonneesCapft()</text>
+                        <text x="120" y="150" text-anchor="middle" fill="#2563eb" font-size="8">Doublons / Poteaux hors zone</text>
+                    </g>
+                    
+                    <!-- Arrow 1→2 -->
+                    <line x1="200" y1="130" x2="215" y2="130" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-cap-blue)"/>
+                    
+                    <!-- Step 2: Extraction -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="220" y="95" width="160" height="70" rx="10" fill="white" stroke="#3b82f6" stroke-width="2"/>
+                        <rect x="220" y="95" width="160" height="24" rx="10" fill="#3b82f6"/>
+                        <text x="300" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">2. Extraction</text>
+                        <text x="300" y="135" text-anchor="middle" fill="#1e40af" font-size="8" font-weight="600">liste_poteau_cap_ft()</text>
+                        <text x="300" y="150" text-anchor="middle" fill="#2563eb" font-size="8">Intersection spatiale</text>
+                    </g>
+                    
+                    <!-- Arrow 2→3 -->
+                    <path d="M 300 165 L 300 185 L 200 185 L 200 205" stroke="#8b5cf6" stroke-width="2" fill="none" marker-end="url(#arrow-cap)"/>
+                    
+                    <!-- Step 3: Launch -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="80" y="210" width="240" height="50" rx="10" fill="white" stroke="#8b5cf6" stroke-width="2"/>
+                        <rect x="80" y="210" width="240" height="22" rx="10" fill="#8b5cf6"/>
+                        <text x="200" y="226" text-anchor="middle" fill="white" font-size="10" font-weight="700">3. CapFtWorkflow.start_analysis()</text>
+                        <text x="200" y="248" text-anchor="middle" fill="#3730a3" font-size="9">Lancement CapFtTask (QgsTask)</text>
+                    </g>
+                    
+                    <!-- Arrow Main→Worker -->
+                    <path d="M 320 235 L 380 235 L 420 120" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrow-cap)"/>
+                    <text x="390" y="180" fill="#065f46" font-size="9" font-weight="700">QgsTask</text>
+                    
+                    <!-- Worker Thread Zone -->
+                    <rect x="420" y="50" width="460" height="220" rx="16" fill="rgba(209,250,229,0.5)" stroke="#10b981" stroke-width="2"/>
+                    <text x="440" y="75" fill="#065f46" font-size="11" font-weight="700">WORKER THREAD</text>
+                    
+                    <!-- Step 4: Lecture -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="440" y="95" width="130" height="80" rx="10" fill="white" stroke="#10b981" stroke-width="2"/>
+                        <rect x="440" y="95" width="130" height="24" rx="10" fill="url(#grad-cap-1)"/>
+                        <text x="505" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">4. Lecture</text>
+                        <text x="505" y="132" text-anchor="middle" fill="#065f46" font-size="8" font-weight="600">LectureFichiers</text>
+                        <text x="505" y="145" text-anchor="middle" fill="#047857" font-size="7">FicheAppui_*.xlsx</text>
+                        <text x="505" y="158" text-anchor="middle" fill="#047857" font-size="7">Par dossiers études</text>
+                    </g>
+                    
+                    <!-- Arrow 4→5 -->
+                    <line x1="570" y1="135" x2="585" y2="135" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-cap)"/>
+                    
+                    <!-- Step 5: Comparaison -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="590" y="95" width="130" height="80" rx="10" fill="white" stroke="#f59e0b" stroke-width="2"/>
+                        <rect x="590" y="95" width="130" height="24" rx="10" fill="#f59e0b"/>
+                        <text x="655" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">5. Comparaison</text>
+                        <text x="655" y="132" text-anchor="middle" fill="#92400e" font-size="8" font-weight="600">traitementResultats</text>
+                        <text x="655" y="145" text-anchor="middle" fill="#a16207" font-size="7">Index O(n+m)</text>
+                        <text x="655" y="158" text-anchor="middle" fill="#a16207" font-size="7">Lookup O(1)</text>
+                    </g>
+                    
+                    <!-- Arrow 5→6 -->
+                    <line x1="720" y1="135" x2="735" y2="135" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-cap)"/>
+                    
+                    <!-- Step 6: Export -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="740" y="95" width="120" height="80" rx="10" fill="white" stroke="#8b5cf6" stroke-width="2"/>
+                        <rect x="740" y="95" width="120" height="24" rx="10" fill="#8b5cf6"/>
+                        <text x="800" y="112" text-anchor="middle" fill="white" font-size="10" font-weight="700">6. Export</text>
+                        <text x="800" y="132" text-anchor="middle" fill="#3730a3" font-size="8" font-weight="600">ecrireResultats</text>
+                        <text x="800" y="145" text-anchor="middle" fill="#4338ca" font-size="7">ANALYSE CAP_FT</text>
+                        <text x="800" y="158" text-anchor="middle" fill="#4338ca" font-size="7">Excel coloré</text>
+                    </g>
+                    
+                    <!-- Normalisation box -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="440" y="190" width="200" height="70" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+                        <rect x="440" y="190" width="200" height="22" rx="10" fill="#f59e0b"/>
+                        <text x="540" y="206" text-anchor="middle" fill="white" font-size="9" font-weight="700">NORMALISATION</text>
+                        <text x="455" y="225" fill="#78350f" font-size="8" font-weight="600">normalize_appui_num_bt()</text>
+                        <text x="455" y="240" fill="#a16207" font-size="7">E000123, FicheAppui_E123.xlsx → 123</text>
+                        <text x="455" y="252" fill="#065f46" font-size="7" font-weight="600">strip_e_prefix=True</text>
+                    </g>
+                    
+                    <!-- Results box -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="660" y="190" width="200" height="70" rx="10" fill="white" stroke="#ec4899" stroke-width="2"/>
+                        <rect x="660" y="190" width="200" height="22" rx="10" fill="#ec4899"/>
+                        <text x="760" y="206" text-anchor="middle" fill="white" font-size="9" font-weight="700">RÉSULTATS</text>
+                        <rect x="675" y="218" width="75" height="16" rx="4" fill="#fee2e2"/>
+                        <text x="712" y="230" text-anchor="middle" fill="#991b1b" font-size="7" font-weight="600">ROUGE</text>
+                        <rect x="760" y="218" width="85" height="16" rx="4" fill="#fed7aa"/>
+                        <text x="802" y="230" text-anchor="middle" fill="#9a3412" font-size="7" font-weight="600">ORANGE</text>
+                        <rect x="675" y="238" width="75" height="16" rx="4" fill="#d1fae5"/>
+                        <text x="712" y="250" text-anchor="middle" fill="#065f46" font-size="7" font-weight="600">BLANC OK</text>
+                        <text x="802" y="250" fill="#10b981" font-size="8" font-weight="700">Bidirectionnel</text>
+                    </g>
+                    
+                    <!-- Signals Section -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="20" y="300" width="860" height="100" rx="12" fill="rgba(255,255,255,0.9)" stroke="#6366f1" stroke-width="2"/>
+                        <text x="450" y="322" text-anchor="middle" fill="#3730a3" font-size="11" font-weight="700">SIGNAUX WORKFLOW → UI</text>
+                        
+                        <rect x="40" y="340" width="150" height="40" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
+                        <text x="115" y="358" text-anchor="middle" fill="#1e40af" font-size="9" font-weight="600">progress_changed</text>
+                        <text x="115" y="372" text-anchor="middle" fill="#2563eb" font-size="7">0% → 100%</text>
+                        
+                        <rect x="210" y="340" width="150" height="40" rx="6" fill="#d1fae5" stroke="#10b981" stroke-width="1"/>
+                        <text x="285" y="358" text-anchor="middle" fill="#065f46" font-size="9" font-weight="600">message_received</text>
+                        <text x="285" y="372" text-anchor="middle" fill="#047857" font-size="7">Message + couleur</text>
+                        
+                        <rect x="380" y="340" width="150" height="40" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="455" y="358" text-anchor="middle" fill="#92400e" font-size="9" font-weight="600">analysis_finished</text>
+                        <text x="455" y="372" text-anchor="middle" fill="#a16207" font-size="7">Résultats analyse</text>
+                        
+                        <rect x="550" y="340" width="150" height="40" rx="6" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
+                        <text x="625" y="358" text-anchor="middle" fill="#3730a3" font-size="9" font-weight="600">export_finished</text>
+                        <text x="625" y="372" text-anchor="middle" fill="#4338ca" font-size="7">Confirmation</text>
+                        
+                        <rect x="720" y="340" width="150" height="40" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1"/>
+                        <text x="795" y="358" text-anchor="middle" fill="#991b1b" font-size="9" font-weight="600">error_occurred</text>
+                        <text x="795" y="372" text-anchor="middle" fill="#dc2626" font-size="7">Erreur critique</text>
+                    </g>
+                    
+                    <!-- Performance box -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="20" y="420" width="420" height="100" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+                        <rect x="20" y="420" width="420" height="28" rx="12" fill="#f59e0b"/>
+                        <text x="230" y="440" text-anchor="middle" fill="white" font-size="11" font-weight="700">PERFORMANCE</text>
+                        <text x="120" y="475" text-anchor="middle" fill="#78350f" font-size="24" font-weight="700">O(n+m)</text>
+                        <text x="120" y="495" text-anchor="middle" fill="#a16207" font-size="10">Index rapide</text>
+                        <line x1="220" y1="455" x2="220" y2="510" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="320" y="475" text-anchor="middle" fill="#78350f" font-size="24" font-weight="700">~95%</text>
+                        <text x="320" y="495" text-anchor="middle" fill="#10b981" font-size="10" font-weight="600">Gain temps</text>
+                    </g>
+                    
+                    <!-- UI Status -->
+                    <g filter="url(#shadow-cap)">
+                        <rect x="460" y="420" width="420" height="100" rx="12" fill="white" stroke="#10b981" stroke-width="2"/>
+                        <rect x="460" y="420" width="420" height="28" rx="12" fill="#10b981"/>
+                        <text x="670" y="440" text-anchor="middle" fill="white" font-size="11" font-weight="700">EXPÉRIENCE UTILISATEUR</text>
+                        <text x="670" y="475" text-anchor="middle" fill="#065f46" font-size="12" font-weight="600">UI 100% réactive pendant traitement</text>
+                        <text x="670" y="495" text-anchor="middle" fill="#047857" font-size="10">Annulation possible à tout moment via task.cancel()</text>
+                        <text x="670" y="512" text-anchor="middle" fill="#10b981" font-size="10" font-weight="600">Deep copy données pour isolation thread-safe</text>
+                    </g>
+                </svg>
+                
+                <div class="legend" style="margin-top: 1.5rem;">
+                    <div class="legend-item"><div class="legend-color" style="background: #3b82f6;"></div><span>Main Thread (QGIS API)</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #10b981;"></div><span>Worker Thread (Python pur)</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #f59e0b;"></div><span>Traitement intensif</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #6366f1;"></div><span>Communication async</span></div>
+                </div>
+            </div>
+
+            <!-- Features Cards -->
+            <div class="cards-grid" style="margin-top: 3rem;">
+                <article class="card">
+                    <div class="card-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <h3>Pattern FicheAppui_*.xlsx</h3>
+                    <p>Structure: 1 fichier par poteau. Organisation par dossiers études. Extraction nom fichier → Numéro appui automatique.</p>
+                </article>
+                <article class="card">
+                    <div class="card-icon orange">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    </div>
+                    <h3>Normalisation robuste</h3>
+                    <p>Gestion formats variables: <code>E000123</code>, <code>FicheAppui_E123.xlsx</code>, <code>E123/63041</code>. Fonction <code>normalize_appui_num_bt(strip_e_prefix=True)</code>.</p>
+                </article>
+                <article class="card">
+                    <div class="card-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                    </div>
+                    <h3>Détection terrains privés</h3>
+                    <p>Extraction simultanée poteaux normaux et privés via champ spécifique. Retour: <code>(dict_poteaux, dict_poteaux_prives)</code>.</p>
+                </article>
+            </div>
+        </section>
+
         <!-- Workflow Section -->
         <section id="workflow">
             <div class="section-header">
@@ -3505,80 +3970,223 @@ etude_comac     <span class="code-comment"># Périmètres COMAC (géométrie Pol
         <!-- FAQ Section -->
         <section id="faq">
             <div class="section-header">
-                <h2>Questions fréquentes</h2>
-                <p>Réponses aux interrogations courantes</p>
+                <h2>Foire aux questions</h2>
+                <p>Tout ce qu'il faut savoir pour exploiter pleinement le plugin</p>
             </div>
 
             <div class="accordion">
+                <!-- Catégorie: Général -->
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem 1rem; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-radius: 8px;">
+                    <span style="color: white; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Général</span>
+                </div>
+
                 <div class="accordion-item active">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Quelles sont les versions QGIS compatibles ?</h4>
+                        <h4>Quelle version de QGIS est requise ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Le plugin est compatible avec QGIS 3.0 et versions supérieures. Il a été testé sur les versions 3.16 LTS, 3.22 LTS et 3.28 LTS.</p>
+                        <p>Le plugin <strong>Pôle Aérien v2.3.0</strong> est compatible avec <strong>QGIS 3.28</strong> et les versions ultérieures (jusqu'à 3.99). Nous recommandons l'utilisation de la version <strong>3.28 LTS</strong> pour une stabilité optimale en environnement de production.</p>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #fef3c7; border-radius: 6px; border-left: 3px solid #f59e0b;">
+                            <strong>Remarque :</strong> Les versions antérieures à 3.28 ne sont plus officiellement prises en charge. Si vous rencontrez des difficultés, vérifiez d'abord votre version de QGIS.
+                        </p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Comment résoudre les erreurs de correspondance N° appui ?</h4>
+                        <h4>Quelles sont les couches QGIS indispensables ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Vérifiez que le N° appui dans Excel correspond exactement à celui de la base QGIS. La correspondance se fait sur le couple <strong>N° appui + Nom Études</strong>. Assurez-vous que les noms d'études sont identiques (ex: QSB vs DTR).</p>
+                        <p>Selon les modules utilisés, les couches suivantes doivent être chargées dans votre projet :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>infra_pt_pot</strong> : Poteaux (points) avec les champs <code>inf_num</code>, <code>inf_type</code>, <code>etat</code></li>
+                            <li><strong>etude_cap_ft</strong> : Zones d'études FT (polygones) avec le champ <code>nom_etudes</code></li>
+                            <li><strong>etude_comac</strong> : Zones d'études BT (polygones) avec le champ <code>etudes</code></li>
+                            <li><strong>bpe</strong> : Boîtes de protection équipement (points)</li>
+                            <li><strong>attaches</strong> : Points d'attache (points)</li>
+                            <li><strong>infra_pt_chb</strong> : Chambres (points) — requis pour Police C6</li>
+                        </ul>
+                        <p style="color: var(--text-light); font-size: 0.9rem;">Les noms des couches doivent correspondre exactement à ceux attendus par le plugin.</p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Quels champs sont modifiés lors de la MAJ BT ?</h4>
+                        <h4>Est-il possible d'annuler une modification ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Les champs modifiés sont : <strong>inf_type</strong>, <strong>inf_propri</strong>, <strong>noe_usage</strong>, <strong>inf_mat</strong>, <strong>etat</strong>, <strong>dce</strong>, ainsi que les champs d'audit <strong>modifie_par</strong> et <strong>date_modif</strong>.</p>
+                        <p>Oui, de plusieurs manières :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>Annulation immédiate :</strong> Utilisez <kbd>Ctrl</kbd>+<kbd>Z</kbd> dans QGIS juste après l'opération.</li>
+                            <li><strong>Restauration :</strong> Rechargez la couche depuis la base de données si les modifications n'ont pas été enregistrées.</li>
+                            <li><strong>Sauvegarde préalable :</strong> Nous conseillons vivement d'effectuer une sauvegarde de votre base de données avant toute mise à jour en lot.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Catégorie: Modules métier -->
+                <div style="margin: 1.5rem 0 0.5rem 0; padding: 0.5rem 1rem; background: linear-gradient(135deg, #10b981, #059669); border-radius: 8px;">
+                    <span style="color: white; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Modules métier</span>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Quels champs sont mis à jour par le module MAJ FT/BT ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Le module de mise à jour des poteaux FT/BT modifie les champs suivants :</p>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; margin: 0.75rem 0;">
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">inf_type</span>
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">inf_propri</span>
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">noe_usage</span>
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">inf_mat</span>
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">etat</span>
+                            <span style="padding: 0.4rem 0.8rem; background: #e0f2fe; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">dce</span>
+                        </div>
+                        <p style="margin-top: 0.75rem;">Les champs d'audit <code>modifie_par</code> et <code>date_modif</code> sont également renseignés automatiquement pour assurer la traçabilité.</p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Puis-je annuler une mise à jour ?</h4>
+                        <h4>Comment fonctionne le module C6 vs BD ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Les modifications sont appliquées directement sur la couche. Utilisez la fonction <strong>Annuler</strong> (Ctrl+Z) de QGIS immédiatement après si nécessaire, ou restaurez depuis une sauvegarde de la base de données.</p>
+                        <p>Ce module compare les fichiers Excel Annexe C6 avec les données présentes dans QGIS afin d'identifier les écarts :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>Extraction IN :</strong> Poteaux FT situés à l'intérieur des périmètres d'études CAP FT</li>
+                            <li><strong>Extraction OUT :</strong> Poteaux FT hors périmètre (alerte potentielle)</li>
+                            <li><strong>Vérification croisée :</strong> Études sans fichier C6 correspondant, et inversement</li>
+                        </ul>
+                        <p>Le résultat est exporté dans un fichier Excel comportant trois feuilles : <em>Analyse C6 BD</em>, <em>Poteaux hors périmètre</em> et <em>Vérification études</em>.</p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Comment fonctionne la vérification de sécurité des portées ?</h4>
+                        <h4>Qu'est-ce que la vérification des portées molles ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Le module lit les colonnes <strong>AO</strong> (type ligne FO) et <strong>AU</strong> (portée) des fichiers Excel COMAC. Il détecte la capacité FO via les codes Prysmian (L1092-xx-P) et compare la portée avec les valeurs max selon la norme <strong>NFC 11201-A1</strong> et la zone climatique (ZVN/ZVF). Les dépassements sont signalés comme <strong>PORTEE MOLLE</strong>.</p>
+                        <p>Le module <strong>VERIF CAP_COMAC</strong> analyse les portées de câbles fibre optique selon la norme <strong>NFC 11201-A1</strong>.</p>
+                        <p style="margin: 0.75rem 0;">Le processus s'effectue comme suit :</p>
+                        <ol style="padding-left: 1.5rem; line-height: 1.8;">
+                            <li>Lecture des colonnes <strong>AO</strong> (type de ligne FO) et <strong>AU</strong> (portée en mètres) des fichiers COMAC</li>
+                            <li>Détection de la capacité FO via les codes Prysmian (ex. : <code>L1092-xx-P</code>)</li>
+                            <li>Comparaison avec les valeurs maximales autorisées selon la zone climatique (<strong>ZVN</strong> ou <strong>ZVF</strong>)</li>
+                        </ol>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #fee2e2; border-radius: 6px; border-left: 3px solid #ef4444;">
+                            Les dépassements sont signalés comme <strong>« PORTÉE MOLLE »</strong> et nécessitent une vérification terrain.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Catégorie: Police C6 & GraceTHD -->
+                <div style="margin: 1.5rem 0 0.5rem 0; padding: 0.5rem 1rem; background: linear-gradient(135deg, #8b5cf6, #7c3aed); border-radius: 8px;">
+                    <span style="color: white; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Police C6 & GraceTHD</span>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Comment fournir les données GraceTHD ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Le module <strong>Police C6</strong> requiert des données GraceTHD pour l'analyse. Deux méthodes d'import sont disponibles :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>Répertoire Shapefiles :</strong> Sélectionnez un dossier contenant les fichiers <code>t_cheminement.shp</code>, <code>t_cableline.shp</code>, <code>t_noeud.shp</code></li>
+                            <li><strong>Fichier SQLite :</strong> Importez directement un fichier SQLite GraceTHD (les couches seront créées avec le suffixe <code>*_copy</code>)</li>
+                        </ul>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #e0f2fe; border-radius: 6px; border-left: 3px solid #3b82f6;">
+                            <strong>Astuce :</strong> L'import SQLite est généralement plus rapide et évite les problèmes d'encodage des fichiers CSV.
+                        </p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Comment signaler un bug ?</h4>
+                        <h4>Qu'est-ce que l'auto-détection du fichier C6 ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Contactez <strong>Youcef ADDA</strong> à l'adresse <strong><a href="mailto:yadda@nge-es.fr">yadda@nge-es.fr</a></strong> en fournissant : la version QGIS, le message d'erreur complet, et les étapes pour reproduire le problème. <a href="https://www.linkedin.com/in/youcef-adda/" target="_blank" style="color: #0077b5;">LinkedIn</a></p>
+                        <p>Lorsque vous sélectionnez une valeur dans le champ <strong>« Filtre Valeur »</strong> (ex. : <em>NGE-63A2D-73463-PA-21</em>), le plugin recherche automatiquement le fichier Excel C6 correspondant dans le répertoire de travail.</p>
+                        <p style="margin: 0.75rem 0;"><strong>Motifs de recherche utilisés :</strong></p>
+                        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0;">
+                            <code style="padding: 0.4rem 0.8rem; background: #f1f5f9; border-radius: 4px; font-size: 0.85rem;">*nom_etudes*.xlsx</code>
+                            <code style="padding: 0.4rem 0.8rem; background: #f1f5f9; border-radius: 4px; font-size: 0.85rem;">*Annexe*C6*nom_etudes*.xlsx</code>
+                            <code style="padding: 0.4rem 0.8rem; background: #f1f5f9; border-radius: 4px; font-size: 0.85rem;">*C6*nom_etudes*.xlsx</code>
+                        </div>
+                        <p style="color: var(--text-light); font-size: 0.9rem;">Si aucun fichier n'est trouvé, vous pouvez toujours le sélectionner manuellement.</p>
+                    </div>
+                </div>
+
+                <!-- Catégorie: Résolution de problèmes -->
+                <div style="margin: 1.5rem 0 0.5rem 0; padding: 0.5rem 1rem; background: linear-gradient(135deg, #f59e0b, #d97706); border-radius: 8px;">
+                    <span style="color: white; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Résolution de problèmes</span>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Pourquoi certains numéros d'appui ne correspondent-ils pas ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>La correspondance des numéros d'appui repose sur le couple <strong>N° appui + Nom d'études</strong>. Vérifiez les points suivants :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>Format :</strong> Le numéro doit être identique (ex. : <code>1016436/63041</code> est normalisé en <code>1016436</code>)</li>
+                            <li><strong>Nom d'études :</strong> Les noms doivent correspondre exactement (attention aux variantes QSB/DTR)</li>
+                            <li><strong>Espaces parasites :</strong> Des espaces en début ou fin de cellule peuvent fausser la correspondance</li>
+                        </ul>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #e0f2fe; border-radius: 6px; border-left: 3px solid #3b82f6;">
+                            <strong>Astuce :</strong> Utilisez la fonction SUPPRESPACE() dans Excel pour nettoyer vos données avant l'import.
+                        </p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg> Quoi de neuf dans la v2.2.4 ?</h4>
+                        <h4>Que faire si le bouton « Exécuter » reste grisé ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p><strong>1. GraceTHD intégré en interne</strong> : Le répertoire GraceTHD est maintenant inclus dans le plugin (chemin fixe : <code>GraceTHD/GraceTHD/shapes/</code>). Plus besoin de le sélectionner manuellement à chaque analyse Police C6.</p>
-                        <p><strong>2. Auto-détection fichier C6</strong> : Lorsque vous sélectionnez une valeur dans "Filtre Valeur" (ex: NGE-63A2D-73463-PA-21), le plugin recherche automatiquement le fichier Excel C6 correspondant dans le répertoire courant. Si non trouvé, vous pouvez toujours le sélectionner manuellement.</p>
-                        <p><strong>3. Patterns de recherche intelligents</strong> : Le système cherche selon plusieurs patterns : <code>*nom_etudes*.xlsx</code>, <code>*Annexe*C6*nom_etudes*.xlsx</code>, <code>*C6*nom_etudes*.xlsx</code></p>
+                        <p>Le bouton d'exécution s'active uniquement lorsque tous les prérequis sont satisfaits. Vérifiez :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>Couches sélectionnées :</strong> Toutes les couches obligatoires doivent être choisies dans les listes déroulantes</li>
+                            <li><strong>Champs requis :</strong> Les couches doivent contenir les champs attendus (<code>inf_num</code>, <code>nom_etudes</code>, etc.)</li>
+                            <li><strong>Fichiers Excel :</strong> Les chemins vers les fichiers doivent être valides et les fichiers accessibles</li>
+                            <li><strong>Source GraceTHD :</strong> Pour Police C6, soit le chemin interne doit être valide, soit un fichier SQLite doit être sélectionné</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Comment signaler une anomalie ou suggérer une amélioration ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Pour tout signalement, contactez <strong>Youcef ADDA</strong> en fournissant les informations suivantes :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li>Version de QGIS et du plugin Pôle Aérien</li>
+                            <li>Message d'erreur complet (copie du panneau « Journal des messages »)</li>
+                            <li>Étapes précises permettant de reproduire le problème</li>
+                            <li>Captures d'écran si pertinent</li>
+                        </ul>
+                        <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+                            <a href="mailto:yadda@nge-es.fr" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: #3b82f6; color: white; border-radius: 6px; text-decoration: none; font-weight: 500;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                yadda@nge-es.fr
+                            </a>
+                            <a href="https://www.linkedin.com/in/youcef-adda/" target="_blank" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: #0077b5; color: white; border-radius: 6px; text-decoration: none; font-weight: 500;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+                                LinkedIn
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3596,11 +4204,10 @@ etude_comac     <span class="code-comment"># Périmètres COMAC (géométrie Pol
                     <div class="card-icon blue">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     </div>
-                    <h3>GraceTHD Intégré</h3>
-                    <p><strong>Fini les sélections manuelles !</strong> Le gabarit GraceTHD est maintenant embarqué dans le plugin. L'interface de sélection du répertoire a été masquée.</p>
-                    <div class="code-block" style="margin-top: 1rem;">
-                        <code><span class="code-comment"># Chemin fixe interne</span>
-repertoireGTHD = <span class="code-string">"GraceTHD/GraceTHD/shapes/"</span></code>
+                    <h3>Import GraceTHD simplifié</h3>
+                    <p><strong>Double option d'import :</strong> Choisissez entre un répertoire de shapefiles ou un fichier SQLite pour vos données GraceTHD.</p>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;">
+                        <p style="margin: 0; font-size: 0.9rem; color: #1e40af;"><strong>SQLite recommandé</strong> : Plus rapide et sans problèmes d'encodage CSV</p>
                     </div>
                 </article>
 
@@ -3675,15 +4282,15 @@ repertoireGTHD = <span class="code-string">"GraceTHD/GraceTHD/shapes/"</span></c
                     <!-- Flèche 2 -->
                     <path d="M 430 200 L 490 200" stroke="#3b82f6" stroke-width="3" fill="none" marker-end="url(#arrow-workflow)" class="flow-arrow"/>
 
-                    <!-- Étape 3: GraceTHD interne -->
+                    <!-- Étape 3: GraceTHD (import manuel) -->
                     <g class="node">
                         <rect x="490" y="150" width="160" height="100" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
                         <text x="570" y="180" text-anchor="middle" font-weight="600" fill="#92400e" font-size="14">3. GraceTHD</text>
-                        <text x="570" y="200" text-anchor="middle" fill="#a16207" font-size="10">Chemin fixe interne:</text>
-                        <text x="570" y="215" text-anchor="middle" fill="#a16207" font-size="9" font-family="monospace">GraceTHD/GraceTHD/</text>
-                        <text x="570" y="228" text-anchor="middle" fill="#a16207" font-size="9" font-family="monospace">shapes/</text>
-                        <rect x="545" y="233" width="50" height="12" rx="3" fill="#10b981" opacity="0.2"/>
-                        <text x="570" y="242" text-anchor="middle" fill="#065f46" font-size="9" font-weight="600">INTÉGRÉ</text>
+                        <text x="570" y="200" text-anchor="middle" fill="#a16207" font-size="10">Import manuel requis:</text>
+                        <text x="570" y="215" text-anchor="middle" fill="#a16207" font-size="9" font-family="monospace">Répertoire .shp</text>
+                        <text x="570" y="228" text-anchor="middle" fill="#a16207" font-size="9" font-family="monospace">ou fichier SQLite</text>
+                        <rect x="545" y="233" width="50" height="12" rx="3" fill="#f59e0b" opacity="0.2"/>
+                        <text x="570" y="242" text-anchor="middle" fill="#92400e" font-size="9" font-weight="600">MANUEL</text>
                     </g>
 
                     <!-- Flèche 3 -->
@@ -3703,7 +4310,7 @@ repertoireGTHD = <span class="code-string">"GraceTHD/GraceTHD/shapes/"</span></c
                     <g opacity="0.7">
                         <rect x="50" y="280" width="200" height="80" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
                         <text x="150" y="300" text-anchor="middle" font-weight="600" fill="#334155" font-size="11">Avant v2.2.4</text>
-                        <text x="60" y="320" fill="#64748b" font-size="9">• Sélection manuelle GraceTHD</text>
+                        <text x="60" y="320" fill="#64748b" font-size="9">• Recherche manuelle fichier C6</text>
                         <text x="60" y="335" fill="#64748b" font-size="9">• Sélection manuelle fichier C6</text>
                         <text x="60" y="350" fill="#dc2626" font-size="9" font-weight="600">= 2 étapes supplémentaires</text>
                     </g>
@@ -3711,8 +4318,8 @@ repertoireGTHD = <span class="code-string">"GraceTHD/GraceTHD/shapes/"</span></c
                     <g opacity="0.7">
                         <rect x="280" y="280" width="200" height="80" rx="8" fill="#d1fae5" stroke="#10b981" stroke-width="1"/>
                         <text x="380" y="300" text-anchor="middle" font-weight="600" fill="#065f46" font-size="11">Maintenant v2.2.4</text>
-                        <text x="290" y="320" fill="#047857" font-size="9">• GraceTHD embarqué</text>
-                        <text x="290" y="335" fill="#047857" font-size="9">• Auto-détection C6</text>
+                        <text x="290" y="320" fill="#047857" font-size="9">• Auto-détection fichier C6</text>
+                        <text x="290" y="335" fill="#047857" font-size="9">• Import GraceTHD simplifié</text>
                         <text x="290" y="350" fill="#10b981" font-size="9" font-weight="600">= Workflow simplifié !</text>
                     </g>
 
