@@ -11,12 +11,12 @@ from datetime import datetime
 
 
 class LogLevel:
-    """Log level constants with colors and icons."""
-    INFO = ('info', '#3b82f6', 'ℹ')      # Blue
-    SUCCESS = ('success', '#22c55e', '✓')  # Green
-    WARNING = ('warning', '#f59e0b', '⚠')  # Orange
-    ERROR = ('error', '#ef4444', '✗')      # Red
-    SECTION = ('section', '#6366f1', '━')  # Purple
+    """Log level constants with colors and labels (no emojis)."""
+    INFO = ('info', '#3b82f6', 'INFO')      # Blue
+    SUCCESS = ('success', '#22c55e', 'OK')  # Green
+    WARNING = ('warning', '#f59e0b', 'ALERTE')  # Orange
+    ERROR = ('error', '#ef4444', 'ERREUR')      # Red
+    SECTION = ('section', '#6366f1', 'SECTION')  # Purple
 
 
 class LogManager(QObject):
@@ -82,7 +82,7 @@ class LogManager(QObject):
     
     def section(self, title: str):
         """Section separator with title."""
-        sep = '━' * 20
+        sep = '-' * 20
         self._write_section(title, sep)
     
     def progress(self, step: str, percent: int):
@@ -135,9 +135,9 @@ class LogManager(QObject):
         """
         _ = level  # Reserved for future filtering
         time_str = datetime.now().strftime('%d/%m %H:%M:%S')
-        html = f'<p style="margin:0;padding:0;line-height:1.2">'
+        html = '<p style="margin:0;padding:0;line-height:1.2">'
         html += f'<span style="color:#94a3b8;font-size:9pt">{time_str}</span> '
-        html += f'<span style="color:{color};font-weight:bold">{icon}</span> '
+        html += f'<span style="color:{color};font-weight:bold">[{icon}]</span> '
         html += f'<span style="color:{color}">{msg}</span></p>'
         self._append_html(html)
     
