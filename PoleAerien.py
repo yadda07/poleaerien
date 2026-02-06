@@ -163,6 +163,7 @@ class PoleAerien:
         self.c6c3a_workflow.export_finished.connect(self._onC6C3AExportFinished)
         self.c6c3a_workflow.error_occurred.connect(self._onC6C3AError)
 
+
         self.init = Initialisation()
 
         # tb_cmd = "cmd"
@@ -250,6 +251,11 @@ class PoleAerien:
 
         # GraceTHD: sélection manuelle du répertoire
         self.dlg.boutonCheminGraceThd.clicked.connect(self.plc6ChoixDossierRepertoireGraceTHD)
+        
+        # Export: sélection du répertoire d'export
+        if hasattr(self.dlg, 'c6BoutonCheminExport'):
+            self.dlg.c6BoutonCheminExport.clicked.connect(self.plc6ChoixDossierExport)
+            self.dlg.c6LienCheminExport.textChanged.connect(self.plc6CocherDecocherAucun)
 
         if hasattr(self.dlg, 'c6BoutonCheminSqlite'):
             self.dlg.c6BoutonCheminSqlite.clicked.connect(self.plc6ChoixFichierSqlite)
@@ -287,6 +293,7 @@ class PoleAerien:
         # GraceTHD: validation du chemin sélectionné
         self.dlg.c6LienCheminGraceThd.textChanged.connect(self.plc6CocherDecocherAucun)
         self.dlg.C6LienCheminImportFichier.textChanged.connect(self.plc6CocherDecocherAucun)
+
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -1028,32 +1035,20 @@ class PoleAerien:
         self.dlg.smooth_progress.reset()
 
     def plc6CocherDecocherAucun(self):
-        """Fonction pour cocher ou décocher l'interface de la phase 2"""
-        ############################# ANALYSE COMAC ####################################
-        # Vérif chemin GraceTHD
-        chemin_gthd = self.dlg.c6LienCheminGraceThd.text()
-        gthd_valide = chemin_gthd and os.path.isdir(chemin_gthd)
+        """Fonction pour valider les champs requis - Police C6 v2.0 (fddcpi2)
         
-        sqlite_ok = False
-        if hasattr(self.dlg, 'c6LienCheminSqlite'):
-            sqlite_path = self.dlg.c6LienCheminSqlite.text().strip()
-            sqlite_ok = bool(sqlite_path) and bool(getattr(self, '_plc6_sqlite_is_valid', False))
-
-        source_gracethd_ok = gthd_valide or sqlite_ok
-        
+        NOUVELLE LOGIQUE: Seul le chemin C6 est obligatoire.
+        Le SRO sera extrait automatiquement de la couche infra_pt_pot ou du nom de fichier.
+        """
         # Vérif chemin C6 (fichier ou répertoire pour auto-browse)
         chemin_c6 = self.dlg.C6LienCheminImportFichier.text().strip()
         chemin_c6_ok = chemin_c6 and (os.path.isdir(chemin_c6) or os.path.isfile(chemin_c6))
         
-        if (not self.dlg.c6ComboBoxCoucheBpe.currentText() or 
-            not self.dlg.c6ComboBoxCoucheEtudes.currentText() or
-            not self.dlg.c6ComboBoxCoucheAttaches.currentText() or
-            not self.dlg.c6comboBoxColonneDecoupage.currentText() or
-            not chemin_c6_ok or
-            not source_gracethd_ok):
-            self.dlg.c6Lanceur.setEnabled(False)
-        else:
+        # Validation minimale: juste le chemin C6
+        if chemin_c6_ok:
             self.dlg.c6Lanceur.setEnabled(True)
+        else:
+            self.dlg.c6Lanceur.setEnabled(False)
 
     def error(self, errorStr):
         """Fonction pour afficher des messages d'erreur"""
@@ -1155,6 +1150,16 @@ class PoleAerien:
         )
         if repertoire and os.access(repertoire, os.W_OK):
             self.dlg.c6LienCheminComac.setText(repertoire)
+
+    def plc6ChoixDossierExport(self):
+        """Sélectionner le répertoire d'export des résultats Police C6"""
+        repertoire = QFileDialog.getExistingDirectory(
+            self.dlg,
+            "Sélectionner le répertoire d'export des résultats",
+            ""
+        )
+        if repertoire and os.access(repertoire, os.W_OK):
+            self.dlg.c6LienCheminExport.setText(repertoire)
 
     def plc6ValiderFichierSqlite(self):
         if not hasattr(self.dlg, 'c6LienCheminSqlite') or not hasattr(self.dlg, 'c6SqliteStatus'):
@@ -1308,6 +1313,12 @@ class PoleAerien:
             'table_etude': self.dlg.c6ComboBoxCoucheEtudes.currentText(),
             'colonne_etude': self.dlg.c6comboBoxColonneDecoupage.currentText()
         }
+        
+        # Ajouter chemin export si renseigné
+        if hasattr(self.dlg, 'c6LienCheminExport'):
+            export_path = self.dlg.c6LienCheminExport.text().strip()
+            if export_path and os.path.isdir(export_path):
+                params['export_path'] = export_path
 
         if hasattr(self.dlg, 'c6ComboBoxZoneDecoupage'):
             zone_lyr = self.dlg.c6ComboBoxZoneDecoupage.currentLayer()
@@ -1316,6 +1327,9 @@ class PoleAerien:
 
         # 5. Lancement Analyse
         self.police_workflow.reset_logic()
+        
+        # Enregistrer callback annulation
+        self.dlg.register_cancel_callback('c6Lanceur', self.police_workflow.cancel)
         
         if is_auto_browse:
             # Mode auto-browse: parcourir toutes les études depuis etude_cap_ft
@@ -1351,7 +1365,11 @@ class PoleAerien:
         """Callback message Police C6"""
         if not self._dlg_alive():
             return
-        self.alerteInfos(msg, couleur=couleur)
+        # Support HTML si le message commence par '<'
+        if msg and msg.strip().startswith('<'):
+            self.dlg.textBrowser.append(msg)
+        else:
+            self.alerteInfos(msg, couleur=couleur)
         # Accumuler pour export texte si non vide
         if msg:
              self.msgexporter += f"{msg}\n"
@@ -1408,32 +1426,24 @@ class PoleAerien:
         self.msgexporter += f"\n{etape}"
         
         self.dlg.smooth_progress.set_target(100)
+        self.dlg.unregister_cancel_callback('c6Lanceur')
         self.dlg.end_processing_success('c6Lanceur', 'Terminé')
 
     def _onPoliceError(self, error_msg):
         """Callback erreur Police C6"""
-        if not self._dlg_alive():
+        if error_msg is None:
             return
         self.alerteInfos(f"Erreur: {error_msg}", couleur="red")
         self.dlg.smooth_progress.reset()
+        self.dlg.unregister_cancel_callback('c6Lanceur')
         self.dlg.end_processing_error('c6Lanceur', 'Erreur')
 
     def Plc6ImportationDonneesDansQgis(self):
-        """On teste si les fichiers souhaités existent à l'emplacement indiqué."""
-        sqlite_path = self.dlg.c6LienCheminSqlite.text().strip() if hasattr(self.dlg, 'c6LienCheminSqlite') else ''
-        repertoireGTHD = self.dlg.c6LienCheminGraceThd.text()
-
-        # Délégué au workflow
-        success, msg = self.police_workflow.import_gracethd_data(repertoireGTHD, sqlite_path)
+        """OBSOLÈTE - Plus besoin d'importer GraceTHD avec la nouvelle logique fddcpi2.
         
-        if not success:
-            alerte = f"Les dossiers GRACETHD indiqués ne contient pas les fichiers suivants :\n{msg}"
-            self.alerteInfos(alerte, False, "red")
-            self.msgexporter = alerte
-            self.sc.alerteCritique(alerte)
-            self.dlg.smooth_progress.reset()
-            return False
-            
+        On interroge directement la BD PostgreSQL via fddcpi2.
+        Cette méthode retourne toujours True pour compatibilité.
+        """
         return True
 
     ########################################### FIN #####################################################

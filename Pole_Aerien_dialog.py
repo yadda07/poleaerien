@@ -52,22 +52,24 @@ BUTTON_ICONS = {
     'C6BdLanceur': 'icon-play.svg',
     'c6_c3a_bdLanceur': 'icon-play.svg',
     'c6Lanceur': 'icon-play.svg',
-    'boutonCheminEtudeCapFt': 'icon-folder-open.svg',
-    'boutonCheminEtudeComac': 'icon-folder-open.svg',
-    'C6BdboutonCheminFichiersC6': 'icon-folder-open.svg',
+    'boutonCheminEtudeCapFt': 'icon-import.svg',
+    'boutonCheminEtudeComac': 'icon-import.svg',
+    'C6BdboutonCheminFichiersC6': 'icon-import.svg',
     'boutonCheminC6_c6_c3a_bd': 'icon-excel.svg',
     'boutonCheminC7_c6_c3a_bd': 'icon-excel.svg',
     'boutonCheminC3A_c6_c3a_bd': 'icon-excel.svg',
     'boutonCheminExportComac': 'icon-export.svg',
+    'boutonCheminExportCapFt': 'icon-export.svg',
     'C6BdboutonCheminExportDonnees': 'icon-export.svg',
     'boutonCheminExportDonnees_c6_c3a_bd': 'icon-export.svg',
     'c6BoutonCheminImport': 'icon-import.svg',
+    'boutonCheminGraceThd': 'icon-import.svg',
     'helpButton': 'icon-help.svg',
     'exporter': 'icon-export.svg',
-    'boutonCheminExport': 'icon-folder-open.svg',
+    'boutonCheminExport': 'icon-export.svg',
     # REQ-PLC6-002/005: nouveaux boutons
     'c6BoutonCheminSqlite': 'icon-import.svg',
-    'c6BoutonCheminComac': 'icon-folder-open.svg',
+    'c6BoutonCheminComac': 'icon-import.svg',
 }
 
 
@@ -134,11 +136,46 @@ class PoleAerienDialog(QtWidgets.QDialog, FORM_CLASS):
                     btn.setIcon(QIcon(icon_path))
                     btn.setIconSize(icon_size)
     
+    def _setup_filewidget_icon(self, widget_name, icon_file):
+        """Apply icon to QgsFileWidget internal button using QGIS API."""
+        from qgis.PyQt.QtWidgets import QToolButton, QPushButton
+        widget = getattr(self, widget_name, None)
+        if not widget:
+            print(f"[DEBUG] Widget {widget_name} not found")
+            return
+        icon_path = os.path.join(self.plugin_dir, 'images', icon_file)
+        if not os.path.exists(icon_path):
+            print(f"[DEBUG] Icon path not found: {icon_path}")
+            return
+        icon = QIcon(icon_path)
+        # List all children for debugging
+        all_children = widget.children()
+        print(f"[DEBUG] {widget_name} children: {[type(c).__name__ for c in all_children]}")
+        # Try QToolButton
+        toolbtns = widget.findChildren(QToolButton)
+        print(f"[DEBUG] QToolButton found: {len(toolbtns)}")
+        for btn in toolbtns:
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(18, 18))
+            print(f"[DEBUG] Icon set on QToolButton")
+            return
+        # Try QPushButton
+        pushbtns = widget.findChildren(QPushButton)
+        print(f"[DEBUG] QPushButton found: {len(pushbtns)}")
+        for btn in pushbtns:
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(18, 18))
+            print(f"[DEBUG] Icon set on QPushButton")
+            return
+        print(f"[DEBUG] No button found in {widget_name}")
+    
     def showEvent(self, event):
         """Attach smooth progress to progressBar on first show."""
         super().showEvent(event)
         if hasattr(self, 'progressBar') and self.smooth_progress:
             self.smooth_progress.set_progress_bar(self.progressBar)
+        # Setup QgsFileWidget icon after widget is fully initialized (delayed)
+        QTimer.singleShot(100, lambda: self._setup_filewidget_icon('MajFileWidget', 'icon-import.svg'))
     
     # --- Page state management ---
     # NOTE: Interface backup utilise QTabWidget natif sans KPI badges
