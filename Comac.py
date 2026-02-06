@@ -54,6 +54,10 @@ class Comac:
         Fonction pour parcourir les fichiers Excel (.xlsx) COMAC
         et extraire les numéros de poteaux + données sécurité.
         
+        Détecte automatiquement les fichiers Excel COMAC par:
+        - Pattern nom: EXPORTCOMAC, Export_Comac, ou nom d'étude (NGE-*, PA-*)
+        - Structure: colonne A avec numéros poteaux (format Exxxxxx ou BT-xxx)
+        
         Args:
             repertoire: Chemin du répertoire contenant les fichiers Excel
             zone_climatique: 'ZVN' (vent normal) ou 'ZVF' (vent fort)
@@ -61,6 +65,8 @@ class Comac:
         Returns:
             tuple: (doublons, erreurs, dict_poteaux, dict_verif_secu)
         """
+        from qgis.core import QgsMessageLog, Qgis
+        
         # Validation zone climatique
         if zone_climatique not in ('ZVN', 'ZVF'):
             zone_climatique = 'ZVN'
@@ -69,11 +75,32 @@ class Comac:
         fichiersComacExistants = []
         fichiersComacEnDoublons = []
         impossibiliteDelireFichier = {}
+        
+        # Patterns de noms de fichiers COMAC acceptés
+        PATTERNS_COMAC = ['EXPORTCOMAC', 'EXPORT_COMAC', 'COMAC', 'NGE-', 'PA-']
+        # Fichiers à exclure
+        PATTERNS_EXCLUS = ['ANALYSE_', 'RAPPORT', 'SYNTHESE', 'RESUME', 'C6', 'C7', 'FICHEAPPUI']
+        
+        fichiers_trouves = 0
+        fichiers_valides = 0
 
         for subdir, _, files in os.walk(repertoire):
             for name in files:
-                if name.endswith('.xlsx'):
-                    if "EXPORTCOMAC" in name.upper() and "~$" not in name:
+                if name.endswith('.xlsx') and "~$" not in name:
+                    name_upper = name.upper()
+                    
+                    # Exclure fichiers non-COMAC
+                    if any(excl in name_upper for excl in PATTERNS_EXCLUS):
+                        continue
+                    
+                    # Vérifier si le nom correspond à un pattern COMAC
+                    is_comac_pattern = any(pat in name_upper for pat in PATTERNS_COMAC)
+                    
+                    # Fallback: accepter tous les Excel dans dossiers d'études (NGE-*, PA-*)
+                    parent_folder = os.path.basename(subdir).upper()
+                    is_in_etude_folder = any(pat in parent_folder for pat in ['NGE-', 'PA-', 'B1L-', 'B1I-'])
+                    
+                    if is_comac_pattern or is_in_etude_folder:
                         filepath = os.path.join(subdir, name)
                         try:
                             document = openpyxl.load_workbook(filepath, data_only=True)
@@ -152,14 +179,32 @@ class Comac:
                                 'verif_hauteur_sol': verif_hauteur_sol
                             })
 
+                        fichiers_trouves += 1
+                        
                         if listePoteauBt:
-                            dicoPoteauBt_SousTraitant[name] = listePoteauBt
-                            dicoVerifSecu[name] = listeVerifSecu
+                            # Utiliser chemin relatif comme clé pour éviter conflits de noms
+                            rel_path = os.path.relpath(filepath, repertoire)
+                            etude_name = os.path.basename(subdir)  # Nom du dossier parent = nom étude
+                            key = etude_name if etude_name not in dicoPoteauBt_SousTraitant else rel_path
+                            
+                            dicoPoteauBt_SousTraitant[key] = listePoteauBt
+                            dicoVerifSecu[key] = listeVerifSecu
+                            fichiers_valides += 1
 
                             if name in fichiersComacExistants:
                                 fichiersComacEnDoublons.append(name)
 
                             fichiersComacExistants.append(name)
+                            QgsMessageLog.logMessage(
+                                f"[COMAC] Fichier détecté: {rel_path} ({len(listePoteauBt)} poteaux)",
+                                "PoleAerien", Qgis.Info
+                            )
+        
+        QgsMessageLog.logMessage(
+            f"[COMAC] Lecture terminée: {fichiers_valides}/{fichiers_trouves} fichiers valides, "
+            f"{sum(len(v) for v in dicoPoteauBt_SousTraitant.values())} poteaux total",
+            "PoleAerien", Qgis.Info
+        )
 
         return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu
 
