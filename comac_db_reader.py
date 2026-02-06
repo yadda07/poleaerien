@@ -1,20 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-Lecteur de la base de données COMAC (GeoPackage SQLite).
-Fournit les références câbles, supports, zones de vent par commune.
+Lecteur de la base de données COMAC.
+Source: PostgreSQL (schéma 'comac' dans la BDD Auvergne)
 
-Source: comac.gpkg (généré par create_comac_gpkg.py)
-Tables: commune, cables, supports, hypothese, armements, fleche, pincefusible, nappetv
+Fournit les références câbles, supports, zones de vent par commune,
+et les capacités FO possibles par référence câble.
+
+Tables: commune, cables, supports, hypothese, armements, fleche,
+        pincefusible, nappetv, cable_capacites_possibles
 """
 
 import os
-import sqlite3
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-# Chemin GeoPackage
-GPKG_PATH = os.path.join(os.path.dirname(__file__), 'comac.gpkg')
+try:
+    import psycopg2
+    _HAS_PSYCOPG2 = True
+except ImportError:
+    _HAS_PSYCOPG2 = False
+
+# Configuration
+PG_SCHEMA = "comac"
 
 
 # =============================================================================
@@ -83,7 +91,9 @@ _cache_cables: Dict[str, CableReference] = {}
 _cache_supports: Dict[str, SupportReference] = {}
 _cache_communes: Dict[str, CommuneInfo] = {}
 _cache_hypotheses: Dict[str, HypotheseClimatique] = {}
+_cache_capacites_possibles: Dict[str, List[int]] = {}  # reference -> [capacités]
 _cache_loaded: bool = False
+_cache_source: str = ""  # "postgresql" or "gpkg"
 
 
 # =============================================================================
@@ -166,22 +176,72 @@ def _extract_fournisseur(nom: str) -> str:
     return ''
 
 
-def _query_gpkg(sql: str, params: tuple = ()) -> List[dict]:
-    """Exécute requête SQLite sur le GeoPackage"""
-    if not os.path.exists(GPKG_PATH):
-        return []
+def _get_pg_connection():
+    """Tente d'obtenir une connexion PostgreSQL via les credentials QGIS."""
+    if not _HAS_PSYCOPG2:
+        return None
     
-    rows = []
     try:
-        conn = sqlite3.connect(GPKG_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(sql, params)
-        rows = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        from qgis.core import QgsSettings
+        settings = QgsSettings()
+        settings.beginGroup("PostgreSQL/connections")
+        connections = settings.childGroups()
+        settings.endGroup()
+        
+        for name in connections:
+            settings.beginGroup(f"PostgreSQL/connections/{name}")
+            host = settings.value("host", "")
+            database = settings.value("database", "")
+            port = int(settings.value("port", 5432))
+            user = settings.value("username", "")
+            password = settings.value("password", "")
+            settings.endGroup()
+            
+            if host == "10.241.228.107" or "auvergne" in database.lower():
+                conn = psycopg2.connect(
+                    host=host, port=port, database=database,
+                    user=user, password=password
+                )
+                # Vérifier que le schéma comac existe
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+                    (PG_SCHEMA,)
+                )
+                if cur.fetchone():
+                    return conn
+                else:
+                    conn.close()
+                    return None
     except Exception as e:
-        print(f"[COMAC_DB] Erreur requête: {e}")
+        print(f"[COMAC_DB] PostgreSQL non disponible: {e}")
+    
+    return None
+
+
+def _query_pg(sql: str, params: tuple = ()) -> List[dict]:
+    """Exécute requête sur PostgreSQL (schéma comac)."""
+    rows = []
+    conn = _get_pg_connection()
+    if not conn:
+        return rows
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        columns = [desc[0] for desc in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    except Exception as e:
+        print(f"[COMAC_DB] Erreur requête PG: {e}")
+    finally:
+        conn.close()
     
     return rows
+
+
+def _query(sql_pg: str, params: tuple = ()) -> List[dict]:
+    """Exécute une requête sur PostgreSQL (schéma comac)."""
+    return _query_pg(sql_pg, params)
 
 
 # =============================================================================
@@ -189,10 +249,10 @@ def _query_gpkg(sql: str, params: tuple = ()) -> List[dict]:
 # =============================================================================
 
 def _load_cables() -> Dict[str, CableReference]:
-    """Charge table cables depuis GPKG"""
+    """Charge table cables depuis PostgreSQL"""
     cables = {}
     
-    for row in _query_gpkg("SELECT * FROM cables"):
+    for row in _query(f"SELECT * FROM {PG_SCHEMA}.cables"):
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -219,10 +279,10 @@ def _load_cables() -> Dict[str, CableReference]:
 
 
 def _load_supports() -> Dict[str, SupportReference]:
-    """Charge table supports depuis GPKG"""
+    """Charge table supports depuis PostgreSQL"""
     supports = {}
     
-    for row in _query_gpkg("SELECT * FROM supports"):
+    for row in _query(f"SELECT * FROM {PG_SCHEMA}.supports"):
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -242,10 +302,10 @@ def _load_supports() -> Dict[str, SupportReference]:
 
 
 def _load_communes() -> Dict[str, CommuneInfo]:
-    """Charge table commune depuis GPKG (fusion 4 départements)"""
+    """Charge table commune depuis PostgreSQL"""
     communes = {}
     
-    for row in _query_gpkg("SELECT * FROM commune"):
+    for row in _query(f"SELECT * FROM {PG_SCHEMA}.commune"):
         insee = row.get('insee', '')
         if not insee:
             continue
@@ -265,10 +325,10 @@ def _load_communes() -> Dict[str, CommuneInfo]:
 
 
 def _load_hypotheses() -> Dict[str, HypotheseClimatique]:
-    """Charge table hypothese depuis GPKG"""
+    """Charge table hypothese depuis PostgreSQL"""
     hypotheses = {}
     
-    for row in _query_gpkg("SELECT * FROM hypothese"):
+    for row in _query(f"SELECT * FROM {PG_SCHEMA}.hypothese"):
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -286,9 +346,27 @@ def _load_hypotheses() -> Dict[str, HypotheseClimatique]:
     return hypotheses
 
 
+def _load_capacites_possibles() -> Dict[str, List[int]]:
+    """Charge table cable_capacites_possibles depuis PostgreSQL."""
+    capas = {}
+    
+    rows = _query_pg(
+        f"SELECT reference, capacite_fo FROM {PG_SCHEMA}.cable_capacites_possibles ORDER BY reference, capacite_fo"
+    )
+    
+    for row in rows:
+        ref = row.get('reference', '')
+        capa = row.get('capacite_fo', 0)
+        if ref:
+            capas.setdefault(ref, []).append(capa)
+    
+    return capas
+
+
 def _ensure_loaded():
     """Charge les données si pas encore fait - CRIT-02: Thread-safe"""
-    global _cache_cables, _cache_supports, _cache_communes, _cache_hypotheses, _cache_loaded
+    global _cache_cables, _cache_supports, _cache_communes, _cache_hypotheses
+    global _cache_capacites_possibles, _cache_loaded, _cache_source
     
     if _cache_loaded:
         return
@@ -297,8 +375,14 @@ def _ensure_loaded():
         if _cache_loaded:
             return
         
-        if not os.path.exists(GPKG_PATH):
-            print(f"[COMAC_DB] WARN: Fichier {GPKG_PATH} introuvable")
+        # Vérifier connexion PostgreSQL
+        pg_conn = _get_pg_connection()
+        if pg_conn:
+            pg_conn.close()
+            _cache_source = "postgresql"
+            print(f"[COMAC_DB] Source: PostgreSQL (schéma {PG_SCHEMA})")
+        else:
+            print("[COMAC_DB] ERREUR: PostgreSQL non disponible")
             _cache_loaded = True
             return
         
@@ -307,6 +391,13 @@ def _ensure_loaded():
             _cache_supports = _load_supports()
             _cache_communes = _load_communes()
             _cache_hypotheses = _load_hypotheses()
+            _cache_capacites_possibles = _load_capacites_possibles()
+            
+            print(
+                f"[COMAC_DB] Chargé: {len(_cache_cables)} câbles, "
+                f"{len(_cache_supports)} supports, {len(_cache_communes)} communes, "
+                f"{len(_cache_capacites_possibles)} refs multi-capa"
+            )
         except Exception as e:
             print(f"[COMAC_DB] ERR: Chargement BD échoué: {e}")
         
@@ -315,10 +406,17 @@ def _ensure_loaded():
 
 def reload_database():
     """Force rechargement de la base - CRIT-02: Thread-safe"""
-    global _cache_loaded
+    global _cache_loaded, _cache_source
     with _cache_lock:
         _cache_loaded = False
+        _cache_source = ""
     _ensure_loaded()
+
+
+def get_source() -> str:
+    """Retourne la source actuelle ('postgresql' ou 'gpkg' ou '')."""
+    _ensure_loaded()
+    return _cache_source
 
 
 # =============================================================================
@@ -361,6 +459,41 @@ def get_cable_capacite(code_cable: str) -> int:
     
     # Fallback: extraction depuis pattern
     return _extract_capacite_fo('', code_clean)
+
+
+def get_cable_capacites_possibles(code_cable: str) -> List[int]:
+    """
+    Retourne les capacités FO possibles pour un code câble.
+    Source: table cable_capacites_possibles (PostgreSQL) si disponible.
+    
+    Ex: L1092-13-P → [24, 36], L1092-14-P → [48, 72]
+    
+    Args:
+        code_cable: Code câble (ex: "L1092-13-P")
+    
+    Returns:
+        Liste de capacités possibles, ou [capacite_unique] si pas de multi-capa
+    """
+    _ensure_loaded()
+    
+    if not code_cable:
+        return [0]
+    
+    code_clean = str(code_cable).strip().upper()
+    
+    # Recherche dans le cache PostgreSQL (table cable_capacites_possibles)
+    if _cache_capacites_possibles:
+        # Recherche exacte
+        if code_cable in _cache_capacites_possibles:
+            return _cache_capacites_possibles[code_cable]
+        # Recherche partielle (L1092-13-P dans "L1092-13-P xxx")
+        for ref, capas in _cache_capacites_possibles.items():
+            if ref.upper() in code_clean or code_clean in ref.upper():
+                return capas
+    
+    # Fallback: capacité unique depuis get_cable_capacite
+    capa = get_cable_capacite(code_cable)
+    return [capa] if capa > 0 else [0]
 
 
 def get_support(nom: str) -> Optional[SupportReference]:

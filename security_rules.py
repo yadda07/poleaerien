@@ -14,6 +14,7 @@ Sources données:
 try:
     from .comac_db_reader import (
         get_cable_capacite as _db_get_capacite,
+        get_cable_capacites_possibles as _db_get_capas_possibles,
         get_zone_vent_from_hypotheses as _db_get_zone_hypo,
         get_zone_vent_from_insee as _db_get_zone_insee
     )
@@ -22,6 +23,7 @@ except ImportError:
     try:
         from comac_db_reader import (
             get_cable_capacite as _db_get_capacite,
+            get_cable_capacites_possibles as _db_get_capas_possibles,
             get_zone_vent_from_hypotheses as _db_get_zone_hypo,
             get_zone_vent_from_insee as _db_get_zone_insee
         )
@@ -85,6 +87,19 @@ CODES_CABLE_PRYSMIAN = {
     'L1092-15-P': 144
 }
 
+# Capacités possibles par référence câble (une référence peut couvrir plusieurs capacités)
+CAPACITES_POSSIBLES = {
+    'L1092-1-P': [12],
+    'L1092-2-P': [36],
+    'L1092-3-P': [72],
+    'L1092-11-P': [6],
+    'L1092-12-P': [12],
+    'L1092-13-P': [24, 36],
+    'L1092-14-P': [48, 72],
+    'L1092-15': [144],
+    'L1092-15-P': [144],
+}
+
 # =============================================================================
 # CONSTANTES - Colonnes Excel Comac
 # =============================================================================
@@ -139,6 +154,40 @@ GRACETHD_COL_CM_LONG = 'cm_long'      # Longueur cheminement
 # =============================================================================
 # FONCTIONS DE VALIDATION
 # =============================================================================
+
+def get_capacites_possibles(code_cable: str) -> list:
+    """
+    Retourne la liste des capacités FO possibles pour un code câble.
+    Source prioritaire: PostgreSQL (table comac.cable_capacites_possibles)
+    Fallback: dict CAPACITES_POSSIBLES local
+    
+    Ex: L1092-13-P → [24, 36], L1092-14-P → [48, 72]
+    
+    Args:
+        code_cable: Code type "L1092-13-P"
+    
+    Returns:
+        Liste de capacités possibles, ou [0] si non reconnu
+    """
+    if not code_cable:
+        return [0]
+    
+    # Priorité 1: PostgreSQL (comac.cable_capacites_possibles)
+    if _HAS_COMAC_DB:
+        capas = _db_get_capas_possibles(code_cable)
+        if capas and capas != [0]:
+            return capas
+    
+    # Priorité 2: mapping local hardcodé
+    code_clean = str(code_cable).strip().upper()
+    for code, capas in CAPACITES_POSSIBLES.items():
+        if code.upper() in code_clean:
+            return capas
+    
+    # Fallback: capacité unique via get_capacite_fo_from_code
+    capa = get_capacite_fo_from_code(code_cable)
+    return [capa] if capa > 0 else [0]
+
 
 def get_capacite_fo_from_code(code_cable: str, debug: bool = False) -> int:
     """
