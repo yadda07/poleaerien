@@ -323,11 +323,16 @@ class C6_vs_Bd:
             if val and val != NULL:
                 etudes_capft.add(str(val).strip())
 
-        # Récupérer les noms de fichiers Excel dans le répertoire C6
+        # Récupérer les noms de fichiers Excel C6 dans le répertoire
+        # (exclut FicheAppui, C7, GESPOT qui ne sont pas des C6)
+        ignore_patterns = ['ficheappui', 'gespot', '_c7', 'annexe c7', 'annexe_c7']
         fichiers_c6 = set()
         for subdir, _, files in os.walk(repertoire_c6):
             for name in files:
                 if name.endswith('.xlsx') and "~$" not in name and not name.startswith("ANALYSE_"):
+                    name_lower = name.lower()
+                    if any(pattern in name_lower for pattern in ignore_patterns):
+                        continue
                     fichiers_c6.add(name.replace(".xlsx", ""))
 
         # Comparaison
