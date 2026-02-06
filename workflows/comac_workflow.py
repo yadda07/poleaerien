@@ -70,9 +70,15 @@ class ComacWorkflow(QObject):
             return
 
         # 2. Préparation des données pour la Task
+        # Construire le nom de fichier si chemin_export est un répertoire
+        if os.path.isdir(chemin_export):
+            fichier_export = os.path.join(chemin_export, "ANALYSE_COMAC.xlsx")
+        else:
+            fichier_export = chemin_export if chemin_export.endswith('.xlsx') else chemin_export + '.xlsx'
+        
         params = {
             'chemin_comac': chemin_comac,
-            'fichier_export': chemin_export,
+            'fichier_export': fichier_export,
             'zone_climatique': 'ZVN'  # Défaut
         }
         
