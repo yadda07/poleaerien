@@ -171,3 +171,141 @@ class ParcourAutoC6Result:
     @property
     def nb_total(self) -> int:
         return len(self.etudes_traitees)
+
+
+# =============================================================================
+# COMPARAISON BD PostgreSQL ↔ GraceTHD (G01-G10)
+# =============================================================================
+
+@dataclass
+class PoteauxComparisonResult:
+    """Résultat comparaison poteaux BD ↔ GraceTHD (G01/G02).
+    
+    G01: Poteaux BD manquants dans GraceTHD
+    G02: Poteaux GraceTHD excédentaires (pas dans BD)
+    """
+    manquants_gracethd: set = field(default_factory=set)
+    excedentaires_gracethd: set = field(default_factory=set)
+    correspondances: set = field(default_factory=set)
+    erreurs: List[str] = field(default_factory=list)
+    
+    @property
+    def nb_total_bd(self) -> int:
+        return len(self.correspondances) + len(self.manquants_gracethd)
+    
+    @property
+    def nb_total_gracethd(self) -> int:
+        return len(self.correspondances) + len(self.excedentaires_gracethd)
+    
+    @property
+    def taux_correspondance(self) -> float:
+        total = self.nb_total_bd
+        return (len(self.correspondances) / total * 100) if total > 0 else 0.0
+
+
+@dataclass
+class BPEComparisonResult:
+    """Résultat comparaison BPE BD ↔ GraceTHD (G03/G04/G09).
+    
+    G03: BPE BD manquants dans GraceTHD
+    G04: BPE GraceTHD excédentaires
+    G09: Types boîtiers différents
+    """
+    manquants_gracethd: set = field(default_factory=set)
+    excedentaires_gracethd: set = field(default_factory=set)
+    types_differents: List[Dict[str, Any]] = field(default_factory=list)
+    correspondances: set = field(default_factory=set)
+    erreurs: List[str] = field(default_factory=list)
+    
+    @property
+    def nb_anomalies(self) -> int:
+        return len(self.manquants_gracethd) + len(self.types_differents)
+    
+    @property
+    def taux_correspondance(self) -> float:
+        total = len(self.correspondances) + len(self.manquants_gracethd)
+        return (len(self.correspondances) / total * 100) if total > 0 else 0.0
+
+
+@dataclass
+class CablesComparisonResult:
+    """Résultat comparaison câbles BD ↔ GraceTHD (G05/G06/G07).
+    
+    G05: Câbles BD manquants dans GraceTHD
+    G06: Câbles GraceTHD excédentaires
+    G07: Capacités FO différentes
+    """
+    manquants_gracethd: set = field(default_factory=set)
+    excedentaires_gracethd: set = field(default_factory=set)
+    capacites_differentes: List[Dict[str, Any]] = field(default_factory=list)
+    correspondances: set = field(default_factory=set)
+    erreurs: List[str] = field(default_factory=list)
+    
+    @property
+    def nb_anomalies(self) -> int:
+        return len(self.manquants_gracethd) + len(self.capacites_differentes)
+    
+    @property
+    def taux_correspondance(self) -> float:
+        total = len(self.correspondances) + len(self.manquants_gracethd)
+        return (len(self.correspondances) / total * 100) if total > 0 else 0.0
+
+
+@dataclass
+class CheminementsComparisonResult:
+    """Résultat comparaison cheminements BD ↔ GraceTHD (G08)."""
+    manquants_gracethd: set = field(default_factory=set)
+    excedentaires_gracethd: set = field(default_factory=set)
+    correspondances: set = field(default_factory=set)
+    erreurs: List[str] = field(default_factory=list)
+
+
+@dataclass
+class GraceTHDComparisonResult:
+    """Résultat agrégé de toutes les comparaisons BD ↔ GraceTHD.
+    
+    Regroupe les résultats de G01-G10 en un seul objet.
+    """
+    poteaux: Optional[PoteauxComparisonResult] = None
+    bpe: Optional[BPEComparisonResult] = None
+    cables: Optional[CablesComparisonResult] = None
+    cheminements: Optional[CheminementsComparisonResult] = None
+    gracethd_path: str = ""
+    
+    @property
+    def nb_anomalies_total(self) -> int:
+        count = 0
+        if self.poteaux:
+            count += len(self.poteaux.manquants_gracethd)
+        if self.bpe:
+            count += self.bpe.nb_anomalies
+        if self.cables:
+            count += self.cables.nb_anomalies
+        if self.cheminements:
+            count += len(self.cheminements.manquants_gracethd)
+        return count
+    
+    @property
+    def is_valid(self) -> bool:
+        return self.nb_anomalies_total == 0
+    
+    def to_summary(self) -> Dict[str, Any]:
+        """Génère un résumé pour affichage UI."""
+        return {
+            'poteaux': {
+                'correspondances': len(self.poteaux.correspondances) if self.poteaux else 0,
+                'manquants': len(self.poteaux.manquants_gracethd) if self.poteaux else 0,
+                'excedentaires': len(self.poteaux.excedentaires_gracethd) if self.poteaux else 0,
+            },
+            'bpe': {
+                'correspondances': len(self.bpe.correspondances) if self.bpe else 0,
+                'manquants': len(self.bpe.manquants_gracethd) if self.bpe else 0,
+                'types_diff': len(self.bpe.types_differents) if self.bpe else 0,
+            },
+            'cables': {
+                'correspondances': len(self.cables.correspondances) if self.cables else 0,
+                'manquants': len(self.cables.manquants_gracethd) if self.cables else 0,
+                'capa_diff': len(self.cables.capacites_differentes) if self.cables else 0,
+            },
+            'total_anomalies': self.nb_anomalies_total,
+        }
