@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Settings/Gear with Check - Configuration Validated Icon -->
+  
+  <!-- Gear outer shape -->
+  <path d="M32 8 L35 8 L36 12 L40 13 L43 10 L46 13 L43 17 L44 20 L48 21 L48 24 L44 25 L43 29 L46 32 L43 35 L40 32 L36 33 L35 37 L32 37 L31 33 L27 32 L24 35 L21 32 L24 29 L23 25 L19 24 L19 21 L23 20 L24 17 L21 13 L24 10 L27 13 L31 12 Z"
+        fill="none" stroke="#4a5568" stroke-width="2"/>
+  
+  <!-- Inner circle -->
+  <circle cx="33" cy="22.5" r="6" fill="none" stroke="#4a5568" stroke-width="2"/>
+  
+  <!-- Check badge -->
+  <circle cx="48" cy="48" r="12" fill="#38a169"/>
+  <path d="M42 48 L46 52 L54 44" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
