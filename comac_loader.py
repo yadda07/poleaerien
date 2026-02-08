@@ -13,6 +13,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+from .core_utils import safe_float, safe_int, get_xml_text, get_xml_float
 
 try:
     import openpyxl
@@ -103,43 +104,12 @@ class EtudeComacMerged:
 
 
 # =============================================================================
-# HELPERS
+# HELPERS (safe_float, safe_int, get_xml_text, get_xml_float importés de core_utils)
 # =============================================================================
-
-def _safe_float(value, default: float = 0.0) -> float:
-    """Parse float avec protection None/erreur"""
-    if value is None:
-        return default
-    try:
-        return float(str(value).replace(',', '.').replace('m', '').strip())
-    except (ValueError, AttributeError):
-        return default
-
-
-def _safe_int(value, default: int = 0) -> int:
-    """Parse int avec protection"""
-    if value is None:
-        return default
-    try:
-        return int(float(str(value).replace(',', '.')))
-    except (ValueError, AttributeError):
-        return default
-
-
-def _get_text(elem: ET.Element, tag: str, default: str = "") -> str:
-    """Get text from XML element safely"""
-    child = elem.find(tag)
-    return child.text.strip() if child is not None and child.text else default
-
-
-def _get_float(elem: ET.Element, tag: str, default: float = 0.0) -> float:
-    """Get float from XML element"""
-    return _safe_float(_get_text(elem, tag), default)
-
 
 def _get_bool(elem: ET.Element, tag: str) -> bool:
     """Get bool from XML element (0/1)"""
-    return _get_text(elem, tag) == '1'
+    return get_xml_text(elem, tag) == '1'
 
 
 def _extract_num_etude(filepath: str) -> str:
@@ -179,8 +149,8 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
         return etude
     
     # Métadonnées
-    etude.num_etude = _get_text(root, 'NumEtude') or _extract_num_etude(filepath)
-    etude.commune = _get_text(root, 'Commune')
+    etude.num_etude = get_xml_text(root, 'NumEtude') or _extract_num_etude(filepath)
+    etude.commune = get_xml_text(root, 'Commune')
     
     # Hypothèses
     hypo_elem = root.find('Hypotheses')
@@ -194,7 +164,7 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
             etude.zone_climatique = detected_zone
     
     # Fallback: détection depuis code INSEE si disponible
-    insee = _get_text(root, 'Insee')
+    insee = get_xml_text(root, 'Insee')
     if insee and etude.zone_climatique == 'ZVN':
         insee_zone = get_zone_vent_from_insee(insee)
         if insee_zone == 'ZVF':
@@ -204,20 +174,20 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
     supports_elem = root.find('Supports')
     if supports_elem is not None:
         for supp_elem in supports_elem.findall('Support'):
-            nom = _get_text(supp_elem, 'Nom')
+            nom = get_xml_text(supp_elem, 'Nom')
             if not nom:
                 continue
             support = SupportMerged(
                 nom=nom,
-                hauteur_totale=_get_float(supp_elem, 'Hauteur'),
-                traverse_existante=_get_float(supp_elem, 'TraverseExistante1'),
-                traverse_a_poser=_get_float(supp_elem, 'TraverseAPoser1') or _get_float(supp_elem, 'TraverseAPoser2'),
+                hauteur_totale=get_xml_float(supp_elem, 'Hauteur'),
+                traverse_existante=get_xml_float(supp_elem, 'TraverseExistante1'),
+                traverse_a_poser=get_xml_float(supp_elem, 'TraverseAPoser1') or get_xml_float(supp_elem, 'TraverseAPoser2'),
                 portee_molle=_get_bool(supp_elem, 'PorteeMolle'),
-                nature=_get_text(supp_elem, 'Nature'),
-                classe=_get_text(supp_elem, 'Classe'),
-                x=_get_float(supp_elem, 'X'),
-                y=_get_float(supp_elem, 'Y'),
-                etat=_get_text(supp_elem, 'Etat')
+                nature=get_xml_text(supp_elem, 'Nature'),
+                classe=get_xml_text(supp_elem, 'Classe'),
+                x=get_xml_float(supp_elem, 'X'),
+                y=get_xml_float(supp_elem, 'Y'),
+                etat=get_xml_text(supp_elem, 'Etat')
             )
             etude.supports[nom] = support
     
@@ -227,7 +197,7 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
     tcf_elem = root.find('LignesTCF')
     if tcf_elem is not None:
         for ligne_elem in tcf_elem.findall('LigneTCF'):
-            cable = _get_text(ligne_elem, 'Cable')
+            cable = get_xml_text(ligne_elem, 'Cable')
             capacite_fo = get_capacite_fo_from_code(cable)
             a_poser = _get_bool(ligne_elem, 'APoser')
             
@@ -240,7 +210,7 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
                     if child.tag == 'Support' and child.text:
                         supports_list.append(child.text.strip())
                     elif child.tag == 'Traverse' and child.text:
-                        traverses_list.append(_safe_int(child.text, 1))
+                        traverses_list.append(safe_int(child.text, 1))
             
             # Parse portées
             portees_list = []
@@ -248,7 +218,7 @@ def _parse_pcm(filepath: str, zone_climatique: str = 'ZVN') -> Optional[EtudeCom
             if portees_section is not None:
                 for p in portees_section.findall('Portee'):
                     if p.text:
-                        portees_list.append(_safe_float(p.text))
+                        portees_list.append(safe_float(p.text))
             
             # Créer segments (support[i] -> support[i+1] avec portee[i])
             portee_max = portees_max.get(capacite_fo, 50.0) if capacite_fo > 0 else 50.0
@@ -313,11 +283,11 @@ def _parse_excel(filepath: str) -> Dict[str, dict]:
             nom = str(num_pot).strip().replace("BT ", "BT-")
             
             data_by_support[nom] = {
-                'hauteur_hors_sol': _safe_float(row[EXCEL_COL_HAUTEUR_HORS_SOL] if len(row) > EXCEL_COL_HAUTEUR_HORS_SOL else None),
-                'hauteur_totale': _safe_float(row[EXCEL_COL_HAUTEUR_TOTALE] if len(row) > EXCEL_COL_HAUTEUR_TOTALE else None),
+                'hauteur_hors_sol': safe_float(row[EXCEL_COL_HAUTEUR_HORS_SOL] if len(row) > EXCEL_COL_HAUTEUR_HORS_SOL else None),
+                'hauteur_totale': safe_float(row[EXCEL_COL_HAUTEUR_TOTALE] if len(row) > EXCEL_COL_HAUTEUR_TOTALE else None),
                 'conducteur': str(row[EXCEL_COL_CONDUCTEUR] or '') if len(row) > EXCEL_COL_CONDUCTEUR else '',
                 'type_ligne_fo': str(row[EXCEL_COL_FO_TYPE_LIGNE] or '') if len(row) > EXCEL_COL_FO_TYPE_LIGNE else '',
-                'longueur': _safe_float(row[EXCEL_COL_LONGUEUR] if len(row) > EXCEL_COL_LONGUEUR else None)
+                'longueur': safe_float(row[EXCEL_COL_LONGUEUR] if len(row) > EXCEL_COL_LONGUEUR else None)
             }
         
         wb.close()

@@ -78,18 +78,10 @@ class DatabaseConnection:
             
             # Vérifier si c'est la bonne connexion
             if host == TARGET_HOST or database.lower() == TARGET_DATABASE:
-                QgsMessageLog.logMessage(
-                    f"Connexion PostgreSQL trouvée: {conn_name} ({host}/{database})",
-                    "PoleAerien", Qgis.Info
-                )
                 return conn_name
             
             # Chercher aussi par nom contenant "Auvergne"
             if "auvergne" in conn_name.lower():
-                QgsMessageLog.logMessage(
-                    f"Connexion PostgreSQL trouvée par nom: {conn_name}",
-                    "PoleAerien", Qgis.Info
-                )
                 return conn_name
         
         return None
@@ -156,10 +148,6 @@ class DatabaseConnection:
                 password=self.password
             )
             
-            QgsMessageLog.logMessage(
-                f"Connexion PostgreSQL établie: {self.host}/{self.database}",
-                "PoleAerien", Qgis.Info
-            )
             return True
             
         except Exception as e:

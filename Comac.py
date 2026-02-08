@@ -8,8 +8,10 @@ from .qgis_utils import (
     liste_poteaux_par_etude,
     normalize_appui_num_bt
 )
+from .core_utils import normalize_appui_num
 from .security_rules import (
     get_capacite_fo_from_code,
+    get_capacites_possibles,
     verifier_portee,
     verifier_distance_sol,
     est_terrain_prive,
@@ -34,6 +36,47 @@ class Comac:
     def __init__(self):
         """Le constructeur de ma classe
         Il prend pour attribut de classe les *** """
+
+    @staticmethod
+    def parse_references_cables_comac(valeur_col_ao: str) -> list:
+        """
+        Parse la colonne AO (idx 40) de l'Export COMAC.
+        Les références câbles sont concaténées, chaque référence se termine par 'P-'.
+        
+        Exemples:
+            "L1092-12-P-" → ["L1092-12-P"]
+            "L1092-12-P-L1092-14-P-" → ["L1092-12-P", "L1092-14-P"]
+            "L1092-12-P-L1092-12-P-L1092-11-P-" → ["L1092-12-P", "L1092-12-P", "L1092-11-P"]
+        
+        Args:
+            valeur_col_ao: Valeur brute de la colonne AO
+        
+        Returns:
+            Liste de références câbles nettoyées (ex: ["L1092-12-P", "L1092-14-P"])
+        """
+        if not valeur_col_ao or not isinstance(valeur_col_ao, str):
+            return []
+        
+        valeur = str(valeur_col_ao).strip()
+        if not valeur:
+            return []
+        
+        # Split par "P-" (séparateur = fin de référence + début de la suivante)
+        parts = valeur.split('P-')
+        
+        references = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Réajouter le "P" final (retiré par le split)
+            ref = part + 'P' if not part.upper().endswith('P') else part
+            # Nettoyer tiret initial éventuel
+            ref = ref.lstrip('-').strip()
+            if ref:
+                references.append(ref)
+        
+        return references
 
     def verificationsDonneesComac(self, table_poteau, table_etude_comac, colonne_comac):
         """Vérifie doublons études + poteaux BT hors étude."""
@@ -63,7 +106,7 @@ class Comac:
             zone_climatique: 'ZVN' (vent normal) ou 'ZVF' (vent fort)
         
         Returns:
-            tuple: (doublons, erreurs, dict_poteaux, dict_verif_secu)
+            tuple: (doublons, erreurs, dict_poteaux, dict_verif_secu, dict_cables_par_appui)
         """
         from qgis.core import QgsMessageLog, Qgis
         
@@ -72,6 +115,7 @@ class Comac:
             zone_climatique = 'ZVN'
         dicoPoteauBt_SousTraitant = {}
         dicoVerifSecu = {}  # Résultats vérifications sécurité
+        dicoCablesParAppui = {}  # {appui_norm → [refs_cables]} pour vérif CabCOMAC
         fichiersComacExistants = []
         fichiersComacEnDoublons = []
         impossibiliteDelireFichier = {}
@@ -116,6 +160,7 @@ class Comac:
 
                         listePoteauBt = []
                         listeVerifSecu = []  # Vérifications par ligne
+                        cables_appui_fichier = {}  # {appui → [refs]} pour ce fichier
 
                         # Lecture à partir de la ligne 4
                         # Col A (idx 0): N° poteau, Col G (idx 6): distance cable/BT
@@ -154,7 +199,16 @@ class Comac:
                                 except (ValueError, AttributeError):
                                     hauteur_sol = 0.0
                             
-                            # Capacité FO depuis code câble
+                            # Parse références câbles concaténées depuis col AO
+                            refs_cables = self.parse_references_cables_comac(
+                                str(type_ligne_fo) if type_ligne_fo else ''
+                            )
+                            if refs_cables:
+                                nompot_norm = normalize_appui_num(nompot)
+                                if nompot_norm:
+                                    cables_appui_fichier[nompot_norm] = refs_cables
+                            
+                            # Capacité FO depuis code câble (première ref pour compat existante)
                             capacite_fo = get_capacite_fo_from_code(type_ligne_fo) if type_ligne_fo else 0
                             
                             # Vérification portée
@@ -189,16 +243,18 @@ class Comac:
                             
                             dicoPoteauBt_SousTraitant[key] = listePoteauBt
                             dicoVerifSecu[key] = listeVerifSecu
+                            # Agréger câbles par appui (tous fichiers confondus)
+                            for appui, refs in cables_appui_fichier.items():
+                                if appui not in dicoCablesParAppui:
+                                    dicoCablesParAppui[appui] = refs
+                                else:
+                                    dicoCablesParAppui[appui].extend(refs)
                             fichiers_valides += 1
 
                             if name in fichiersComacExistants:
                                 fichiersComacEnDoublons.append(name)
 
                             fichiersComacExistants.append(name)
-                            QgsMessageLog.logMessage(
-                                f"[COMAC] Fichier détecté: {rel_path} ({len(listePoteauBt)} poteaux)",
-                                "PoleAerien", Qgis.Info
-                            )
         
         QgsMessageLog.logMessage(
             f"[COMAC] Lecture terminée: {fichiers_valides}/{fichiers_trouves} fichiers valides, "
@@ -206,7 +262,7 @@ class Comac:
             "PoleAerien", Qgis.Info
         )
 
-        return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu
+        return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui
 
     def LectureFichiersPCM(self, repertoire, zone_climatique='ZVN'):
         """
@@ -220,30 +276,16 @@ class Comac:
         Returns:
             tuple: (etudes_dict, erreurs_dict, anomalies_list, supports_pm_list)
         """
-        # DEBUG COMAC PCM
-        print(f"[COMAC_PCM] Début lecture répertoire: {repertoire}")
-        print(f"[COMAC_PCM] Zone climatique: {zone_climatique}")
-        
         etudes, erreurs = parse_repertoire_pcm(repertoire, zone_climatique)
         
-        print(f"[COMAC_PCM] Nombre études parsées: {len(etudes)}")
-        print(f"[COMAC_PCM] Nombre erreurs: {len(erreurs)}")
         if erreurs:
-            for fpath, err in erreurs.items():
-                print(f"[COMAC_PCM] ERREUR {fpath}: {err}")
-        
-        # Résumé capacités FO par étude
-        for nom_etude, etude in etudes.items():
-            lignes_fo = [l for l in etude.lignes_tcf if l.capacite_fo > 0]
-            print(f"[COMAC_PCM] Etude '{nom_etude}': {len(etude.lignes_tcf)} lignes TCF, {len(lignes_fo)} avec capacité FO")
-            for l in lignes_fo:
-                print(f"[COMAC_PCM]   -> cable='{l.cable}' capacite_fo={l.capacite_fo} a_poser={l.a_poser} nb_portees={len(l.portees)}")
+            QgsMessageLog.logMessage(
+                f"[COMAC_PCM] {len(erreurs)} erreur(s) lecture PCM",
+                "PoleAerien", Qgis.Warning
+            )
         
         anomalies = get_anomalies_securite(etudes)
         supports_pm = get_supports_portee_molle(etudes)
-        
-        print(f"[COMAC_PCM] Anomalies sécurité: {len(anomalies)}")
-        print(f"[COMAC_PCM] Supports portée molle: {len(supports_pm)}")
         
         # Extraction poteaux par étude (compatible avec workflow existant)
         dico_poteaux = {}
@@ -252,7 +294,11 @@ class Comac:
             if poteaux:
                 dico_poteaux[nom_etude] = poteaux
         
-        print(f"[COMAC_PCM] Fin lecture - {len(dico_poteaux)} études avec poteaux")
+        QgsMessageLog.logMessage(
+            f"[COMAC_PCM] {len(etudes)} etudes, {len(anomalies)} anomalies, "
+            f"{len(supports_pm)} portees molles, {len(dico_poteaux)} avec poteaux",
+            "PoleAerien", Qgis.Info
+        )
         return etudes, erreurs, anomalies, supports_pm, dico_poteaux
 
     def traitementResultatFinaux(self, dicoEtudeComacPoteauQgis, dicoPoteauBt_SousTraitant):
@@ -304,13 +350,91 @@ class Comac:
 
         return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants
 
-    def ecrireResultatsAnalyseExcels(self, resultatsFinaux, nom, dico_verif_secu=None):
+    def comparer_comac_cables(
+        self,
+        dico_cables_comac: dict,
+        cables_par_appui: dict
+    ) -> list:
+        """
+        Compare les câbles déclarés dans l'Export COMAC (col AO) avec les câbles BDD (fddcpi2).
+        Logique identique à PoliceC6.comparer_c6_cables().
+        
+        Args:
+            dico_cables_comac: {appui_norm → [refs_cables]} depuis LectureFichiersExcelsComac()
+            cables_par_appui: {appui_norm → {count, capacites, cables}} depuis compter_cables_par_appui()
+        
+        Returns:
+            Liste de dicts avec comparaison par appui:
+            [{num_appui, nb_cables_comac, cables_comac, capas_comac,
+              nb_cables_bdd, capas_bdd, statut, message}]
+        """
+        from .cable_analyzer import capacites_compatibles
+        
+        comparaison = []
+        
+        for num_appui, refs_comac in dico_cables_comac.items():
+            bdd_data = cables_par_appui.get(num_appui, {})
+            nb_cables_bdd = bdd_data.get('count', 0)
+            nb_cables_comac = len(refs_comac)
+            
+            # Résoudre capacités possibles COMAC via PostgreSQL/local
+            capas_possibles_comac = []
+            for ref in refs_comac:
+                capas_possibles_comac.append(get_capacites_possibles(ref))
+            
+            capas_bdd = sorted(bdd_data.get('capacites', []))
+            capas_comac_display = ['/'.join(str(c) for c in cp) for cp in capas_possibles_comac]
+            
+            # Déterminer le statut
+            messages = []
+            if not bdd_data:
+                statut = "ABSENT_BDD"
+                messages.append("Appui non trouvé dans les appuis QGIS")
+            else:
+                ecart_count = nb_cables_comac != nb_cables_bdd
+                ecart_capa = not capacites_compatibles(
+                    capas_possibles_comac, capas_bdd
+                )
+                
+                if ecart_count:
+                    diff = nb_cables_bdd - nb_cables_comac
+                    messages.append(
+                        f"Écart nombre: {diff:+d} câble(s) (BDD={nb_cables_bdd}, COMAC={nb_cables_comac})"
+                    )
+                
+                if ecart_capa:
+                    comac_str = '+'.join(capas_comac_display) or '?'
+                    bdd_str = '+'.join(str(c) for c in capas_bdd) or '?'
+                    messages.append(
+                        f"Écart capacité: COMAC=[{comac_str}] vs BDD=[{bdd_str}]"
+                    )
+                
+                if ecart_count or ecart_capa:
+                    statut = "ECART"
+                else:
+                    statut = "OK"
+            
+            comparaison.append({
+                'num_appui': num_appui,
+                'nb_cables_comac': nb_cables_comac,
+                'cables_comac': '; '.join(refs_comac),
+                'capas_comac': capas_comac_display,
+                'nb_cables_bdd': nb_cables_bdd,
+                'capas_bdd': capas_bdd,
+                'statut': statut,
+                'message': ' | '.join(messages)
+            })
+        
+        return comparaison
+
+    def ecrireResultatsAnalyseExcels(self, resultatsFinaux, nom, dico_verif_secu=None, verif_cables=None):
         """Fonction qui permet d'écrire dans le fichier Excel à partir d'un fichier modèle.
         
         Args:
             resultatsFinaux: tuple (introuvables_excel, introuvables_qgis, existants)
             nom: Chemin du fichier Excel à créer
             dico_verif_secu: Dictionnaire des vérifications sécurité par fichier
+            verif_cables: Liste de dicts comparaison câbles COMAC vs BDD (feuille VERIF_CABLES)
         """
 
         dicoPotBt_Excel_Introuvable = resultatsFinaux[0]
@@ -463,6 +587,59 @@ class Comac:
                             fill_type='solid', fgColor=color_hauteur)
                     
                     ligne_secu += 1
+
+        ############################## FEUILLE 3 : VERIF_CABLES ################################################
+        if verif_cables:
+            sheet_idx = len(fichierXlsx.sheetnames)
+            feuille_cables = fichierXlsx.create_sheet("VERIF_CABLES", sheet_idx)
+            
+            green_color = openpyxl.styles.colors.Color(rgb='90EE90')
+            
+            headers_cables = [
+                "APPUI", "NB CABLES COMAC", "REFS COMAC", "CAPAS COMAC",
+                "NB CABLES BDD", "CAPAS BDD", "STATUT", "MESSAGE"
+            ]
+            for col_idx, header in enumerate(headers_cables, 1):
+                feuille_cables.cell(row=1, column=col_idx, value=header).font = openpyxl.styles.Font(bold=True)
+                feuille_cables.cell(row=1, column=col_idx).alignment = alignement
+            
+            feuille_cables.column_dimensions["A"].width = 20
+            feuille_cables.column_dimensions["B"].width = 18
+            feuille_cables.column_dimensions["C"].width = 40
+            feuille_cables.column_dimensions["D"].width = 25
+            feuille_cables.column_dimensions["E"].width = 18
+            feuille_cables.column_dimensions["F"].width = 25
+            feuille_cables.column_dimensions["G"].width = 15
+            feuille_cables.column_dimensions["H"].width = 60
+            
+            ligne_cab = 2
+            for entry in verif_cables:
+                statut = entry.get('statut', '')
+                
+                feuille_cables.cell(row=ligne_cab, column=1, value=entry.get('num_appui', ''))
+                feuille_cables.cell(row=ligne_cab, column=2, value=entry.get('nb_cables_comac', 0))
+                feuille_cables.cell(row=ligne_cab, column=3, value=entry.get('cables_comac', ''))
+                feuille_cables.cell(row=ligne_cab, column=4, value='+'.join(entry.get('capas_comac', [])))
+                feuille_cables.cell(row=ligne_cab, column=5, value=entry.get('nb_cables_bdd', 0))
+                feuille_cables.cell(row=ligne_cab, column=6, value='+'.join(str(c) for c in entry.get('capas_bdd', [])))
+                feuille_cables.cell(row=ligne_cab, column=7, value=statut)
+                feuille_cables.cell(row=ligne_cab, column=8, value=entry.get('message', ''))
+                
+                # Coloration selon statut
+                if statut == 'OK':
+                    color = green_color
+                elif statut == 'ECART':
+                    color = red_color
+                elif statut == 'ABSENT_BDD':
+                    color = orange_color
+                else:
+                    color = None
+                
+                if color:
+                    feuille_cables.cell(row=ligne_cab, column=7).fill = openpyxl.styles.PatternFill(
+                        fill_type='solid', fgColor=color)
+                
+                ligne_cab += 1
 
         if 'Sheet' in fichierXlsx.sheetnames:
             del fichierXlsx['Sheet']

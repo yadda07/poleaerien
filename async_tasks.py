@@ -14,6 +14,7 @@ THREADING SAFETY:
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
 from qgis.core import QgsTask, QgsApplication, QgsMessageLog, Qgis
 import traceback
+import random
 import sip
 
 
@@ -34,22 +35,50 @@ class TaskSignals(QObject):
 
 class SmoothProgressController(QObject):
     """
-    Smooth progress interpolation for fluid UI feedback.
-    Animates between target values instead of jumping.
+    Continuous, fluid progress bar controller.
+    
+    Design principles:
+    - NEVER freezes: always moves forward, even if very slowly
+    - Exponential easing toward targets (fast start, gradual deceleration)
+    - Asymptotic drift: speed decreases near ceiling but never reaches zero
+    - Random micro-jitter for natural, organic feel
+    - Only explicit set_target(100) can reach 100%
+    - Same public API: set_target, reset, set_immediate, set_progress_bar
     """
     
     valueChanged = pyqtSignal(int)
     
-    def __init__(self, progress_bar=None, interval_ms=30, step=2):
+    # Soft ceiling for auto-drift. Drift decelerates approaching this
+    # but never fully stops. Only set_target(>=100) completes to 100.
+    _DRIFT_CEILING = 94.0
+    
+    # Easing factor per tick toward real target.
+    _EASE_FACTOR = 0.10
+    
+    # Base drift speed range (units per tick).
+    _DRIFT_BASE_MIN = 0.05
+    _DRIFT_BASE_MAX = 0.18
+    
+    # Absolute minimum drift per tick -- guarantees bar never freezes.
+    _DRIFT_FLOOR = 0.008
+    
+    # Ticks between drift speed re-randomization.
+    _DRIFT_CHANGE_TICKS = 12
+    
+    def __init__(self, progress_bar=None, interval_ms=30, step=None):
         super().__init__()
         self._progress_bar = progress_bar
-        self._current = 0
-        self._target = 0
-        self._step = step
+        self._current = 0.0
+        self._target = 0.0
+        self._finished = False
+        self._last_int = -1
+        
+        self._drift_speed = self._random_drift()
+        self._drift_tick = 0
         
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
-        self._timer.timeout.connect(self._interpolate)
+        self._timer.timeout.connect(self._tick)
     
     def set_progress_bar(self, progress_bar):
         """Attach to a QProgressBar"""
@@ -57,39 +86,86 @@ class SmoothProgressController(QObject):
     
     def set_target(self, value):
         """Set target value, animation will interpolate to it (never regress)"""
-        new_target = max(0, min(100, value))
-        # Ne jamais régresser: garder le max entre l'ancienne et la nouvelle cible
+        new_target = max(0.0, min(100.0, float(value)))
         self._target = max(self._target, new_target)
+        if new_target >= 100.0:
+            self._finished = True
         if not self._timer.isActive():
             self._timer.start()
     
     def set_immediate(self, value):
         """Set value immediately without animation"""
-        self._current = value
-        self._target = value
+        self._current = float(value)
+        self._target = float(value)
+        if value >= 100:
+            self._finished = True
         self._update_bar()
     
     def reset(self):
         """Reset to 0"""
         self._timer.stop()
-        self._current = 0
-        self._target = 0
+        self._current = 0.0
+        self._target = 0.0
+        self._finished = False
+        self._last_int = -1
+        self._drift_speed = self._random_drift()
+        self._drift_tick = 0
         self._update_bar()
     
-    def _interpolate(self):
-        """Smooth interpolation step (only forward, never regress)"""
-        if self._current < self._target:
-            self._current = min(self._current + self._step, self._target)
+    def _tick(self):
+        """Main animation tick -- ALWAYS moves forward, NEVER freezes."""
+        if self._finished and self._current >= 100.0:
+            self._current = 100.0
             self._update_bar()
-        # Ne jamais régresser: ignorer si current > target
-        if self._current >= self._target and self._target >= 100:
             self._timer.stop()
+            return
+        
+        # Phase 1: Ease toward real target (exponential deceleration)
+        gap = self._target - self._current
+        if gap > 0.05:
+            step = max(gap * self._EASE_FACTOR, 0.08)
+            self._current += step
+        elif gap > 0:
+            self._current = self._target
+        
+        # Phase 2: Continuous drift -- ALWAYS active when not finished.
+        # Speed scales down as we approach the ceiling, but never zero.
+        if not self._finished:
+            ceiling = self._DRIFT_CEILING
+            room = max(ceiling - self._current, 0.0)
+            # Ratio 1.0 = far from ceiling, 0.0 = at ceiling
+            ratio = min(room / 30.0, 1.0)
+            # Scale drift speed by ratio, but floor guarantees movement
+            effective_drift = max(
+                self._drift_speed * ratio,
+                self._DRIFT_FLOOR
+            )
+            self._current += effective_drift
+            # Hard cap: never exceed ceiling via drift alone
+            if self._current > ceiling and self._target < ceiling:
+                self._current = ceiling
+            
+            # Re-randomize drift speed periodically for organic feel
+            self._drift_tick += 1
+            if self._drift_tick >= self._DRIFT_CHANGE_TICKS:
+                self._drift_speed = self._random_drift()
+                self._drift_tick = 0
+        
+        self._current = min(self._current, 100.0)
+        self._update_bar()
+    
+    def _random_drift(self):
+        """Generate a random drift speed for organic feel."""
+        return random.uniform(self._DRIFT_BASE_MIN, self._DRIFT_BASE_MAX)
     
     def _update_bar(self):
-        """Update progress bar and emit signal"""
-        if self._progress_bar:
-            self._progress_bar.setValue(int(self._current))
-        self.valueChanged.emit(int(self._current))
+        """Update progress bar and emit signal (only on integer change)"""
+        int_val = int(self._current)
+        if int_val != self._last_int:
+            self._last_int = int_val
+            if self._progress_bar:
+                self._progress_bar.setValue(int_val)
+            self.valueChanged.emit(int_val)
 
 
 class AsyncTaskBase(QgsTask):
@@ -220,8 +296,7 @@ class CapFtTask(AsyncTaskBase):
             return True
         
         if hors_etude:
-            self.result = {'error_type': 'hors_etude', 'data': hors_etude}
-            return True
+            self.emit_message(f"ATTENTION: {len(hors_etude)} poteaux hors perimetre etude", "orange")
         
         self.emit_progress(15)
         self.emit_message("Donnees QGIS chargees...", "grey")
@@ -263,6 +338,7 @@ class CapFtTask(AsyncTaskBase):
             'dico_qgis': dico_qgis,
             'dico_poteaux_prives': dico_poteaux_prives,
             'dico_excel': dico_excel,
+            'hors_etude': hors_etude,
             'pending_export': True
         }
         return True
@@ -305,8 +381,7 @@ class ComacTask(AsyncTaskBase):
             return True
         
         if hors_etude:
-            self.result = {'error_type': 'hors_etude', 'data': hors_etude}
-            return True
+            self.emit_message(f"ATTENTION: {len(hors_etude)} poteaux hors perimetre etude", "orange")
         
         self.emit_progress(15)
         self.emit_message("Donnees QGIS chargees...", "grey")
@@ -323,7 +398,7 @@ class ComacTask(AsyncTaskBase):
         # Lecture Excel - thread-safe (pas d'appel QGIS)
         from .Comac import Comac
         com = Comac()
-        doublons, erreurs_lecture, dico_excel, dico_verif_secu = com.LectureFichiersExcelsComac(
+        doublons, erreurs_lecture, dico_excel, dico_verif_secu, dico_cables_comac = com.LectureFichiersExcelsComac(
             self.params['chemin_comac'],
             self.params.get('zone_climatique', 'ZVN')
         )
@@ -342,7 +417,7 @@ class ComacTask(AsyncTaskBase):
         if self.isCanceled():
             return False
         
-        self.emit_progress(60)
+        self.emit_progress(55)
         self.emit_message("Comparaison donnees...", "grey")
         
         # Traitement pur - thread-safe
@@ -350,6 +425,92 @@ class ComacTask(AsyncTaskBase):
         
         if self.isCanceled():
             return False
+        
+        # === Vérification câbles COMAC vs BDD ===
+        verif_cables = []
+        cables_all_for_cache = None
+        sro = self.params.get('sro')
+        
+        if sro and dico_cables_comac:
+            self.emit_progress(65)
+            
+            try:
+                from .db_connection import DatabaseConnection
+                from .cable_analyzer import compter_cables_par_appui
+                from qgis.core import QgsGeometry
+                
+                # Désérialiser WKB → QgsGeometry (thread-safe)
+                appuis_data = []
+                for appui in self.qgis_data.get('appuis', []):
+                    geom = None
+                    wkb = appui.get('geom_wkb')
+                    if wkb:
+                        geom = QgsGeometry()
+                        geom.fromWkb(wkb)
+                    appuis_data.append({
+                        'num_appui': appui.get('num_appui', ''),
+                        'feature_id': appui.get('feature_id'),
+                        'geom': geom
+                    })
+                
+                # Utiliser le cache fddcpi2 si disponible (batch multi-modules)
+                cables_all = self.params.get('fddcpi_cables_cache')
+                if cables_all is not None:
+                    self.emit_message(
+                        f"Vérif câbles: fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
+                        "grey"
+                    )
+                else:
+                    self.emit_message(f"Vérif câbles: connexion PostgreSQL fddcpi2({sro})...", "grey")
+                    db = DatabaseConnection()
+                    if db.connect():
+                        cables_all = db.execute_fddcpi2(sro)
+                        db.disconnect()
+                    else:
+                        cables_all = None
+                        self.emit_message("Vérif câbles: connexion PostgreSQL impossible", "orange")
+                
+                if cables_all is not None:
+                    cables_all_for_cache = cables_all
+                    cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+                    
+                    nb_exclu = len(cables_all) - len(cables)
+                    self.emit_message(
+                        f"  {len(cables)} câbles CDI aériens/façade ({nb_exclu} exclus sur {len(cables_all)})",
+                        "blue"
+                    )
+                    
+                    if self.isCanceled():
+                        return False
+                    
+                    self.emit_progress(75)
+                    self.emit_message("Vérif câbles: intersection appuis...", "grey")
+                    
+                    # Compter câbles par appui
+                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=0.5)
+                    
+                    self.emit_progress(85)
+                    self.emit_message(
+                        f"Vérif câbles: comparaison {len(dico_cables_comac)} appuis COMAC...",
+                        "grey"
+                    )
+                    
+                    # Comparer COMAC vs BDD
+                    verif_cables = com.comparer_comac_cables(dico_cables_comac, cables_par_appui)
+                    
+                    nb_ok = sum(1 for v in verif_cables if v['statut'] == 'OK')
+                    nb_ecart = sum(1 for v in verif_cables if v['statut'] == 'ECART')
+                    nb_absent = sum(1 for v in verif_cables if v['statut'] == 'ABSENT_BDD')
+                    self.emit_message(
+                        f"  Vérif câbles: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents BDD",
+                        "green" if nb_ecart == 0 else "orange"
+                    )
+            except Exception as e:
+                self.emit_message(f"Vérif câbles: erreur {e}", "orange")
+        elif not sro:
+            self.emit_message("Vérif câbles: SRO non disponible, étape ignorée", "grey")
+        elif not dico_cables_comac:
+            self.emit_message("Vérif câbles: aucune référence câble dans col AO, étape ignorée", "grey")
         
         self.emit_progress(90)
         
@@ -363,7 +524,11 @@ class ComacTask(AsyncTaskBase):
             'dico_poteaux_prives': dico_poteaux_prives,
             'dico_excel': dico_excel,
             'dico_verif_secu': dico_verif_secu,
-            'pending_export': True
+            'verif_cables': verif_cables,
+            'hors_etude': hors_etude,
+            'pending_export': True,
+            'fddcpi_cables_all': cables_all_for_cache,
+            'fddcpi_sro': sro,
         }
         return True
 
@@ -602,17 +767,25 @@ class PoliceC6Task(AsyncTaskBase):
         if self.isCanceled():
             return False
         
-        # 1. Connexion PostgreSQL et récupération câbles via DatabaseConnection
+        # 1. Récupération câbles via cache ou DatabaseConnection
         self.emit_progress(10)
-        self.emit_message(f"Connexion PostgreSQL et appel fddcpi2({sro})...", "grey")
         
         try:
-            db = DatabaseConnection()
-            if not db.connect():
-                self.result = {'error': 'Connexion PostgreSQL impossible'}
-                return True
-            
-            cables_all = db.execute_fddcpi2(sro)
+            # Utiliser le cache fddcpi2 si disponible (batch multi-modules)
+            cables_all = self.params.get('fddcpi_cables_cache')
+            if cables_all is not None:
+                self.emit_message(
+                    f"fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
+                    "grey"
+                )
+            else:
+                self.emit_message(f"Connexion PostgreSQL et appel fddcpi2({sro})...", "grey")
+                db = DatabaseConnection()
+                if not db.connect():
+                    self.result = {'error': 'Connexion PostgreSQL impossible'}
+                    return True
+                cables_all = db.execute_fddcpi2(sro)
+                db.disconnect()
             
             # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
             cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
@@ -624,8 +797,13 @@ class PoliceC6Task(AsyncTaskBase):
             )
             
             # Récupérer les BPE du SRO pour vérification boîtier
-            bpe_list = db.query_bpe_by_sro(sro)
-            db.disconnect()
+            db_bpe = DatabaseConnection()
+            if db_bpe.connect():
+                bpe_list = db_bpe.query_bpe_by_sro(sro)
+                db_bpe.disconnect()
+            else:
+                bpe_list = []
+                self.emit_message("  BPE: connexion PostgreSQL impossible", "orange")
             
             # Préparer géométries BPE pour matching spatial
             bpe_geoms = []
@@ -744,7 +922,7 @@ class PoliceC6Task(AsyncTaskBase):
             self.emit_message("Export Excel...", "grey")
             try:
                 excel_file = self._export_excel(stats_globales, export_path)
-                self.emit_message(f"✓ Export: {os.path.basename(excel_file)}", "green")
+                self.emit_message(f"Export: {os.path.basename(excel_file)}", "green")
             except Exception as e:
                 self.emit_message(f"[!] Erreur export: {e}", "orange")
         
@@ -770,7 +948,9 @@ class PoliceC6Task(AsyncTaskBase):
             'total_etudes': len(c6_files),
             'etudes_traitees': len(stats_globales),
             'cables': cables_for_layer,
-            'sro': sro
+            'sro': sro,
+            'fddcpi_cables_all': cables_all,
+            'fddcpi_sro': sro,
         }
         return True
     

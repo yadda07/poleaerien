@@ -8,6 +8,7 @@ from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog
 from ..CapFt import CapFt
 from ..async_tasks import CapFtTask, ExcelExportTask, run_async_task
+from ..core_utils import build_export_path
 import os
 import copy
 
@@ -52,13 +53,7 @@ class CapFtWorkflow(QObject):
             self.error_occurred.emit("Répertoire CAP_FT invalide")
             return
 
-        # Construire chemin fichier export (avec extension .xlsx)
-        if os.path.isdir(chemin_export):
-            fichier_export = os.path.join(chemin_export, "analyse_cap_ft.xlsx")
-        elif not chemin_export.endswith('.xlsx'):
-            fichier_export = chemin_export + ".xlsx"
-        else:
-            fichier_export = chemin_export
+        fichier_export = build_export_path(chemin_export, "analyse_cap_ft.xlsx")
 
         # 1. Extraction des données (Main Thread)
         try:

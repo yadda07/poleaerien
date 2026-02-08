@@ -19,9 +19,11 @@ from ..db_connection import extract_sro_from_layer
 from ..cable_analyzer import extraire_appuis_from_layer
 from ..qgis_utils import get_layer_safe
 from ..async_tasks import PoliceC6Task, run_async_task
+from ..core_utils import is_plugin_output_file
 import os
 import glob
 from datetime import datetime
+
 
 class PoliceWorkflow(QObject):
     """
@@ -133,6 +135,8 @@ class PoliceWorkflow(QObject):
             os.path.join(repertoire_c6, "**", f"{nom_etude}.xlsx"),
             # Fichier direct avec nom étude
             os.path.join(repertoire_c6, f"*{nom_etude}*.xlsx"),
+            # Dernier recours: n'importe quel xlsx dans le dossier etude
+            os.path.join(repertoire_c6, "**", nom_etude, "*.xlsx"),
         ]
         
         for pattern in patterns:
@@ -140,8 +144,7 @@ class PoliceWorkflow(QObject):
             matches = glob.glob(pattern, recursive=True)
             # Filtrer les fichiers non-C6 (FicheAppui, C7, GESPOT)
             for match in matches:
-                fname = os.path.basename(match).lower()
-                if 'ficheappui' in fname or 'c7' in fname or 'gespot' in fname:
+                if is_plugin_output_file(os.path.basename(match)):
                     continue
                 return match
         
@@ -207,7 +210,7 @@ class PoliceWorkflow(QObject):
             # Fallback: scanner les fichiers C6 directement
             self.message_received.emit("Scan des fichiers C6...", "grey")
             c6_files = glob.glob(os.path.join(repertoire_c6, "**", "*C6*.xlsx"), recursive=True)
-            c6_files = [f for f in c6_files if 'ficheappui' not in f.lower() and 'c7' not in f.lower()]
+            c6_files = [f for f in c6_files if not is_plugin_output_file(os.path.basename(f))]
             etudes = [os.path.splitext(os.path.basename(f))[0] for f in c6_files]
         
         if not etudes:
@@ -264,7 +267,8 @@ class PoliceWorkflow(QObject):
         task_params = {
             'c6_files': c6_files_list,
             'sro': sro,
-            'export_path': export_path
+            'export_path': export_path,
+            'fddcpi_cables_cache': params.get('fddcpi_cables_cache'),
         }
         
         qgis_data = {
@@ -313,7 +317,7 @@ class PoliceWorkflow(QObject):
         
         # Message récapitulatif
         stats = result.get('stats', [])
-        self.message_received.emit(f"✓ Analyse terminée: {len(stats)} études traitées", "green")
+        self.message_received.emit(f"Analyse terminée: {len(stats)} études traitées", "green")
     
     def _load_cables_layer(self, cables, sro):
         """Charge les câbles fddcpi2 comme couche temporaire dans QGIS."""
@@ -381,202 +385,10 @@ class PoliceWorkflow(QObject):
             layer.triggerRepaint()
         
         self.message_received.emit(
-            f"✓ Couche '{layer.name()}' chargée: {len(features)} câbles découpés",
+            f"Couche '{layer.name()}' chargée: {len(features)} câbles découpés",
             "green"
         )
     
-    def run_analysis_auto_browse_sync(self, params):
-        """
-        ANCIENNE VERSION SYNCHRONE - Conservée pour compatibilité.
-        Utiliser run_analysis_auto_browse pour la version async.
-        """
-        self._cancelled = False
-        repertoire_c6 = params.get('repertoire_c6', '')
-        table_etude = params['table_etude']
-        colonne_etude = params['colonne_etude']
-        
-        etudes = self.get_etudes_from_layer(table_etude, colonne_etude)
-        if not etudes:
-            self.error_occurred.emit("Aucune étude trouvée dans la couche")
-            return
-        
-        self.message_received.emit(f"Parcours de {len(etudes)} études...", "blue")
-        self.progress_changed.emit(5)
-        
-        etudes_sans_c6 = []
-        etudes_traitees = 0
-        stats_globales = []
-        
-        from qgis.PyQt.QtWidgets import QApplication
-        
-        for i, etude in enumerate(etudes):
-            # Vérifier annulation
-            QApplication.processEvents()
-            if self._cancelled:
-                self.message_received.emit("Traitement annulé par l'utilisateur", "orange")
-                break
-            
-            progress = 5 + int((i / len(etudes)) * 90)
-            self.progress_changed.emit(progress)
-            
-            # Trouver le fichier C6
-            c6_file = self.find_c6_file(repertoire_c6, etude)
-            
-            if not c6_file:
-                etudes_sans_c6.append(etude)
-                self.message_received.emit(f"[!] {etude}: Fichier C6 introuvable", "orange")
-                continue
-            
-            self.message_received.emit(f"[>] {etude}: {os.path.basename(c6_file)}", "blue")
-            
-            # Préparer les params pour cette étude
-            etude_params = params.copy()
-            etude_params['fname'] = c6_file
-            etude_params['filterValeur'] = etude
-            
-            # Lancer l'analyse pour cette étude
-            try:
-                self.police_logic._reset_state()
-                self._run_single_analysis(etude_params)
-                etudes_traitees += 1
-                # Collecter stats pour tableau récap + données détaillées pour export
-                # SENS CORRECT: C6 → QGIS (ce qui est dans C6 mais pas dans QGIS)
-                cables_c6_absents = getattr(self.police_logic, 'cables_c6_absents_qgis', [])
-                stats_globales.append({
-                    'etude': etude,
-                    'appuis_ok': self.police_logic.nb_appui_corresp,
-                    'appuis_c6_manq': self.police_logic.nb_appui_absentPot,  # Appuis C6 absents de QGIS
-                    'appuis_qgis_manq': self.police_logic.nb_appui_absent,   # Pour info seulement
-                    'bpe_ok': self.police_logic.nb_pbo_corresp,
-                    'bpe_anom': len(self.police_logic.ebp_non_appui) + len(self.police_logic.ebp_appui_inconnu),
-                    'cables_ok': getattr(self.police_logic, 'cable_corresp', 0),
-                    'cables_c6_manq': len(cables_c6_absents),  # Câbles C6 absents de QGIS (sens correct)
-                    'rac_exclus': getattr(self.police_logic, 'cables_rac_exclus', 0),
-                    # Données détaillées pour export Excel - SENS C6 → QGIS
-                    'detail_appuis_c6_manq': list(self.police_logic.absence),  # Appuis C6 absents de QGIS
-                    'detail_appuis_qgis_manq': list(getattr(self.police_logic, 'idPotAbsent', [])),
-                    'detail_bpe_non_appui': list(self.police_logic.ebp_non_appui),
-                    'detail_bpe_appui_inconnu': list(self.police_logic.ebp_appui_inconnu),
-                    'detail_cables_c6_absents': list(cables_c6_absents)  # Câbles C6 absents de QGIS
-                })
-            except PoliceC6Cancelled:
-                self._cancelled = True
-                self.message_received.emit("Traitement annulé par l'utilisateur", "orange")
-                break
-            except Exception as e:
-                self.message_received.emit(f"[X] {etude}: Erreur - {e}", "red")
-                QgsMessageLog.logMessage(f"Erreur analyse {etude}: {e}", "PoleAerien", Qgis.Warning)
-        
-        # 3. Rapport final avec tableau récapitulatif compact
-        self.progress_changed.emit(100)
-        
-        # Construire tableau récapitulatif bien formaté
-        # SENS: C6 → QGIS (anomalies = ce qui est dans C6 mais pas dans QGIS)
-        totaux = {'appuis_ok': 0, 'c6_manq': 0, 'qg_manq': 0, 'bpe_ok': 0, 'bpe_anom': 0, 'cables_ok': 0, 'cables_c6_manq': 0, 'rac_exclus': 0}
-        lignes = []
-        
-        for s in stats_globales:
-            # Extraire numéro court de l'étude (ex: "FTTH-NGE-ETUDE-B1L-63041-14" -> "14")
-            etude_short = s['etude'].split('-')[-1] if '-' in s['etude'] else s['etude'][:8]
-            lignes.append({
-                'etude': etude_short,
-                'appuis_ok': s['appuis_ok'],
-                'c6_manq': s['appuis_c6_manq'],  # Appuis C6 absents de QGIS
-                'qg_manq': s['appuis_qgis_manq'],
-                'bpe_ok': s['bpe_ok'],
-                'bpe_anom': s['bpe_anom'],
-                'cables_ok': s['cables_ok'],
-                'cables_c6_manq': s.get('cables_c6_manq', 0)  # Câbles C6 absents de QGIS
-            })
-            totaux['appuis_ok'] += s['appuis_ok']
-            totaux['c6_manq'] += s['appuis_c6_manq']
-            totaux['qg_manq'] += s['appuis_qgis_manq']
-            totaux['bpe_ok'] += s['bpe_ok']
-            totaux['bpe_anom'] += s['bpe_anom']
-            totaux['cables_ok'] += s['cables_ok']
-            totaux['cables_c6_manq'] += s.get('cables_c6_manq', 0)
-            totaux['rac_exclus'] += s.get('rac_exclus', 0)
-        
-        # Afficher récapitulatif en tableau HTML (comme MAJ BD)
-        # Termes clairs:
-        # - Appuis C6∩QGIS = présents dans les deux
-        # - Absents QGIS = dans C6 mais pas dans QGIS  
-        # - Absents C6 = dans QGIS mais pas dans C6
-        # - Boîtes OK = correspondance PBO trouvée
-        # - Boîtes Ano = EBP sans appui ou appui inconnu
-        # - Câbles OK = triplet appui-câble-appui trouvé
-        # - Câbles Ano = câbles QGIS non trouvés dans C6
-        html = '<p><b style="color:#6366f1">RECAP POLICE C6</b></p>'
-        html += '<table cellspacing="0" cellpadding="3" style="font-size:9pt;border-collapse:collapse">'
-        
-        # En-têtes avec termes clairs
-        html += '<tr style="background:#6366f1;color:#fff">'
-        html += '<th style="padding:4px 8px">Etude</th>'
-        html += '<th style="padding:4px 8px" title="Appuis présents dans C6 ET QGIS">Appuis OK</th>'
-        html += '<th style="padding:4px 8px" title="Appuis dans C6 mais absents de QGIS">Abs. QGIS</th>'
-        html += '<th style="padding:4px 8px" title="Appuis dans QGIS mais absents de C6">Abs. C6</th>'
-        html += '<th style="padding:4px 8px" title="Boîtes (PBO) avec correspondance">Boîtes OK</th>'
-        html += '<th style="padding:4px 8px" title="EBP sans appui ou appui inconnu">Boîtes Ano</th>'
-        html += '<th style="padding:4px 8px" title="Triplets Appui-Câble-Appui trouvés">Câbles OK</th>'
-        html += '<th style="padding:4px 8px" title="Câbles C6 absents de QGIS/GraceTHD">Câbles C6 Manq</th>'
-        html += '</tr>'
-        
-        # Lignes de données
-        for row in lignes:
-            has_anomaly = (row['c6_manq'] > 0 or row['bpe_anom'] > 0 or row['cables_c6_manq'] > 0)
-            bg = '#fee2e2' if has_anomaly else '#dcfce7'  # Rouge clair ou vert clair
-            html += f'<tr style="background:{bg}">'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0"><b>{row["etude"]}</b></td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["appuis_ok"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["c6_manq"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["qg_manq"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["bpe_ok"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["bpe_anom"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["cables_ok"]}</td>'
-            html += f'<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">{row["cables_c6_manq"]}</td>'
-            html += '</tr>'
-        
-        # Ligne totaux
-        html += '<tr style="background:#6366f1;color:#fff;font-weight:bold">'
-        html += '<td style="padding:3px 6px">TOTAL</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["appuis_ok"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["c6_manq"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["qg_manq"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["bpe_ok"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["bpe_anom"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["cables_ok"]}</td>'
-        html += f'<td style="padding:3px 6px;text-align:center">{totaux["cables_c6_manq"]}</td>'
-        html += '</tr>'
-        html += '</table>'
-        
-        # Émettre le tableau HTML
-        self.message_received.emit(html, "html")
-        
-        # Info sur les câbles RAC exclus
-        if totaux['rac_exclus'] > 0:
-            self.message_received.emit(f"<p style='color:#64748b;font-size:9pt'>Note: {totaux['rac_exclus']} câbles RAC exclus (non présents dans Annexe C6)</p>", "html")
-        
-        self.message_received.emit(f"Etudes traitees: {etudes_traitees}/{len(etudes)}", "green" if etudes_traitees > 0 else "orange")
-        
-        if etudes_sans_c6:
-            self.message_received.emit(f"Etudes sans C6: {', '.join(etudes_sans_c6)}", "orange")
-        
-        # Export Excel si chemin fourni
-        export_path = params.get('export_path')
-        if export_path and stats_globales:
-            excel_file = self._export_to_excel(export_path, stats_globales, totaux)
-            if excel_file:
-                self.message_received.emit(f"<p style='color:#22c55e;font-weight:bold'>✓ Export Excel: {os.path.basename(excel_file)}</p>", "html")
-        
-        # Émettre le résultat final
-        result = {
-            'success': True,
-            'mode': 'auto_browse',
-            'etudes_traitees': etudes_traitees,
-            'etudes_sans_c6': etudes_sans_c6
-        }
-        self.analysis_finished.emit(result)
-
     def _run_single_analysis(self, params):
         """
         Exécute l'analyse pour une seule étude.

@@ -15,6 +15,11 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
 try:
+    from .core_utils import safe_float, parse_bool, get_xml_text, get_xml_float
+except ImportError:
+    from core_utils import safe_float, parse_bool, get_xml_text, get_xml_float
+
+try:
     from qgis.core import QgsMessageLog, Qgis
     HAS_QGIS = True
 except ImportError:
@@ -27,7 +32,6 @@ try:
         verifier_portee,
         verifier_distance_sol,
         PORTEES_MAX_ZVN,
-        PORTEES_MAX_ZVF
     )
 except ImportError as e:
     # Standalone mode (testing outside QGIS plugin context)
@@ -37,7 +41,6 @@ except ImportError as e:
             verifier_portee,
             verifier_distance_sol,
             PORTEES_MAX_ZVN,
-            PORTEES_MAX_ZVF
         )
     except ImportError:
         raise ImportError(f"security_rules module not found: {e}") from e
@@ -125,38 +128,12 @@ class EtudePCM:
 
 
 # =============================================================================
-# FONCTIONS UTILITAIRES
+# FONCTIONS UTILITAIRES (safe_float, parse_bool, get_xml_text, get_xml_float importés de core_utils)
 # =============================================================================
-
-def _parse_float(value: str, default: float = 0.0) -> float:
-    """Parse float avec virgule française"""
-    if not value:
-        return default
-    try:
-        return float(str(value).replace(',', '.').strip())
-    except (ValueError, AttributeError):
-        return default
-
-
-def _parse_bool(value: str) -> bool:
-    """Parse booléen (0/1)"""
-    return str(value).strip() == '1'
-
-
-def _get_text(element, tag: str, default: str = "") -> str:
-    """Extrait texte d'un sous-élément"""
-    child = element.find(tag)
-    return child.text.strip() if child is not None and child.text else default
-
-
-def _get_float(element, tag: str, default: float = 0.0) -> float:
-    """Extrait float d'un sous-élément"""
-    return _parse_float(_get_text(element, tag), default)
-
 
 def _get_bool(element, tag: str) -> bool:
     """Extrait booléen d'un sous-élément"""
-    return _parse_bool(_get_text(element, tag))
+    return parse_bool(get_xml_text(element, tag))
 
 
 # =============================================================================
@@ -185,9 +162,9 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
         root = tree.getroot()
         
         # Métadonnées
-        etude.num_etude = _get_text(root, 'NumEtude')
-        etude.version = _get_text(root, 'Version')
-        etude.commune = _get_text(root, 'Commune')
+        etude.num_etude = get_xml_text(root, 'NumEtude')
+        etude.version = get_xml_text(root, 'Version')
+        etude.commune = get_xml_text(root, 'Commune')
         
         # Hypothèses climatiques
         hypotheses_elem = root.find('Hypotheses')
@@ -207,10 +184,10 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
         
     except ET.ParseError as e:
         etude.erreurs_parse.append(f"Erreur XML: {e}")
-        QgsMessageLog.logMessage(f"Erreur parse {filepath}: {e}", "PCM_PARSER", Qgis.Critical)
+        _log_message(f"Erreur parse {filepath}: {e}", "PCM_PARSER", 2)
     except Exception as e:
         etude.erreurs_parse.append(f"Erreur: {e}")
-        QgsMessageLog.logMessage(f"Erreur {filepath}: {e}", "PCM_PARSER", Qgis.Critical)
+        _log_message(f"Erreur {filepath}: {e}", "PCM_PARSER", 2)
     
     return etude
 
@@ -222,24 +199,24 @@ def _parse_supports(root: ET.Element, etude: EtudePCM):
         return
     
     for supp_elem in supports_elem.findall('Support'):
-        nom = _get_text(supp_elem, 'Nom')
+        nom = get_xml_text(supp_elem, 'Nom')
         if not nom:
             continue
         
         support = Support(
             nom=nom,
-            nature=_get_text(supp_elem, 'Nature'),
-            hauteur=_get_float(supp_elem, 'Hauteur'),
-            classe=_get_text(supp_elem, 'Classe'),
-            effort=_get_float(supp_elem, 'Effort'),
-            traverse_existante=_get_float(supp_elem, 'TraverseExistante1'),
-            traverse_a_poser=_get_float(supp_elem, 'TraverseAPoser2'),
+            nature=get_xml_text(supp_elem, 'Nature'),
+            hauteur=get_xml_float(supp_elem, 'Hauteur'),
+            classe=get_xml_text(supp_elem, 'Classe'),
+            effort=get_xml_float(supp_elem, 'Effort'),
+            traverse_existante=get_xml_float(supp_elem, 'TraverseExistante1'),
+            traverse_a_poser=get_xml_float(supp_elem, 'TraverseAPoser2'),
             portee_molle=_get_bool(supp_elem, 'PorteeMolle'),
             non_calcule=_get_bool(supp_elem, 'NonCalcule'),
             illisible=_get_bool(supp_elem, 'Illisible'),
-            x=_get_float(supp_elem, 'X'),
-            y=_get_float(supp_elem, 'Y'),
-            etat=_get_text(supp_elem, 'Etat')
+            x=get_xml_float(supp_elem, 'X'),
+            y=get_xml_float(supp_elem, 'Y'),
+            etat=get_xml_text(supp_elem, 'Etat')
         )
         etude.supports[nom] = support
 
@@ -260,7 +237,7 @@ def _parse_lignes_tcf(root: ET.Element, etude: EtudePCM):
         print(f"[PCM_CAPA] Etude {etude.num_etude}: {nb_lignes} lignes TCF trouvées")
     
     for idx, ligne_elem in enumerate(tcf_elem.findall('LigneTCF')):
-        cable = _get_text(ligne_elem, 'Cable')
+        cable = get_xml_text(ligne_elem, 'Cable')
         capacite = get_capacite_fo_from_code(cable, debug=_DEBUG_COMAC_CAPA)
         
         if _DEBUG_COMAC_CAPA:
@@ -288,7 +265,7 @@ def _parse_lignes_tcf(root: ET.Element, etude: EtudePCM):
         if portees_elem is not None:
             for portee_elem in portees_elem.findall('Portee'):
                 if portee_elem.text:
-                    ligne.portees.append(_parse_float(portee_elem.text))
+                    ligne.portees.append(safe_float(portee_elem.text))
         
         # Portée max selon capacité
         if capacite > 0:
@@ -305,7 +282,7 @@ def _parse_lignes_bt(root: ET.Element, etude: EtudePCM):
     
     for ligne_elem in bt_elem.findall('LigneBT'):
         ligne = LigneBT(
-            conducteur=_get_text(ligne_elem, 'Conducteur')
+            conducteur=get_xml_text(ligne_elem, 'Conducteur')
         )
         
         # Supports
@@ -320,7 +297,7 @@ def _parse_lignes_bt(root: ET.Element, etude: EtudePCM):
         if portees_elem is not None:
             for portee_elem in portees_elem.findall('Portee'):
                 if portee_elem.text:
-                    ligne.portees.append(_parse_float(portee_elem.text))
+                    ligne.portees.append(safe_float(portee_elem.text))
         
         etude.lignes_bt.append(ligne)
 

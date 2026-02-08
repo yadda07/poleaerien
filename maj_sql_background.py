@@ -20,8 +20,6 @@ from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 from qgis.core import (
     Qgis, QgsTask, QgsMessageLog, QgsDataSourceUri, QgsProject
 )
-import pandas as pd
-
 
 class MajSqlSignals(QObject):
     """Signaux pour communication avec le main thread."""
@@ -55,6 +53,9 @@ class MajSqlBackgroundTask(QgsTask):
         self.signals = MajSqlSignals()
         self.exception = None
         self.result = {'ft_updated': 0, 'bt_updated': 0, 'gids_pot_ac': []}
+        self._existing_columns = set()
+        self._skipped_ft = []
+        self._skipped_bt = []
     
     def run(self):
         """Exécute les MAJ SQL en background (worker thread)."""
@@ -78,6 +79,16 @@ class MajSqlBackgroundTask(QgsTask):
             
             # Récupérer les colonnes existantes dans la table
             self._existing_columns = self._get_table_columns(db, schema, table)
+            self._skipped_ft = []
+            self._skipped_bt = []
+            QgsMessageLog.logMessage(
+                f"[MAJ-SQL-BG] Table: {schema}.{table} ({len(self._existing_columns)} colonnes). "
+                f"inf_num={'OUI' if 'inf_num' in self._existing_columns else 'NON'}, "
+                f"commentair={'OUI' if 'commentair' in self._existing_columns else 'NON'}, "
+                f"dce={'OUI' if 'dce' in self._existing_columns else 'NON'}, "
+                f"etat={'OUI' if 'etat' in self._existing_columns else 'NON'}",
+                "PoleAerien", Qgis.Info
+            )
             
             try:
                 # Démarrer transaction
@@ -106,11 +117,15 @@ class MajSqlBackgroundTask(QgsTask):
                     raise RuntimeError(f"Commit échoué: {db.lastError().text()}")
                 
                 t1 = time.perf_counter()
-                QgsMessageLog.logMessage(
-                    f"[MAJ-SQL-BG] Terminé: {self.result['ft_updated']} FT, "
-                    f"{self.result['bt_updated']} BT en {t1-t0:.1f}s",
-                    "PoleAerien", Qgis.Info
-                )
+                skipped_total = len(self._skipped_ft) + len(self._skipped_bt)
+                msg = (f"[MAJ-SQL-BG] Terminé: {self.result['ft_updated']} FT, "
+                       f"{self.result['bt_updated']} BT en {t1-t0:.1f}s")
+                if skipped_total:
+                    msg += f" ({skipped_total} ligne(s) ignorée(s))"
+                QgsMessageLog.logMessage(msg, "PoleAerien", Qgis.Info)
+                
+                self.result['skipped_ft'] = self._skipped_ft
+                self.result['skipped_bt'] = self._skipped_bt
                 
             finally:
                 db.close()
@@ -125,181 +140,301 @@ class MajSqlBackgroundTask(QgsTask):
             )
             return False
     
+    def _exec_sp(self, db, sql):
+        """Execute a SQL statement reliably (persistent QSqlQuery, checked)."""
+        q = QSqlQuery(db)
+        ok = q.exec_(sql)
+        if not ok:
+            err = q.lastError().text()
+            QgsMessageLog.logMessage(
+                f"[MAJ-SQL-BG] _exec_sp failed: {sql[:60]}... => {err}",
+                "PoleAerien", Qgis.Warning
+            )
+        return ok
+
     def _update_ft_sql(self, db, schema, table):
         """Exécute les UPDATE SQL pour les FT."""
         total = len(self.data_ft)
         count = 0
+        updated = 0
         gids_pot_ac = []
         
         for gid, row in self.data_ft.iterrows():
             if self.isCanceled():
-                return count
+                break
             
             count += 1
-            action = str(row.get("action", "")).upper()
+            sp_name = f"sp_ft_{count}"
             
-            # Récupérer les valeurs actuelles (inf_num, commentair) pour concaténation
-            current_inf_num = ""
-            current_comment = ""
-            select_sql = f'SELECT inf_num, commentair FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
-            select_query = QSqlQuery(db)
-            if select_query.exec_(select_sql) and select_query.next():
-                current_inf_num = select_query.value(0) or ""
-                current_comment = select_query.value(1) or ""
+            # SAVEPOINT avant toute opération pour cette ligne
+            self._exec_sp(db, f"SAVEPOINT {sp_name}")
             
-            # Construire la requête UPDATE
-            updates = []
-            
-            if action == "IMPLANTATION":
-                updates.append("etat = 'FT KO'")
-                updates.append("inf_propri = 'RAUV'")
-                updates.append("inf_type = 'POT-AC'")
-                updates.append("dce = 'O'")
-                if row.get("inf_mat_replace"):
-                    mat = self._escape_sql(row["inf_mat_replace"])
-                    updates.append(f"inf_mat = '{mat}'")
-                # Sauvegarder ancien inf_num dans nommage_fibees avant de le vider
-                if current_inf_num and self._column_exists("nommage_fibees"):
-                    ancien_num = self._escape_sql(current_inf_num)
-                    updates.append(f"nommage_fibees = '{ancien_num}'")
-                gids_pot_ac.append(int(gid))
-            else:
-                if row.get("etat"):
-                    etat = self._escape_sql(row["etat"])
-                    updates.append(f"etat = '{etat}'")
-                if row.get("inf_mat_replace"):
-                    mat = self._escape_sql(row["inf_mat_replace"])
-                    updates.append(f"inf_mat = '{mat}'")
-                updates.append("dce = 'O'")
-            
-            if row.get("etiquette_jaune") and self._column_exists("etiquette_jaune"):
-                val = self._escape_sql(row["etiquette_jaune"])
-                updates.append(f"etiquette_jaune = '{val}'")
-            
-            if row.get("etiquette_orange") and self._column_exists("etiquette_orange"):
-                val = self._escape_sql(row["etiquette_orange"])
-                updates.append(f"etiquette_orange = '{val}'")
-            
-            if row.get("transition_aerosout") and self._column_exists("transition_aerosout"):
-                val = self._escape_sql(row["transition_aerosout"])
-                updates.append(f"transition_aerosout = '{val}'")
-            
-            # Zone privée: concaténer /PRIVE au commentaire existant
-            zone_privee = str(row.get("zone_privee", "")).strip().upper()
-            if zone_privee == "X" and self._column_exists("commentair"):
-                if "/PRIVE" not in str(current_comment).upper():
-                    new_comment = f"{current_comment}/PRIVE" if current_comment else "/PRIVE"
-                    new_comment_escaped = self._escape_sql(new_comment)
-                    updates.append(f"commentair = '{new_comment_escaped}'")
-            
-            # Transition aérosout: concaténer /AEROSOUTRANSI au commentaire existant
-            transition = str(row.get("transition_aerosout", "")).strip().upper()
-            if transition == "OUI" and self._column_exists("commentair"):
-                # Récupérer le commentaire actuel (peut avoir été modifié par zone_privee)
-                comment_base = current_comment
-                # Vérifier si on a déjà ajouté /PRIVE dans cette itération
-                for upd in updates:
-                    if "commentair = " in upd:
-                        # Extraire la valeur déjà définie
-                        comment_base = upd.split("'")[1] if "'" in upd else current_comment
-                        updates.remove(upd)
-                        break
-                if "/AEROSOUTRANSI" not in str(comment_base).upper():
-                    new_comment = f"{comment_base}/AEROSOUTRANSI" if comment_base else "/AEROSOUTRANSI"
-                    new_comment_escaped = self._escape_sql(new_comment)
-                    updates.append(f"commentair = '{new_comment_escaped}'")
-            
-            if updates:
+            try:
+                action = str(row.get("action", "")).upper()
+                
+                # Récupérer les valeurs actuelles pour concaténation
+                current_inf_num = ""
+                current_comment = ""
+                sel_cols = []
+                if self._column_exists("inf_num"):
+                    sel_cols.append("inf_num")
+                if self._column_exists("commentair"):
+                    sel_cols.append("commentair")
+                if sel_cols:
+                    select_sql = f'SELECT {", ".join(sel_cols)} FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
+                    select_query = QSqlQuery(db)
+                    if select_query.exec_(select_sql) and select_query.next():
+                        idx = 0
+                        if self._column_exists("inf_num"):
+                            current_inf_num = select_query.value(idx) or ""
+                            idx += 1
+                        if self._column_exists("commentair"):
+                            current_comment = select_query.value(idx) or ""
+                
+                # Construire la requête UPDATE
+                updates = []
+                
+                # Gestion centralisée du commentaire (évite doublons dans SET)
+                pending_comment = None
+                comment_changed = False
+                
+                if action == "IMPLANTATION":
+                    if self._column_exists("etat"):
+                        updates.append("etat = 'FT KO'")
+                    if self._column_exists("inf_propri"):
+                        updates.append("inf_propri = 'RAUV'")
+                    if self._column_exists("inf_type"):
+                        updates.append("inf_type = 'POT-AC'")
+                    if self._column_exists("dce"):
+                        updates.append("dce = 'O'")
+                    mat = self._escape_sql(row["inf_mat_replace"]) if row.get("inf_mat_replace") else "BS8"
+                    if self._column_exists("inf_mat"):
+                        updates.append(f"inf_mat = '{mat}'")
+                    # Sauvegarder ancien inf_num dans nommage_fibees avant de le vider
+                    if current_inf_num and self._column_exists("nommage_fibees"):
+                        ancien_num = self._escape_sql(current_inf_num)
+                        updates.append(f"nommage_fibees = '{ancien_num}'")
+                    # BUG-1 FIX: Commentaire pour IMPLANTATION
+                    if self._column_exists("commentair"):
+                        pending_comment = f"POT FT (ancien nommage : {self._escape_sql(current_inf_num)} est FT KO)"
+                        comment_changed = True
+                    gids_pot_ac.append(int(gid))
+                else:
+                    if row.get("etat") and self._column_exists("etat"):
+                        etat = self._escape_sql(row["etat"])
+                        updates.append(f"etat = '{etat}'")
+                    if row.get("inf_mat_replace") and self._column_exists("inf_mat"):
+                        mat = self._escape_sql(row["inf_mat_replace"])
+                        updates.append(f"inf_mat = '{mat}'")
+                    if self._column_exists("dce"):
+                        updates.append("dce = 'O'")
+                
+                if row.get("etiquette_jaune") and self._column_exists("etiquette_jaune"):
+                    val = self._escape_sql(row["etiquette_jaune"])
+                    updates.append(f"etiquette_jaune = '{val}'")
+                
+                if row.get("etiquette_orange") and self._column_exists("etiquette_orange"):
+                    val = self._escape_sql(row["etiquette_orange"])
+                    updates.append(f"etiquette_orange = '{val}'")
+                
+                if row.get("transition_aerosout") and self._column_exists("transition_aerosout"):
+                    val = self._escape_sql(row["transition_aerosout"])
+                    updates.append(f"transition_aerosout = '{val}'")
+                
+                # Zone privée: concaténer PRIVE au commentaire
+                zone_privee = str(row.get("zone_privee", "")).strip().upper()
+                if zone_privee == "X" and self._column_exists("commentair"):
+                    comment_base = pending_comment if pending_comment is not None else current_comment
+                    if "PRIVE" not in str(comment_base).upper():
+                        pending_comment = f"{comment_base}/PRIVE" if str(comment_base).strip() else "PRIVE"
+                        comment_changed = True
+                
+                # Transition aérosout: concaténer AEROSOUTRANSI au commentaire
+                transition = str(row.get("transition_aerosout", "")).strip().upper()
+                if transition == "OUI" and self._column_exists("commentair"):
+                    comment_base = pending_comment if pending_comment is not None else current_comment
+                    if "AEROSOUTRANSI" not in str(comment_base).upper():
+                        pending_comment = f"{comment_base}/AEROSOUTRANSI" if str(comment_base).strip() else "AEROSOUTRANSI"
+                        comment_changed = True
+                
+                # Écrire le commentaire une seule fois (évite duplicate column dans SET)
+                if comment_changed and pending_comment is not None:
+                    updates.append(f"commentair = '{self._escape_sql(pending_comment)}'")
+                
+                if not updates:
+                    self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
+                    continue
+                
                 sql = f'UPDATE "{schema}"."{table}" SET {", ".join(updates)} WHERE gid = {int(gid)}'
                 query = QSqlQuery(db)
                 if not query.exec_(sql):
-                    QgsMessageLog.logMessage(
-                        f"[MAJ-SQL-BG] Erreur FT gid={gid}: {query.lastError().text()}",
-                        "PoleAerien", Qgis.Warning
-                    )
+                    raise RuntimeError(query.lastError().text())
+                
+                self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
+                updated += 1
+                
+            except Exception as exc:
+                self._exec_sp(db, f"ROLLBACK TO SAVEPOINT {sp_name}")
+                self._skipped_ft.append({'gid': int(gid), 'error': str(exc)})
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] FT gid={gid} ignoré: {exc}",
+                    "PoleAerien", Qgis.Warning
+                )
             
             # Progression
             if count % 5 == 0 or count == total:
                 pct = 10 + int((count / total) * 40)  # 10% -> 50%
                 self.signals.progress.emit(pct, f"MAJ FT: {count}/{total}")
         
+        # BUG-2 FIX: Batch UPDATE inf_num = NULL pour déclencher le trigger PostgreSQL
+        # Le trigger insert_inf_num_pt_ac() génère un nouveau inf_num quand inf_num IS NULL
+        if gids_pot_ac and self._column_exists("inf_num"):
+            self._exec_sp(db, "SAVEPOINT sp_ft_inf_num")
+            gids_str = ",".join(str(g) for g in gids_pot_ac)
+            sql_null = f'UPDATE "{schema}"."{table}" SET inf_num = NULL WHERE gid IN ({gids_str})'
+            q_null = QSqlQuery(db)
+            if not q_null.exec_(sql_null):
+                err_msg = q_null.lastError().text()
+                self._exec_sp(db, "ROLLBACK TO SAVEPOINT sp_ft_inf_num")
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] Erreur inf_num=NULL FT: {err_msg}",
+                    "PoleAerien", Qgis.Warning
+                )
+            else:
+                self._exec_sp(db, "RELEASE SAVEPOINT sp_ft_inf_num")
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] Trigger FT: inf_num=NULL pour {len(gids_pot_ac)} POT-AC",
+                    "PoleAerien", Qgis.Info
+                )
+        
         self.result['gids_pot_ac'] = gids_pot_ac
-        return count
+        return updated
     
     def _update_bt_sql(self, db, schema, table):
         """Exécute les UPDATE SQL pour les BT."""
         total = len(self.data_bt)
         count = 0
+        updated = 0
         gids_pot_ac_bt = []
         
         for gid, row in self.data_bt.iterrows():
             if self.isCanceled():
-                return count
+                break
             
             count += 1
+            sp_name = f"sp_bt_{count}"
             
-            # Récupérer les valeurs actuelles (inf_num, commentair) pour concaténation
-            current_inf_num = ""
-            current_comment = ""
-            select_sql = f'SELECT inf_num, commentair FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
-            select_query = QSqlQuery(db)
-            if select_query.exec_(select_sql) and select_query.next():
-                current_inf_num = select_query.value(0) or ""
-                current_comment = select_query.value(1) or ""
+            # SAVEPOINT avant toute opération pour cette ligne
+            self._exec_sp(db, f"SAVEPOINT {sp_name}")
             
-            # Construire la requête UPDATE
-            updates = []
-            
-            if str(row.get("Portée molle", "")).upper() == "X":
-                updates.append("etat = 'PORTEE MOLLE'")
-            else:
-                if row.get("inf_type"):
-                    val = self._escape_sql(row["inf_type"])
-                    updates.append(f"inf_type = '{val}'")
-                    # Si BT KO (IMPLANTATION), sauvegarder inf_num dans nommage_fibees
-                    if val == "POT-AC" and current_inf_num and self._column_exists("nommage_fibees"):
-                        ancien_num = self._escape_sql(current_inf_num)
-                        updates.append(f"nommage_fibees = '{ancien_num}'")
-                        gids_pot_ac_bt.append(int(gid))
-                if row.get("inf_propri"):
-                    val = self._escape_sql(row["inf_propri"])
-                    updates.append(f"inf_propri = '{val}'")
-                updates.append("noe_usage = 'DI'")
-                if row.get("typ_po_mod"):
-                    val = self._escape_sql(row["typ_po_mod"])
-                    updates.append(f"inf_mat = '{val}'")
-                if row.get("etat"):
-                    val = self._escape_sql(row["etat"])
-                    updates.append(f"etat = '{val}'")
-                updates.append("dce = 'O'")
-            
-            if row.get("etiquette_orange") and self._column_exists("etiquette_orange"):
-                val = self._escape_sql(row["etiquette_orange"])
-                updates.append(f"etiquette_orange = '{val}'")
-            
-            # Zone privée BT: concaténer /PRIVE au commentaire existant
-            zone_privee = str(row.get("zone_privee", "")).strip().upper()
-            if zone_privee == "X" and self._column_exists("commentair"):
-                if "/PRIVE" not in str(current_comment).upper():
-                    new_comment = f"{current_comment}/PRIVE" if current_comment else "/PRIVE"
-                    new_comment_escaped = self._escape_sql(new_comment)
-                    updates.append(f"commentair = '{new_comment_escaped}'")
-            
-            if updates:
+            try:
+                # Récupérer les valeurs actuelles pour concaténation
+                current_inf_num = ""
+                current_comment = ""
+                sel_cols = []
+                if self._column_exists("inf_num"):
+                    sel_cols.append("inf_num")
+                if self._column_exists("commentair"):
+                    sel_cols.append("commentair")
+                if sel_cols:
+                    select_sql = f'SELECT {", ".join(sel_cols)} FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
+                    select_query = QSqlQuery(db)
+                    if select_query.exec_(select_sql) and select_query.next():
+                        idx = 0
+                        if self._column_exists("inf_num"):
+                            current_inf_num = select_query.value(idx) or ""
+                            idx += 1
+                        if self._column_exists("commentair"):
+                            current_comment = select_query.value(idx) or ""
+                
+                # Construire la requête UPDATE
+                updates = []
+                
+                if str(row.get("Portée molle", "")).upper() == "X":
+                    if self._column_exists("etat"):
+                        updates.append("etat = 'PORTEE MOLLE'")
+                else:
+                    if row.get("inf_type") and self._column_exists("inf_type"):
+                        val = self._escape_sql(row["inf_type"])
+                        updates.append(f"inf_type = '{val}'")
+                        # Si BT KO (IMPLANTATION), sauvegarder inf_num dans nommage_fibees
+                        if val == "POT-AC" and current_inf_num and self._column_exists("nommage_fibees"):
+                            ancien_num = self._escape_sql(current_inf_num)
+                            updates.append(f"nommage_fibees = '{ancien_num}'")
+                            gids_pot_ac_bt.append(int(gid))
+                    if row.get("inf_propri") and self._column_exists("inf_propri"):
+                        val = self._escape_sql(row["inf_propri"])
+                        updates.append(f"inf_propri = '{val}'")
+                    if self._column_exists("noe_usage"):
+                        updates.append("noe_usage = 'DI'")
+                    if row.get("typ_po_mod") and self._column_exists("inf_mat"):
+                        val = self._escape_sql(row["typ_po_mod"])
+                        updates.append(f"inf_mat = '{val}'")
+                    if row.get("etat") and self._column_exists("etat"):
+                        val = self._escape_sql(row["etat"])
+                        updates.append(f"etat = '{val}'")
+                    if self._column_exists("dce"):
+                        updates.append("dce = 'O'")
+                
+                if row.get("etiquette_orange") and self._column_exists("etiquette_orange"):
+                    val = self._escape_sql(row["etiquette_orange"])
+                    updates.append(f"etiquette_orange = '{val}'")
+                
+                # Zone privée BT: concaténer PRIVE au commentaire existant
+                zone_privee = str(row.get("zone_privee", "")).strip().upper()
+                if zone_privee == "X" and self._column_exists("commentair"):
+                    if "PRIVE" not in str(current_comment).upper():
+                        new_comment = f"{current_comment}/PRIVE" if str(current_comment).strip() else "PRIVE"
+                        new_comment_escaped = self._escape_sql(new_comment)
+                        updates.append(f"commentair = '{new_comment_escaped}'")
+                
+                if not updates:
+                    self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
+                    continue
+                
                 sql = f'UPDATE "{schema}"."{table}" SET {", ".join(updates)} WHERE gid = {int(gid)}'
                 query = QSqlQuery(db)
                 if not query.exec_(sql):
-                    QgsMessageLog.logMessage(
-                        f"[MAJ-SQL-BG] Erreur BT gid={gid}: {query.lastError().text()}",
-                        "PoleAerien", Qgis.Warning
-                    )
+                    raise RuntimeError(query.lastError().text())
+                
+                self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
+                updated += 1
+                
+            except Exception as exc:
+                self._exec_sp(db, f"ROLLBACK TO SAVEPOINT {sp_name}")
+                self._skipped_bt.append({'gid': int(gid), 'error': str(exc)})
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] BT gid={gid} ignoré: {exc}",
+                    "PoleAerien", Qgis.Warning
+                )
             
             # Progression
             if count % 5 == 0 or count == total:
                 pct = 50 + int((count / total) * 40)  # 50% -> 90%
                 self.signals.progress.emit(pct, f"MAJ BT: {count}/{total}")
         
-        return count
+        # BUG-3 FIX: Batch UPDATE inf_num = NULL pour déclencher le trigger PostgreSQL (BT)
+        if gids_pot_ac_bt and self._column_exists("inf_num"):
+            self._exec_sp(db, "SAVEPOINT sp_bt_inf_num")
+            gids_str = ",".join(str(g) for g in gids_pot_ac_bt)
+            sql_null = f'UPDATE "{schema}"."{table}" SET inf_num = NULL WHERE gid IN ({gids_str})'
+            q_null = QSqlQuery(db)
+            if not q_null.exec_(sql_null):
+                err_msg = q_null.lastError().text()
+                self._exec_sp(db, "ROLLBACK TO SAVEPOINT sp_bt_inf_num")
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] Erreur inf_num=NULL BT: {err_msg}",
+                    "PoleAerien", Qgis.Warning
+                )
+            else:
+                self._exec_sp(db, "RELEASE SAVEPOINT sp_bt_inf_num")
+                QgsMessageLog.logMessage(
+                    f"[MAJ-SQL-BG] Trigger BT: inf_num=NULL pour {len(gids_pot_ac_bt)} POT-AC",
+                    "PoleAerien", Qgis.Info
+                )
+        
+        self.result['gids_pot_ac_bt'] = gids_pot_ac_bt
+        return updated
     
     def _escape_sql(self, value):
         """Échappe une valeur pour SQL (protection injection)."""

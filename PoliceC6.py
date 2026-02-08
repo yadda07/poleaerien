@@ -366,13 +366,6 @@ class PoliceC6:
                     col_pose_boitier = self._find_column_index(row_headers, boitier_candidates)
                     break
             
-            QgsMessageLog.logMessage(
-                f"C6 header_row={header_row_idx}, num_appui=col{col_num_appui}, "
-                f"nom_cable=col{col_nom_cable}, effort_dispo=col{col_effort_dispo}, "
-                f"pose_boitier=col{col_pose_boitier}",
-                "POLICE_C6", Qgis.Info
-            )
-            
             if header_row_idx is None or col_num_appui == -1:
                 # Log toutes les premières lignes pour debug
                 debug_rows = []
@@ -384,7 +377,7 @@ class PoliceC6:
                     "POLICE_C6", Qgis.Warning
                 )
                 wb.close()
-                return donnees_par_appui, liste_brute
+                return donnees_par_appui, liste_brute, boitier_par_appui
             
             current_appui = None
             appuis_edf = set()
@@ -442,20 +435,8 @@ class PoliceC6:
             if appuis_edf:
                 for appui_edf in appuis_edf:
                     donnees_par_appui.pop(appui_edf, None)
-                QgsMessageLog.logMessage(
-                    f"C6: {len(appuis_edf)} appui(s) EDF exclus (effort disponible absent): "
-                    f"{', '.join(sorted(appuis_edf)[:10])}{'...' if len(appuis_edf) > 10 else ''}",
-                    "POLICE_C6", Qgis.Info
-                )
             
             wb.close()
-            
-            total_cables = sum(len(v) for v in donnees_par_appui.values())
-            QgsMessageLog.logMessage(
-                f"C6 lu: {len(donnees_par_appui)} appuis, {total_cables} câbles"
-                f" ({len(appuis_edf)} appuis EDF exclus)",
-                "POLICE_C6", Qgis.Info
-            )
             
             return donnees_par_appui, liste_brute, boitier_par_appui
             
@@ -713,36 +694,7 @@ class PoliceC6:
     ) -> bool:
         """
         Vérifie si les capacités BDD sont compatibles avec les câbles C6.
-        Chaque capacité BDD doit pouvoir être associée à un câble C6
-        dont les capacités possibles incluent cette valeur.
-        
-        Ex: C6 = [[24,36], [24,36]], BDD = [24, 36] → True
-        Ex: C6 = [[24,36]], BDD = [72] → False
-        
-        Args:
-            capas_possibles_c6: Liste de listes de capacités possibles par câble C6
-            capas_bdd: Liste des capacités BDD (cab_capa)
-        
-        Returns:
-            True si toutes les capacités BDD matchent un câble C6
+        Délègue à la fonction partagée cable_analyzer.capacites_compatibles().
         """
-        if len(capas_possibles_c6) != len(capas_bdd):
-            return False
-        
-        if not capas_bdd and not capas_possibles_c6:
-            return True
-        
-        # Matching glouton : pour chaque capacité BDD, trouver un câble C6 compatible
-        used = [False] * len(capas_possibles_c6)
-        
-        for bdd_capa in sorted(capas_bdd):
-            matched = False
-            for i, possibles in enumerate(capas_possibles_c6):
-                if not used[i] and bdd_capa in possibles:
-                    used[i] = True
-                    matched = True
-                    break
-            if not matched:
-                return False
-        
-        return True
+        from .cable_analyzer import capacites_compatibles
+        return capacites_compatibles(capas_possibles_c6, capas_bdd)

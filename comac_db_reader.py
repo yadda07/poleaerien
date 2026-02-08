@@ -14,6 +14,7 @@ import os
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+from .core_utils import safe_float, safe_int
 
 try:
     import psycopg2
@@ -97,39 +98,8 @@ _cache_source: str = ""  # "postgresql" or "gpkg"
 
 
 # =============================================================================
-# HELPERS
+# HELPERS (safe_float, safe_int importés de core_utils)
 # =============================================================================
-
-def _safe_float(value, default: float = 0.0) -> float:
-    """Parse float (gère None et str)"""
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return float(value)
-    val = str(value).strip()
-    if not val:
-        return default
-    try:
-        return float(val.replace(',', '.'))
-    except ValueError:
-        return default
-
-
-def _safe_int(value, default: int = 0) -> int:
-    """Parse int (gère None et str)"""
-    if value is None:
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    val = str(value).strip()
-    if not val:
-        return default
-    try:
-        return int(float(val.replace(',', '.')))
-    except ValueError:
-        return default
 
 
 def _extract_capacite_fo(description: str, nom: str) -> int:
@@ -260,15 +230,15 @@ def _load_cables() -> Dict[str, CableReference]:
         description = row.get('description', '') or ''
         cable = CableReference(
             nom=nom,
-            section=_safe_float(row.get('section_reelle')),
-            diametre=_safe_float(row.get('diametre')),
-            masse_lineique=_safe_float(row.get('masse_lineique')),
-            charge_rupture=_safe_float(row.get('charge_rupture')),
+            section=safe_float(row.get('section_reelle')),
+            diametre=safe_float(row.get('diametre')),
+            masse_lineique=safe_float(row.get('masse_lineique')),
+            charge_rupture=safe_float(row.get('charge_rupture')),
             volt=(row.get('volt') or '').strip(),
-            tension_zvn_agglo=_safe_float(row.get('tension_agglo')),
-            tension_zvn_ecart=_safe_float(row.get('tension_ecart')),
-            tension_zvf_agglo=_safe_float(row.get('tension_agglo_zvf')),
-            tension_zvf_ecart=_safe_float(row.get('tension_ecart_zvf')),
+            tension_zvn_agglo=safe_float(row.get('tension_agglo')),
+            tension_zvn_ecart=safe_float(row.get('tension_ecart')),
+            tension_zvf_agglo=safe_float(row.get('tension_agglo_zvf')),
+            tension_zvf_ecart=safe_float(row.get('tension_ecart_zvf')),
             description=description,
             capacite_fo=_extract_capacite_fo(description, nom),
             fournisseur=_extract_fournisseur(nom)
@@ -291,8 +261,8 @@ def _load_supports() -> Dict[str, SupportReference]:
             nom=nom,
             nature=(row.get('nature') or '').strip(),
             classe=(row.get('classe') or '').strip(),
-            effort_nominal=_safe_float(row.get('effort_nominal')),
-            hauteur_totale=_safe_float(row.get('hauteur_totale')),
+            effort_nominal=safe_float(row.get('effort_nominal')),
+            hauteur_totale=safe_float(row.get('hauteur_totale')),
             nom_capft=(row.get('nom_capft') or '').strip(),
             nom_gespot=(row.get('nom_gespot') or '').strip()
         )
@@ -314,10 +284,10 @@ def _load_communes() -> Dict[str, CommuneInfo]:
             insee=insee,
             nom=(row.get('nom') or '').strip(),
             departement=(row.get('dep') or '').strip(),
-            zone1=_safe_int(row.get('zone1'), 1),
-            zone2=_safe_int(row.get('zone2'), 1),
-            zone3=_safe_int(row.get('zone3'), 1),
-            zone4=_safe_int(row.get('zone4'), 1)
+            zone1=safe_int(row.get('zone1'), 1),
+            zone2=safe_int(row.get('zone2'), 1),
+            zone3=safe_int(row.get('zone3'), 1),
+            zone4=safe_int(row.get('zone4'), 1)
         )
         communes[insee] = commune
     
@@ -337,9 +307,9 @@ def _load_hypotheses() -> Dict[str, HypotheseClimatique]:
             nom=nom,
             volt=(row.get('volt') or '').strip(),
             description=(row.get('description') or '').strip(),
-            temperature=_safe_float(row.get('temperature')),
-            pression_vent=_safe_float(row.get('pression_vent')),
-            complementaire=_safe_int(row.get('complementaire')) == 1
+            temperature=safe_float(row.get('temperature')),
+            pression_vent=safe_float(row.get('pression_vent')),
+            complementaire=safe_int(row.get('complementaire')) == 1
         )
         hypotheses[nom] = hypo
     

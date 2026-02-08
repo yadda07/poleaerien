@@ -5,12 +5,14 @@ Orchestre l'extraction des données, l'analyse asynchrone et l'export Excel.
 """
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.core import QgsApplication, Qgis, QgsMessageLog
+from qgis.core import Qgis, QgsMessageLog
 from ..Comac import Comac
 from ..async_tasks import ComacTask, ExcelExportTask, run_async_task
+from ..core_utils import build_export_path
+from ..db_connection import extract_sro_from_layer
+from ..cable_analyzer import extraire_appuis_from_layer
 import os
 import copy
-import time
 
 class ComacWorkflow(QObject):
     """
@@ -34,7 +36,8 @@ class ComacWorkflow(QObject):
         self.comac_logic = Comac()
         self.current_task = None
 
-    def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export):
+    def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export,
+                        fddcpi_cache=None):
         """
         Lance l'analyse COMAC.
         
@@ -44,6 +47,7 @@ class ComacWorkflow(QObject):
             col_comac (str): Colonne identifiant l'étude dans la couche COMAC
             chemin_comac (str): Répertoire des fichiers COMAC
             chemin_export (str): Chemin pour le fichier Excel de sortie
+            fddcpi_cache (list|None): CableSegment list from previous fddcpi2 call (batch optimization)
         """
         if not lyr_pot or not lyr_comac:
             self.error_occurred.emit("Couches invalides ou manquantes")
@@ -69,17 +73,37 @@ class ComacWorkflow(QObject):
             self.error_occurred.emit(f"Erreur technique extraction: {e}")
             return
 
-        # 2. Préparation des données pour la Task
-        # Construire le nom de fichier si chemin_export est un répertoire
-        if os.path.isdir(chemin_export):
-            fichier_export = os.path.join(chemin_export, "ANALYSE_COMAC.xlsx")
+        # 2. Extraction SRO + appuis géométrie pour vérif câbles (Main Thread)
+        sro = extract_sro_from_layer(lyr_pot)
+        appuis_wkb = []
+        if sro:
+            raw_appuis = extraire_appuis_from_layer(lyr_pot)
+            for appui in raw_appuis:
+                geom = appui.get('geom')
+                appuis_wkb.append({
+                    'num_appui': appui.get('num_appui', ''),
+                    'feature_id': appui.get('feature_id'),
+                    'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None
+                })
+            QgsMessageLog.logMessage(
+                f"[COMAC] SRO={sro}, {len(appuis_wkb)} appuis extraits pour vérif câbles",
+                "PoleAerien", Qgis.Info
+            )
         else:
-            fichier_export = chemin_export if chemin_export.endswith('.xlsx') else chemin_export + '.xlsx'
+            QgsMessageLog.logMessage(
+                "[COMAC] SRO non trouvé - vérif câbles désactivée",
+                "PoleAerien", Qgis.Warning
+            )
+
+        # 3. Préparation des données pour la Task
+        fichier_export = build_export_path(chemin_export, "ANALYSE_COMAC.xlsx")
         
         params = {
             'chemin_comac': chemin_comac,
             'fichier_export': fichier_export,
-            'zone_climatique': 'ZVN'  # Défaut
+            'zone_climatique': 'ZVN',
+            'sro': sro,
+            'fddcpi_cables_cache': fddcpi_cache,
         }
         
         # Deep copy pour éviter mutation
@@ -87,7 +111,8 @@ class ComacWorkflow(QObject):
             'doublons': list(doublons),
             'hors_etude': list(hors_etude),
             'dico_qgis': copy.deepcopy(dico_qgis),
-            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives)
+            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
+            'appuis': appuis_wkb
         }
 
         # 3. Lancement Task Asynchrone
@@ -117,7 +142,8 @@ class ComacWorkflow(QObject):
             args=[
                 result['resultats'],
                 result['fichier_export'],
-                result.get('dico_verif_secu')
+                result.get('dico_verif_secu'),
+                result.get('verif_cables')
             ],
             payload=result,
         )

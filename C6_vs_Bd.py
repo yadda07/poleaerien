@@ -17,13 +17,14 @@ import re
 import numpy as np
 import pandas as pd
 from openpyxl.styles import PatternFill
-from .core_utils import normalize_appui_num
+from .core_utils import normalize_appui_num, is_plugin_output_file
 
 
 # Patterns pour auto-détection du champ étude
 ETUDE_FIELD_PATTERNS = [
     r'^nom[_\s]?etude[s]?$',
     r'^etude[s]?$',
+    r'^ref_fci$',
     r'^name$',
     r'^nom$',
     r'^decoupage$',
@@ -77,25 +78,13 @@ class C6_vs_Bd:
         - *_C7*.xlsx, *Annexe C7*.xlsx (fichiers C7)
         - GESPOT_*.xlsx (exports GESPOT)
         """
-        # Patterns de fichiers à ignorer (non-C6)
-        ignore_patterns = [
-            'ficheappui',
-            'gespot',
-            '_c7',
-            'annexe c7',
-            'annexe_c7',
-        ]
-
         for subdir, _, files in os.walk(repertoire):
             for name in files:
                 if not name.endswith('.xlsx') or "~$" in name or name.startswith("ANALYSE_"):
                     continue
-                
-                # Ignorer fichiers non-C6
-                name_lower = name.lower()
-                if any(pattern in name_lower for pattern in ignore_patterns):
+                if is_plugin_output_file(name):
                     continue
-
+                
                 cheminComplet = os.path.join(subdir, name)
 
                 try:
@@ -324,16 +313,14 @@ class C6_vs_Bd:
                 etudes_capft.add(str(val).strip())
 
         # Récupérer les noms de fichiers Excel C6 dans le répertoire
-        # (exclut FicheAppui, C7, GESPOT qui ne sont pas des C6)
-        ignore_patterns = ['ficheappui', 'gespot', '_c7', 'annexe c7', 'annexe_c7']
         fichiers_c6 = set()
         for subdir, _, files in os.walk(repertoire_c6):
             for name in files:
-                if name.endswith('.xlsx') and "~$" not in name and not name.startswith("ANALYSE_"):
-                    name_lower = name.lower()
-                    if any(pattern in name_lower for pattern in ignore_patterns):
-                        continue
-                    fichiers_c6.add(name.replace(".xlsx", ""))
+                if not name.endswith('.xlsx'):
+                    continue
+                if is_plugin_output_file(name):
+                    continue
+                fichiers_c6.add(name.replace(".xlsx", ""))
 
         # Comparaison
         etudes_sans_c6 = [e for e in etudes_capft if e not in fichiers_c6]

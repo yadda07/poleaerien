@@ -1,20 +1,18 @@
-#!/usr/bin/python
+﻿#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 import time
 from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.PyQt.QtWidgets import QApplication
 from qgis.core import (
-    Qgis, QgsFeatureRequest, QgsExpression,
-    QgsFeature, QgsGeometry, QgsPointXY, QgsProject,
+    Qgis, QgsFeatureRequest, QgsExpression, QgsProject,
     QgsTask, QgsApplication, QgsSpatialIndex, NULL,
-    QgsDataSourceUri, QgsMessageLog, QgsVectorDataProvider, QgsWkbTypes
+    QgsMessageLog
 )
-from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 import pandas as pd
 import os
 import re
 import random
+import difflib
 from .qgis_utils import validate_same_crs, get_layer_safe
 from .dataclasses_results import (
     ExcelValidationResult, PoteauxPolygoneResult, 
@@ -40,64 +38,6 @@ class MajFtBtSignals(QObject):
     error = pyqtSignal(str)
 
 
-class MajUpdateTask(QgsTask):
-    """
-    CRITICAL-001 FIX: Tâche asynchrone pour MAJ BD après confirmation.
-    Évite le freeze UI lors de l'écriture en base de données.
-    """
-    
-    def __init__(self, layer_name, data_ft, data_bt):
-        super().__init__("MAJ BD FT/BT", QgsTask.CanCancel)
-        self.layer_name = layer_name
-        self.data_ft = data_ft
-        self.data_bt = data_bt
-        self.signals = MajFtBtSignals()
-        self.exception = None
-        self.result = {'ft_updated': 0, 'bt_updated': 0}
-    
-    def run(self):
-        """
-        CRITICAL FIX: Ne fait PAS de modification QGIS ici (Worker Thread).
-        Les modifications de couche DOIVENT être sur le Main Thread.
-        Cette tâche sert uniquement à signaler que l'UI est prête pour la MAJ.
-        """
-        try:
-            # Simuler une courte préparation
-            self.signals.progress.emit(random.randint(58, 63))
-            self.signals.message.emit("Préparation MAJ BD...", "grey")
-            
-            if self.isCanceled():
-                return False
-            
-            # Stocker les compteurs pour le callback
-            self.result['ft_count'] = len(self.data_ft) if self.data_ft is not None and not self.data_ft.empty else 0
-            self.result['bt_count'] = len(self.data_bt) if self.data_bt is not None and not self.data_bt.empty else 0
-            
-            self.signals.progress.emit(random.randint(64, 68))
-            return True
-            
-        except Exception as e:
-            self.exception = str(e)
-            QgsMessageLog.logMessage(f"[MajUpdateTask] Erreur: {e}", "MAJ_FT_BT", Qgis.Critical)
-            return False
-    
-    def finished(self, success):
-        """
-        Callback sur Main Thread - C'est ici que la MAJ QGIS sera déclenchée.
-        """
-        if success:
-            # Émettre les données pour traitement sur Main Thread
-            self.signals.finished.emit({
-                'layer_name': self.layer_name,
-                'data_ft': self.data_ft,
-                'data_bt': self.data_bt,
-                'ft_count': self.result.get('ft_count', 0),
-                'bt_count': self.result.get('bt_count', 0)
-            })
-        else:
-            self.signals.error.emit(self.exception or "Annulé")
-
-
 class MajFtBtTask(QgsTask):
     """Tache asynchrone pour MAJ FT/BT - traitement spatial en Worker Thread"""
 
@@ -121,11 +61,15 @@ class MajFtBtTask(QgsTask):
 
             # 1. Lecture Excel
             t1 = time.perf_counter()
-            excel_ft, excel_bt = maj.LectureFichiersExcelsFtBtKo(
+            excel_ft, excel_bt, colonnes_warnings = maj.LectureFichiersExcelsFtBtKo(
                 self.params['fichier_excel']
             )
             t2 = time.perf_counter()
             QgsMessageLog.logMessage(f"[PERF-MAJ] Lecture Excel: {t2-t1:.3f}s", "PoleAerien", Qgis.Info)
+            
+            # Afficher les warnings de colonnes mal écrites dans le log du plugin
+            for warn in colonnes_warnings:
+                self.signals.message.emit(f"ATTENTION : {warn}", "orange")
             
             if self.isCanceled():
                 return False
@@ -406,7 +350,7 @@ class MajFtBt:
             dans_polygone = False
             bbox = feat_pot.geometry().boundingBox()
             candidates = idx_cap_ft.intersects(bbox)
-            
+
             for fid in candidates:
                 if fid in etudes_cap_ft_dict:
                     if etudes_cap_ft_dict[fid].geometry().contains(feat_pot.geometry()):
@@ -431,7 +375,7 @@ class MajFtBt:
             dans_polygone = False
             bbox = feat_pot.geometry().boundingBox()
             candidates = idx_comac.intersects(bbox)
-            
+
             for fid in candidates:
                 if fid in etudes_comac_dict:
                     if etudes_comac_dict[fid].geometry().contains(feat_pot.geometry()):
@@ -549,9 +493,52 @@ class MajFtBt:
         
         return result
 
+    def _detect_and_fix_columns(self, df, colonnes_attendues, nom_onglet):
+        """
+        Détecte les colonnes mal écrites et les corrige automatiquement.
+        
+        Pour chaque colonne attendue absente, cherche la colonne existante
+        la plus similaire. Si trouvée, renomme la colonne et collecte un warning.
+        Si non trouvée, la colonne reste manquante (erreur bloquante).
+        
+        Args:
+            df: DataFrame pandas à corriger (modifié in-place)
+            colonnes_attendues: list des noms de colonnes requises
+            nom_onglet: 'FT' ou 'BT' (pour les messages)
+            
+        Returns:
+            tuple: (manquantes: list[str], warnings: list[str])
+        """
+        colonnes_presentes_list = list(df.columns)
+        manquantes = []
+        warnings = []
+        
+        for col_attendue in colonnes_attendues:
+            if col_attendue in df.columns:
+                continue
+            
+            # Chercher la colonne la plus similaire (seuil 0.8 = 80% de similarité)
+            similaires = difflib.get_close_matches(
+                col_attendue, colonnes_presentes_list, n=1, cutoff=0.8
+            )
+            
+            if similaires:
+                ancien_nom = similaires[0]
+                df.rename(columns={ancien_nom: col_attendue}, inplace=True)
+                colonnes_presentes_list = list(df.columns)
+                warnings.append(
+                    f"Onglet {nom_onglet} : colonne '{ancien_nom}' "
+                    f"corrigée en '{col_attendue}'"
+                )
+            else:
+                manquantes.append(col_attendue)
+        
+        return manquantes, warnings
+
     def LectureFichiersExcelsFtBtKo(self, fichier_Excel):
         """Fonction pour parcourir les fichiers Excel pour renseigner la référence des appuis."""
 
+        colonnes_warnings = []
         try:
             with pd.ExcelFile(fichier_Excel) as xls:
                 # Lire avec header existant (ligne 0)
@@ -562,19 +549,30 @@ class MajFtBt:
             df_ft.columns = df_ft.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
             df_bt.columns = df_bt.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
             
-            # Vérifier que colonnes requises existent
-            colonnes_ft_requises = ["Nom Etudes", "N° appui", "Action", "inf_mat_replace"]
-            colonnes_bt_requises = ["Nom Etudes", "N° appui", "Action", "typ_po_mod", "Portée molle"]
-            
-            # Vérif colonnes FT
-            manquantes_ft = [col for col in colonnes_ft_requises if col not in df_ft.columns]
+            # Vérifier et corriger colonnes FT (auto-renomme si typo détectée)
+            colonnes_warnings = []
+            manquantes_ft, warns_ft = self._detect_and_fix_columns(
+                df_ft, COLONNES_FT_REQUISES, "FT"
+            )
+            colonnes_warnings.extend(warns_ft)
             if manquantes_ft:
-                raise ValueError(f"Colonnes manquantes onglet FT: {manquantes_ft}")
+                raise ValueError(
+                    f"Onglet FT — colonnes manquantes (aucune correspondance trouvée) :\n"
+                    f"  {manquantes_ft}\n"
+                    f"Colonnes présentes dans le fichier :\n  {list(df_ft.columns)}"
+                )
             
-            # Vérif colonnes BT
-            manquantes_bt = [col for col in colonnes_bt_requises if col not in df_bt.columns]
+            # Vérifier et corriger colonnes BT (auto-renomme si typo détectée)
+            manquantes_bt, warns_bt = self._detect_and_fix_columns(
+                df_bt, COLONNES_BT_REQUISES, "BT"
+            )
+            colonnes_warnings.extend(warns_bt)
             if manquantes_bt:
-                raise ValueError(f"Colonnes manquantes onglet BT: {manquantes_bt}")
+                raise ValueError(
+                    f"Onglet BT — colonnes manquantes (aucune correspondance trouvée) :\n"
+                    f"  {manquantes_bt}\n"
+                    f"Colonnes présentes dans le fichier :\n  {list(df_bt.columns)}"
+                )
 
             ######################################### FT #######################################
             # On donne la liste des colonnes que l'on souhaite garder
@@ -679,6 +677,9 @@ class MajFtBt:
             # Remplacer les champs de la colonne vide par les valeurs pércédentes.
             df_bt["Nom Etudes"] = df_bt["Nom Etudes"].ffill().str.upper()
 
+        except ValueError:
+            raise
+
         except AttributeError as lettre:
             QgsMessageLog.logMessage(f"FICHIER : {fichier_Excel} - {lettre}", "MAJ_FT_BT", Qgis.Warning)
             df_ft = pd.DataFrame({})
@@ -691,7 +692,7 @@ class MajFtBt:
 
         # Debug logs removed for production
 
-        return df_ft, df_bt
+        return df_ft, df_bt, colonnes_warnings
 
     def liste_poteau_etudes(self, table_poteau, table_cap_ft, table_comac):
         """Extraction poteaux avec index spatial (performance O(n log n))"""
@@ -930,656 +931,60 @@ class MajFtBt:
 
         return liste_ft, liste_bt
 
-    def miseAjourFinalDesDonnees(self, table_poteau, df):
-        """MAJ FT dans infra_pt_pot via provider."""
-        lyrs = QgsProject.instance().mapLayersByName(table_poteau)
-        if not lyrs or not lyrs[0].isValid():
-            raise ValueError(f"Couche invalide: {table_poteau}")
-        infra_pt_pot = lyrs[0]
-
-        if not infra_pt_pot.dataProvider().capabilities() & QgsVectorDataProvider.ChangeAttributeValues:
-            raise ValueError("Provider ne supporte pas ChangeAttributeValues")
-
-        # On récupére la liste des columns qui seront modifié
-        listesColumns = list(df.columns.values)  # this will always work in pandas
-
-        changementNomColumns = {}
-        for column in listesColumns:
-            # On récupère la position du champs (colonne) des appuis à remplacer
-            idx_inf_num = infra_pt_pot.dataProvider().fields().indexFromName(str(column))
-            changementNomColumns[column] = idx_inf_num
-
-        # print(f"changementNomColumns : {changementNomColumns}")
-        # On change le nom des colonnes par rapport à leurs positions.
-        df = df.rename(columns=changementNomColumns, errors="raise")
-
-        # Mise à jour des données.
-        infra_pt_pot.dataProvider().changeAttributeValues(df.to_dict('index'))
-        infra_pt_pot.updateExtents()
-
-    # =========================================================================
-    # REQ-MAJ-007: MAJ FT Implantation avec nouveau nommage et commentaire
-    # =========================================================================
-    def _prepare_update_ft(self, table_poteau, liste_valeur_trouve_ft):
-        lyrs = QgsProject.instance().mapLayersByName(table_poteau)
-        if not lyrs or not lyrs[0].isValid():
-            raise ValueError(f"Couche invalide: {table_poteau}")
-        infra_pt_pot = lyrs[0]
-
-        fields = infra_pt_pot.fields()
-        required = {"etat", "inf_type", "inf_propri", "inf_mat", "commentair", "dce", "inf_num"}
-        missing = [f for f in required if fields.indexOf(f) == -1]
-        if missing:
-            raise ValueError(f"Champs requis manquants: {missing}")
-
-        idx_etat = fields.indexOf("etat")
-        idx_inf_type = fields.indexOf("inf_type")
-        idx_inf_propri = fields.indexOf("inf_propri")
-        idx_inf_mat = fields.indexOf("inf_mat")
-        idx_dce = fields.indexOf("dce")
-        idx_inf_num = fields.indexOf("inf_num")
-        idx_commentaire = fields.indexOf("commentair")
-        idx_etiquette_jaune = fields.indexOf("etiquette_jaune")
-        idx_etiquette_orange = fields.indexOf("etiquette_orange")
-        idx_transition_aerosout = fields.indexOf("transition_aerosout")
-
-        gids_pot_ac = []
-
-        t1 = time.perf_counter()
-        gids_needed = set(int(g) for g in liste_valeur_trouve_ft.index)
-        features_by_gid = {}
-        for feat in infra_pt_pot.getFeatures():
-            gid_val = feat["gid"]
-            if gid_val in gids_needed:
-                features_by_gid[gid_val] = feat
-        t2 = time.perf_counter()
-        QgsMessageLog.logMessage(
-            f"[PERF-MAJ-BD] Index features FT: {len(features_by_gid)} en {t2-t1:.3f}s",
-            "PoleAerien", Qgis.Info
-        )
-
-        if not infra_pt_pot.isEditable():
-            infra_pt_pot.startEditing()
-
-        return {
-            "layer": infra_pt_pot,
-            "features_by_gid": features_by_gid,
-            "gids_pot_ac": gids_pot_ac,
-            "idx_etat": idx_etat,
-            "idx_inf_type": idx_inf_type,
-            "idx_inf_propri": idx_inf_propri,
-            "idx_inf_mat": idx_inf_mat,
-            "idx_dce": idx_dce,
-            "idx_inf_num": idx_inf_num,
-            "idx_commentaire": idx_commentaire,
-            "idx_etiquette_jaune": idx_etiquette_jaune,
-            "idx_etiquette_orange": idx_etiquette_orange,
-            "idx_transition_aerosout": idx_transition_aerosout,
-        }
-
-    def _apply_update_ft_row(self, state, gid, row):
-        infra_pt_pot = state["layer"]
-        featFT = state["features_by_gid"].get(int(gid))
-        if featFT is None:
-            return False
-
-        fid = featFT.id()
-        action = str(row.get("action", "")).upper()
-
-        idx_etat = state["idx_etat"]
-        idx_inf_type = state["idx_inf_type"]
-        idx_inf_propri = state["idx_inf_propri"]
-        idx_inf_mat = state["idx_inf_mat"]
-        idx_dce = state["idx_dce"]
-        idx_commentaire = state["idx_commentaire"]
-        idx_etiquette_jaune = state["idx_etiquette_jaune"]
-        idx_etiquette_orange = state["idx_etiquette_orange"]
-        idx_transition_aerosout = state["idx_transition_aerosout"]
-
-        if action == "IMPLANTATION":
-            ancien_inf_num = featFT["inf_num"] or ""
-            if idx_etat >= 0:
-                infra_pt_pot.changeAttributeValue(fid, idx_etat, "FT KO")
-            if idx_inf_mat >= 0:
-                new_inf_mat = row.get("inf_mat_replace") or featFT["inf_mat"] or ""
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_mat, new_inf_mat)
-            if idx_inf_propri >= 0:
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_propri, "RAUV")
-            if idx_inf_type >= 0:
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_type, "POT-AC")
-                state["gids_pot_ac"].append(int(gid))
-            if idx_commentaire >= 0:
-                nouveau_commentaire = f"POT FT (ancien nommage : {ancien_inf_num} est FT KO)"
-                infra_pt_pot.changeAttributeValue(fid, idx_commentaire, nouveau_commentaire)
-            if idx_dce >= 0:
-                infra_pt_pot.changeAttributeValue(fid, idx_dce, 'O')
-        else:
-            if row.get("etat"):
-                infra_pt_pot.changeAttributeValue(fid, idx_etat, row["etat"])
-            if row.get("inf_mat_replace"):
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_mat, row["inf_mat_replace"])
-            if idx_dce >= 0:
-                infra_pt_pot.changeAttributeValue(fid, idx_dce, 'O')
-
-        if idx_etiquette_jaune >= 0 and row.get("etiquette_jaune"):
-            infra_pt_pot.changeAttributeValue(fid, idx_etiquette_jaune, row["etiquette_jaune"])
-        if idx_etiquette_orange >= 0 and row.get("etiquette_orange"):
-            infra_pt_pot.changeAttributeValue(fid, idx_etiquette_orange, row["etiquette_orange"])
-
-        if row.get("zone_privee") == 'X' and idx_commentaire >= 0:
-            commentaire_actuel = featFT["commentair"]
-            commentaire_str = str(commentaire_actuel) if commentaire_actuel and commentaire_actuel != NULL else ''
-            if '/PRIVE' not in commentaire_str.upper():
-                nouveau_commentaire = f"{commentaire_str}/PRIVE" if commentaire_str.strip() else "/PRIVE"
-                infra_pt_pot.changeAttributeValue(fid, idx_commentaire, nouveau_commentaire)
-        
-        # Transition aérosout: concaténer /AEROSOUTRANSI au commentaire
-        if row.get("transition_aerosout") == 'oui' and idx_commentaire >= 0:
-            commentaire_actuel = featFT["commentair"]
-            commentaire_str = str(commentaire_actuel) if commentaire_actuel and commentaire_actuel != NULL else ''
-            if '/AEROSOUTRANSI' not in commentaire_str.upper():
-                nouveau_commentaire = f"{commentaire_str}/AEROSOUTRANSI" if commentaire_str.strip() else "/AEROSOUTRANSI"
-                infra_pt_pot.changeAttributeValue(fid, idx_commentaire, nouveau_commentaire)
-
-        if idx_transition_aerosout >= 0 and row.get("transition_aerosout"):
-            infra_pt_pot.changeAttributeValue(fid, idx_transition_aerosout, row["transition_aerosout"])
-
-        return True
-
-    def _finalize_update_ft(self, state):
-        infra_pt_pot = state["layer"]
-        if not infra_pt_pot.commitChanges():
-            errors = infra_pt_pot.commitErrors()
-            err_detail = "; ".join(errors) if errors else "inconnu"
-            raise RuntimeError(f"Commit échoué: {err_detail}")
-
-        if state["gids_pot_ac"]:
-            QgsMessageLog.logMessage(
-                f"[MAJ-FT] Trigger PostgreSQL ({len(state['gids_pot_ac'])} implantations)...",
-                "PoleAerien", Qgis.Info
-            )
-            self._execSqlTriggerBatch(infra_pt_pot, state["gids_pot_ac"])
-            infra_pt_pot.triggerRepaint()
-
-    def miseAjourFinalDesDonneesFT(self, table_poteau, liste_valeur_trouve_ft, progress_callback=None):
-        """
-        REQ-MAJ-007: MAJ FT dans infra_pt_pot avec gestion implantation.
+    @staticmethod
+    def exporter_rapport_maj(liste_ft, liste_bt, export_dir):
+        """Exporte un rapport Excel detaillant les modifications MAJ BD.
 
         Args:
-            progress_callback: callable(message, percent) pour feedback UI
-        """
-        t0_func = time.perf_counter()
+            liste_ft: [nb_introuvables, df_introuvables, nb_trouves, df_trouves]
+            liste_bt: idem pour BT
+            export_dir: repertoire d'export
 
-        state = self._prepare_update_ft(table_poteau, liste_valeur_trouve_ft)
-        infra_pt_pot = state["layer"]
-
-        try:
-            t3 = time.perf_counter()
-            count = 0
-            total = len(liste_valeur_trouve_ft)
-
-            if progress_callback:
-                progress_callback(f"MAJ FT: 0/{total} poteaux...", 60)
-
-            for gid, row in liste_valeur_trouve_ft.iterrows():
-                t_feat_start = time.perf_counter()
-                count += 1
-                action = str(row.get("action", "")).upper()
-
-                if count % 5 == 0 or count == 1:
-                    pct = 60 + int((count / total) * 25)  # 60% -> 85%
-                    if progress_callback:
-                        progress_callback(f"MAJ FT: {count}/{total} ({action})...", pct)
-                    QApplication.processEvents()
-
-                if not self._apply_update_ft_row(state, gid, row):
-                    continue
-
-                t_feat_end = time.perf_counter()
-                if count <= 5 or (t_feat_end - t_feat_start) > 1.0:
-                    QgsMessageLog.logMessage(
-                        f"[PERF-MAJ-BD] Feature {count}/{total} (gid={gid}): {t_feat_end - t_feat_start:.3f}s",
-                        "PoleAerien", Qgis.Info
-                    )
-
-            t4 = time.perf_counter()
-            temps_maj = t4 - t3
-
-            if progress_callback:
-                progress_callback(f"Enregistrement FT ({count} poteaux)...", 86)
-            QApplication.processEvents()
-
-            t5 = time.perf_counter()
-            self._finalize_update_ft(state)
-            t6 = time.perf_counter()
-
-            temps_total = time.perf_counter() - t0_func
-            QgsMessageLog.logMessage("=" * 50, "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage("[MAJ-FT] TERMINE", "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage(f"[MAJ-FT] Poteaux traites: {count}", "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage(f"[MAJ-FT] Temps total: {temps_total:.1f}s", "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage(f"[MAJ-FT] MAJ attributs: {temps_maj:.1f}s", "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage(f"[MAJ-FT] Commit BD: {t6-t5:.1f}s", "PoleAerien", Qgis.Info)
-            QgsMessageLog.logMessage("=" * 50, "PoleAerien", Qgis.Info)
-
-        except Exception as e:
-            infra_pt_pot.rollBack()
-            msg = f"[MAJ_FT_BT] miseAjourFinalDesDonneesFT échoué: {e}"
-            QgsMessageLog.logMessage(msg, "MAJ_FT_BT", Qgis.Critical)
-            raise RuntimeError(msg) from e
-
-# ... (rest of the code remains the same)
-    def _execSqlTriggerBatch(self, layer, gids):
-        """Execute SQL UPDATE batch pour declencher trigger PostgreSQL.
-        
-        PERF-01: Connexion unique pour tous les gids (batch).
-        
-        Args:
-            layer: QgsVectorLayer PostgreSQL
-            gids: list[int] - Liste des gid a traiter
-            
         Returns:
-            int: Nombre de gids traites avec succes
+            str: chemin du fichier Excel genere
         """
-        if not gids:
-            return 0
-        
-        # QA-04: Verifier provider PostgreSQL
-        if layer.dataProvider().name() != "postgres":
-            QgsMessageLog.logMessage("Skip trigger: layer non PostgreSQL", "MAJ_FT_BT", Qgis.Info)
-            return 0
-        
-        uri = QgsDataSourceUri(layer.dataProvider().dataSourceUri())
-        
-        # QA-04: Verifier schema/table non vides
-        if not uri.schema() or not uri.table():
-            QgsMessageLog.logMessage("Erreur: schema ou table vide", "MAJ_FT_BT", Qgis.Warning)
-            return 0
-        
-        conn_name = "trigger_conn_batch"
-        
-        # PERF-01: Connexion unique
-        db = QSqlDatabase.addDatabase("QPSQL", conn_name)
-        db.setHostName(uri.host())
-        db.setPort(int(uri.port()) if uri.port() else 5432)
-        db.setDatabaseName(uri.database())
-        db.setUserName(uri.username())
-        db.setPassword(uri.password())
-        
-        if not db.open():
-            QgsMessageLog.logMessage(f"Erreur connexion DB: {db.lastError().text()}", "MAJ_FT_BT", Qgis.Critical)
-            QSqlDatabase.removeDatabase(conn_name)
-            return 0
-        
-        # PERF-01: Batch UPDATE avec IN clause
-        # SEC-01: Validation identifiants SQL pour éviter injection
-        schema = uri.schema().replace('"', '""')
-        table = uri.table().replace('"', '""')
-        gids_str = ",".join(str(int(g)) for g in gids)
-        
-        # Sauvegarder inf_num dans nommage_fibees AVANT de le vider
-        sql_save = f'''UPDATE "{schema}"."{table}" 
-                  SET nommage_fibees = inf_num 
-                  WHERE gid IN ({gids_str}) AND inf_type = 'POT-AC' AND inf_num IS NOT NULL'''
-        
-        query_save = QSqlQuery(db)
-        if not query_save.exec_(sql_save):
-            QgsMessageLog.logMessage(f"Erreur sauvegarde nommage_fibees: {query_save.lastError().text()}", "MAJ_FT_BT", Qgis.Warning)
-        
-        # Puis vider inf_num
-        sql = f'''UPDATE "{schema}"."{table}" 
-                  SET inf_num = NULL 
-                  WHERE gid IN ({gids_str}) AND inf_type = 'POT-AC' '''
-        
-        query = QSqlQuery(db)
-        success_count = 0
-        
-        if query.exec_(sql):
-            success_count = len(gids)
-        else:
-            QgsMessageLog.logMessage(f"Erreur SQL batch: {query.lastError().text()}", "MAJ_FT_BT", Qgis.Critical)
-        
-        db.close()
-        QSqlDatabase.removeDatabase(conn_name)
-        return success_count
+        from datetime import datetime
 
-    def _prepare_update_bt(self, table_poteau, liste_valeur_trouve_bt):
-        lyrs = QgsProject.instance().mapLayersByName(table_poteau)
-        if not lyrs or not lyrs[0].isValid():
-            raise ValueError(f"Couche invalide: {table_poteau}")
-        infra_pt_pot = lyrs[0]
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"rapport_maj_bd_{ts}.xlsx"
+        filepath = os.path.join(export_dir, filename)
 
-        fields = infra_pt_pot.fields()
-        required = {"etat", "inf_type", "inf_propri", "noe_usage", "inf_mat", "dce", "inf_num"}
-        missing = [f for f in required if fields.indexOf(f) == -1]
-        if missing:
-            raise ValueError(f"Champs requis manquants: {missing}")
+        tt_introuvable_ft = liste_ft[0] if len(liste_ft) > 0 else 0
+        df_introuvable_ft = liste_ft[1] if len(liste_ft) > 1 else pd.DataFrame()
+        tt_trouve_ft = liste_ft[2] if len(liste_ft) > 2 else 0
+        df_trouve_ft = liste_ft[3] if len(liste_ft) > 3 else pd.DataFrame()
 
-        idx_etat = fields.indexOf("etat")
-        idx_inf_type = fields.indexOf("inf_type")
-        idx_inf_propri = fields.indexOf("inf_propri")
-        idx_noe_usage = fields.indexOf("noe_usage")
-        idx_inf_mat = fields.indexOf("inf_mat")
-        idx_dce = fields.indexOf("dce")
-        idx_commentaire = fields.indexOf("commentair")
-        idx_etiquette_jaune = fields.indexOf("etiquette_jaune")
-        idx_etiquette_orange = fields.indexOf("etiquette_orange")
+        tt_introuvable_bt = liste_bt[0] if len(liste_bt) > 0 else 0
+        df_introuvable_bt = liste_bt[1] if len(liste_bt) > 1 else pd.DataFrame()
+        tt_trouve_bt = liste_bt[2] if len(liste_bt) > 2 else 0
+        df_trouve_bt = liste_bt[3] if len(liste_bt) > 3 else pd.DataFrame()
 
-        gids_pot_ac = []
+        resume = pd.DataFrame([
+            {"Element": "FT identifies", "Nombre": tt_trouve_ft},
+            {"Element": "FT introuvables (Excel sans QGIS)", "Nombre": tt_introuvable_ft},
+            {"Element": "BT identifies", "Nombre": tt_trouve_bt},
+            {"Element": "BT introuvables (Excel sans QGIS)", "Nombre": tt_introuvable_bt},
+        ])
 
-        t1 = time.perf_counter()
-        gids_needed = set(int(g) for g in liste_valeur_trouve_bt.index)
-        features_by_gid = {}
-        for feat in infra_pt_pot.getFeatures():
-            gid_val = feat["gid"]
-            if gid_val in gids_needed:
-                features_by_gid[gid_val] = feat
-        t2 = time.perf_counter()
-        QgsMessageLog.logMessage(
-            f"[PERF-MAJ-BD] Index features BT: {len(features_by_gid)} en {t2-t1:.3f}s",
-            "PoleAerien", Qgis.Info
-        )
+        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            resume.to_excel(writer, sheet_name='RESUME', index=False)
 
-        if not infra_pt_pot.isEditable():
-            infra_pt_pot.startEditing()
-
-        return {
-            "layer": infra_pt_pot,
-            "features_by_gid": features_by_gid,
-            "gids_pot_ac": gids_pot_ac,
-            "idx_etat": idx_etat,
-            "idx_inf_type": idx_inf_type,
-            "idx_inf_propri": idx_inf_propri,
-            "idx_noe_usage": idx_noe_usage,
-            "idx_inf_mat": idx_inf_mat,
-            "idx_dce": idx_dce,
-            "idx_commentaire": idx_commentaire,
-            "idx_etiquette_jaune": idx_etiquette_jaune,
-            "idx_etiquette_orange": idx_etiquette_orange,
-        }
-
-    def _apply_update_bt_row(self, state, gid, row):
-        infra_pt_pot = state["layer"]
-        featBT = state["features_by_gid"].get(int(gid))
-        if featBT is None:
-            return False
-
-        fid = featBT.id()
-        idx_etat = state["idx_etat"]
-        idx_inf_type = state["idx_inf_type"]
-        idx_inf_propri = state["idx_inf_propri"]
-        idx_noe_usage = state["idx_noe_usage"]
-        idx_inf_mat = state["idx_inf_mat"]
-        idx_dce = state["idx_dce"]
-        idx_etiquette_orange = state["idx_etiquette_orange"]
-
-        if str(row["Portée molle"]).upper() != "X":
-            if row["inf_type"]:
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_type, row["inf_type"])
-                if row["inf_type"] == "POT-AC":
-                    state["gids_pot_ac"].append(int(gid))
-            if row["inf_propri"]:
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_propri, row["inf_propri"])
-            infra_pt_pot.changeAttributeValue(fid, idx_noe_usage, "DI")
-            if row["typ_po_mod"]:
-                infra_pt_pot.changeAttributeValue(fid, idx_inf_mat, row["typ_po_mod"])
-            infra_pt_pot.changeAttributeValue(fid, idx_etat, row["etat"])
-            infra_pt_pot.changeAttributeValue(fid, idx_dce, 'O')
-
-            if idx_etiquette_orange >= 0 and row.get("etiquette_orange"):
-                infra_pt_pot.changeAttributeValue(fid, idx_etiquette_orange, row["etiquette_orange"])
-            
-            # Zone privée BT: concaténer /PRIVE au commentaire
-            idx_commentaire = state["idx_commentaire"]
-            if row.get("zone_privee") == 'X' and idx_commentaire >= 0:
-                commentaire_actuel = featBT["commentair"]
-                commentaire_str = str(commentaire_actuel) if commentaire_actuel and commentaire_actuel != NULL else ''
-                if '/PRIVE' not in commentaire_str.upper():
-                    nouveau_commentaire = f"{commentaire_str}/PRIVE" if commentaire_str.strip() else "/PRIVE"
-                    infra_pt_pot.changeAttributeValue(fid, idx_commentaire, nouveau_commentaire)
-            return True
-
-        infra_pt_pot.changeAttributeValue(fid, idx_etat, 'PORTEE MOLLE')
-
-        if not featBT.hasGeometry():
-            QgsMessageLog.logMessage(
-                f"miseAjourFinalDesDonneesBT: geometrie absente (gid {gid})",
-                "MAJ_FT_BT", Qgis.Warning
-            )
-            return False
-
-        geom = featBT.geometry()
-        if geom.isNull() or geom.isEmpty():
-            QgsMessageLog.logMessage(
-                f"miseAjourFinalDesDonneesBT: geometrie vide (gid {gid})",
-                "MAJ_FT_BT", Qgis.Warning
-            )
-            return False
-
-        if geom.isMultipart():
-            QgsMessageLog.logMessage(
-                f"miseAjourFinalDesDonneesBT: geometrie multipart (gid {gid})",
-                "MAJ_FT_BT", Qgis.Warning
-            )
-            return False
-
-        if QgsWkbTypes.geometryType(geom.wkbType()) != QgsWkbTypes.PointGeometry:
-            QgsMessageLog.logMessage(
-                f"miseAjourFinalDesDonneesBT: geometrie non point (gid {gid})",
-                "MAJ_FT_BT", Qgis.Warning
-            )
-            return False
-
-        point_geom = geom.asPoint()
-        point_decale = QgsPointXY(point_geom.x() + 1, point_geom.y())
-
-        feat = QgsFeature(featBT)
-        feat.setGeometry(QgsGeometry.fromPointXY(point_decale))
-        if row["inf_type"]:
-            feat.setAttribute("inf_type", row["inf_type"])
-        if row["inf_propri"]:
-            feat.setAttribute("inf_propri", row["inf_propri"])
-        feat.setAttribute("noe_usage", "DI")
-        if row["typ_po_mod"]:
-            feat.setAttribute("inf_mat", row["typ_po_mod"])
-        feat.setAttribute("etat", row["etat"])
-        feat.setAttribute("dce", 'O')
-        infra_pt_pot.addFeature(feat)
-        return True
-
-    def _finalize_update_bt(self, state):
-        infra_pt_pot = state["layer"]
-        if not infra_pt_pot.commitChanges():
-            errors = infra_pt_pot.commitErrors()
-            err_detail = "; ".join(errors) if errors else "inconnu"
-            raise RuntimeError(f"Commit BT échoué: {err_detail}")
-
-        if state["gids_pot_ac"]:
-            QgsMessageLog.logMessage(
-                f"[MAJ-BT] Trigger PostgreSQL ({len(state['gids_pot_ac'])} POT-AC)...",
-                "PoleAerien", Qgis.Info
-            )
-            self._execSqlTriggerBatch(infra_pt_pot, state["gids_pot_ac"])
-            infra_pt_pot.triggerRepaint()
-
-    def miseAjourFinalDesDonneesBT(self, table_poteau, liste_valeur_trouve_bt, progress_callback=None):
-        """MAJ BT dans infra_pt_pot. Preserve attributs existants.
-        
-        Args:
-            progress_callback: callable(message, percent) pour feedback UI
-        """
-        t0_func = time.perf_counter()
-        
-        lyrs = QgsProject.instance().mapLayersByName(table_poteau)
-        if not lyrs or not lyrs[0].isValid():
-            raise ValueError(f"Couche invalide: {table_poteau}")
-        infra_pt_pot = lyrs[0]
-
-        # QA-07: Index des champs avec verification
-        fields = infra_pt_pot.fields()
-        required = {"etat", "inf_type", "inf_propri", "noe_usage", "inf_mat", "dce", "inf_num"}
-        missing = [f for f in required if fields.indexOf(f) == -1]
-        if missing:
-            raise ValueError(f"Champs requis manquants: {missing}")
-        
-        idx_etat = fields.indexOf("etat")
-        idx_inf_type = fields.indexOf("inf_type")
-        idx_inf_propri = fields.indexOf("inf_propri")
-        idx_noe_usage = fields.indexOf("noe_usage")
-        idx_inf_mat = fields.indexOf("inf_mat")
-        idx_dce = fields.indexOf("dce")
-        idx_commentaire = fields.indexOf("commentair")
-        idx_etiquette_jaune = fields.indexOf("etiquette_jaune")
-        idx_etiquette_orange = fields.indexOf("etiquette_orange")
-        
-        # Liste des gid POT-AC pour trigger SQL
-        gids_pot_ac = []
-        
-        # PERF-OPTIM: Construire un index gid -> feature UNE SEULE FOIS
-        t1 = time.perf_counter()
-        gids_needed = set(int(g) for g in liste_valeur_trouve_bt.index)
-        features_by_gid = {}
-        for feat in infra_pt_pot.getFeatures():
-            gid_val = feat["gid"]
-            if gid_val in gids_needed:
-                features_by_gid[gid_val] = feat
-        t2 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ-BD] Index features BT: {len(features_by_gid)} en {t2-t1:.3f}s", "PoleAerien", Qgis.Info)
-        
-        # PERF-02: Demarrer edition une seule fois
-        if not infra_pt_pot.isEditable():
-            infra_pt_pot.startEditing()
-
-        t3 = time.perf_counter()
-        count = 0
-        total = len(liste_valeur_trouve_bt)
-        
-        # Message initial
-        if progress_callback:
-            progress_callback(f"MAJ BT: 0/{total} poteaux...", 88)
-        
-        for gid, row in liste_valeur_trouve_bt.iterrows():
-            count += 1
-            
-            # Mise a jour UI tous les 5 features
-            if count % 5 == 0 or count == 1:
-                pct = 88 + int((count / total) * 8) if total > 0 else 88  # 88% -> 96%
-                if progress_callback:
-                    progress_callback(f"MAJ BT: {count}/{total}...", pct)
-                QApplication.processEvents()
-            
-            # PERF-OPTIM: Lookup direct O(1) au lieu de requête O(n)
-            featBT = features_by_gid.get(int(gid))
-            if featBT is None:
-                continue
-            
-            fid = featBT.id()
-
-            if str(row["Portée molle"]).upper() != "X":
-                # Cas normal: modifier uniquement les attributs nécessaires
-                if row["inf_type"]:
-                    infra_pt_pot.changeAttributeValue(fid, idx_inf_type, row["inf_type"])
-                    if row["inf_type"] == "POT-AC":
-                        gids_pot_ac.append(int(gid))
-                if row["inf_propri"]:
-                    infra_pt_pot.changeAttributeValue(fid, idx_inf_propri, row["inf_propri"])
-                infra_pt_pot.changeAttributeValue(fid, idx_noe_usage, "DI")
-                if row["typ_po_mod"]:
-                    infra_pt_pot.changeAttributeValue(fid, idx_inf_mat, row["typ_po_mod"])
-                infra_pt_pot.changeAttributeValue(fid, idx_etat, row["etat"])
-                infra_pt_pot.changeAttributeValue(fid, idx_dce, 'O')
-                
-                if idx_etiquette_orange >= 0 and row.get("etiquette_orange"):
-                    infra_pt_pot.changeAttributeValue(fid, idx_etiquette_orange, row["etiquette_orange"])
-                
-                # Zone privée BT: concaténer /PRIVE au commentaire
-                if row.get("zone_privee") == 'X' and idx_commentaire >= 0:
-                    commentaire_actuel = featBT["commentair"]
-                    commentaire_str = str(commentaire_actuel) if commentaire_actuel and commentaire_actuel != NULL else ''
-                    if '/PRIVE' not in commentaire_str.upper():
-                        nouveau_commentaire = f"{commentaire_str}/PRIVE" if commentaire_str.strip() else "/PRIVE"
-                        infra_pt_pot.changeAttributeValue(fid, idx_commentaire, nouveau_commentaire)
+            if isinstance(df_trouve_ft, pd.DataFrame) and not df_trouve_ft.empty:
+                df_trouve_ft.to_excel(writer, sheet_name='FT_MAJ')
             else:
-                # Cas portée molle: marquer l'existant et créer nouveau décalé
-                infra_pt_pot.changeAttributeValue(fid, idx_etat, 'PORTEE MOLLE')
-                
-                if not featBT.hasGeometry():
-                    QgsMessageLog.logMessage(
-                        f"miseAjourFinalDesDonneesBT: geometrie absente (gid {gid})",
-                        "MAJ_FT_BT", Qgis.Warning
-                    )
-                    continue
+                pd.DataFrame({"Info": ["Aucun FT identifie"]}).to_excel(
+                    writer, sheet_name='FT_MAJ', index=False)
 
-                geom = featBT.geometry()
-                if geom.isNull() or geom.isEmpty():
-                    QgsMessageLog.logMessage(
-                        f"miseAjourFinalDesDonneesBT: geometrie vide (gid {gid})",
-                        "MAJ_FT_BT", Qgis.Warning
-                    )
-                    continue
+            if isinstance(df_trouve_bt, pd.DataFrame) and not df_trouve_bt.empty:
+                df_trouve_bt.to_excel(writer, sheet_name='BT_MAJ')
+            else:
+                pd.DataFrame({"Info": ["Aucun BT identifie"]}).to_excel(
+                    writer, sheet_name='BT_MAJ', index=False)
 
-                if geom.isMultipart():
-                    QgsMessageLog.logMessage(
-                        f"miseAjourFinalDesDonneesBT: geometrie multipart (gid {gid})",
-                        "MAJ_FT_BT", Qgis.Warning
-                    )
-                    continue
+            if isinstance(df_introuvable_ft, pd.DataFrame) and not df_introuvable_ft.empty:
+                df_introuvable_ft.to_excel(writer, sheet_name='FT_INTROUVABLES', index=False)
 
-                if QgsWkbTypes.geometryType(geom.wkbType()) != QgsWkbTypes.PointGeometry:
-                    QgsMessageLog.logMessage(
-                        f"miseAjourFinalDesDonneesBT: geometrie non point (gid {gid})",
-                        "MAJ_FT_BT", Qgis.Warning
-                    )
-                    continue
-                
-                # Créer nouveau point décalé avec copie de tous les attributs
-                point_geom = geom.asPoint()
-                point_decale = QgsPointXY(point_geom.x() + 1, point_geom.y())
-                
-                feat = QgsFeature(featBT)
-                feat.setGeometry(QgsGeometry.fromPointXY(point_decale))
-                if row["inf_type"]:
-                    feat.setAttribute("inf_type", row["inf_type"])
-                if row["inf_propri"]:
-                    feat.setAttribute("inf_propri", row["inf_propri"])
-                feat.setAttribute("noe_usage", "DI")
-                if row["typ_po_mod"]:
-                    feat.setAttribute("inf_mat", row["typ_po_mod"])
-                feat.setAttribute("etat", row["etat"])
-                feat.setAttribute("dce", 'O')
-                infra_pt_pot.addFeature(feat)
-        
-        t4 = time.perf_counter()
-        temps_maj = t4 - t3
-        
-        # Message progression: enregistrement
-        if progress_callback:
-            progress_callback(f"Enregistrement BT ({count} poteaux)...", 96)
-        QApplication.processEvents()
+            if isinstance(df_introuvable_bt, pd.DataFrame) and not df_introuvable_bt.empty:
+                df_introuvable_bt.to_excel(writer, sheet_name='BT_INTROUVABLES', index=False)
 
-        # PERF-02: Commit unique a la fin
-        t5 = time.perf_counter()
-        if not infra_pt_pot.commitChanges():
-            errors = infra_pt_pot.commitErrors()
-            err_detail = "; ".join(errors) if errors else "inconnu"
-            msg = f"Commit BT échoué: {err_detail}"
-            infra_pt_pot.rollBack()
-            QgsMessageLog.logMessage(msg, "MAJ_FT_BT", Qgis.Critical)
-            raise RuntimeError(msg)
-        t6 = time.perf_counter()
-
-        # PERF-01: Declencher trigger PostgreSQL via batch SQL
-        if gids_pot_ac:
-            QgsMessageLog.logMessage(f"[MAJ-BT] Trigger PostgreSQL ({len(gids_pot_ac)} POT-AC)...", "PoleAerien", Qgis.Info)
-            self._execSqlTriggerBatch(infra_pt_pot, gids_pot_ac)
-            infra_pt_pot.triggerRepaint()
-        
-        # RÉCAP FINAL BT
-        temps_total = time.perf_counter() - t0_func
-        QgsMessageLog.logMessage("=" * 50, "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage("[MAJ-BT] TERMINE", "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage(f"[MAJ-BT] Poteaux traites: {count}", "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage(f"[MAJ-BT] Temps total: {temps_total:.1f}s", "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage(f"[MAJ-BT] MAJ attributs: {temps_maj:.1f}s", "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage(f"[MAJ-BT] Commit BD: {t6-t5:.1f}s", "PoleAerien", Qgis.Info)
-        QgsMessageLog.logMessage("=" * 50, "PoleAerien", Qgis.Info)
+        return filepath

@@ -6,6 +6,120 @@ Sécurisées pour l'utilisation dans les threads workers.
 """
 
 import re
+import xml.etree.ElementTree as ET
+
+
+# =============================================================================
+# PARSING HELPERS (centralisés - utilisés par comac_db_reader, comac_loader, pcm_parser)
+# =============================================================================
+
+def safe_float(value, default: float = 0.0) -> float:
+    """Parse float avec protection None/erreur et virgule française.
+    
+    Args:
+        value: Valeur à parser (None, int, float, str)
+        default: Valeur par défaut si parsing échoue
+        
+    Returns:
+        float parsée ou default
+    """
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    val = str(value).strip().replace('m', '')
+    if not val:
+        return default
+    try:
+        return float(val.replace(',', '.'))
+    except (ValueError, AttributeError):
+        return default
+
+
+def safe_int(value, default: int = 0) -> int:
+    """Parse int avec protection None/erreur.
+    
+    Args:
+        value: Valeur à parser (None, int, float, str)
+        default: Valeur par défaut si parsing échoue
+        
+    Returns:
+        int parsé ou default
+    """
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    val = str(value).strip()
+    if not val:
+        return default
+    try:
+        return int(float(val.replace(',', '.')))
+    except (ValueError, AttributeError):
+        return default
+
+
+def get_xml_text(element: ET.Element, tag: str, default: str = "") -> str:
+    """Extrait le texte d'un sous-élément XML de manière sûre.
+    
+    Args:
+        element: Élément XML parent
+        tag: Nom du sous-élément à chercher
+        default: Valeur par défaut si absent
+        
+    Returns:
+        Texte du sous-élément ou default
+    """
+    child = element.find(tag)
+    return child.text.strip() if child is not None and child.text else default
+
+
+def get_xml_float(element: ET.Element, tag: str, default: float = 0.0) -> float:
+    """Extrait un float d'un sous-élément XML.
+    
+    Args:
+        element: Élément XML parent
+        tag: Nom du sous-élément
+        default: Valeur par défaut
+        
+    Returns:
+        float parsée ou default
+    """
+    return safe_float(get_xml_text(element, tag), default)
+
+
+def parse_bool(value: str) -> bool:
+    """Parse booléen (0/1)."""
+    return str(value).strip() == '1'
+
+
+# =============================================================================
+# EXPORT PATH HELPER
+# =============================================================================
+
+def build_export_path(chemin: str, default_name: str) -> str:
+    """Construit le chemin complet pour un fichier d'export Excel.
+    
+    Args:
+        chemin: Chemin fourni (répertoire ou fichier)
+        default_name: Nom de fichier par défaut (ex: "analyse.xlsx")
+        
+    Returns:
+        Chemin complet vers le fichier .xlsx
+    """
+    import os
+    if os.path.isdir(chemin):
+        return os.path.join(chemin, default_name)
+    if not chemin.endswith('.xlsx'):
+        return chemin + '.xlsx'
+    return chemin
+
+
+# =============================================================================
+# NORMALISATION APPUIS
+# =============================================================================
 
 def normalize_appui_num(inf_num):
     """Normalise un numéro d'appui pour comparaison.
@@ -112,6 +226,38 @@ def temps_ecoule(seconde):
     if hour > 0:
         return f"{hour}h: {int(minutes)}mn : {int(seconds)}sec"
     return f"{minutes}mn : {int(seconds)}sec"
+
+
+# =============================================================================
+# FILE FILTERING (shared by C6_vs_Bd, police_workflow, etc.)
+# =============================================================================
+
+_OUTPUT_PREFIXES = (
+    'analyse_c6', 'policec6_export', 'police_c6_export',
+    'rapport_', 'rapport_batch_', 'export_', '~$',
+    'analyse_', 'ficheappui', 'gespot',
+)
+_OUTPUT_KEYWORDS = (
+    'ficheappui', '_c7', 'annexe c7', 'annexe_c7',
+    'comac', 'capft', 'cap_ft',
+)
+
+
+def is_plugin_output_file(filename):
+    """Return True if the file is a plugin output / temp file, not a real C6 annexe.
+
+    Args:
+        filename: Filename (basename, not full path)
+
+    Returns:
+        True if the file should be excluded from C6 detection
+    """
+    name = filename.lower()
+    if any(name.startswith(p) for p in _OUTPUT_PREFIXES):
+        return True
+    if any(kw in name for kw in _OUTPUT_KEYWORDS):
+        return True
+    return False
 
 
 def find_default_layer_index(layer_list, pattern):

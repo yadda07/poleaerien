@@ -412,3 +412,44 @@ def compter_cables_par_appui(
             )
     
     return result
+
+
+def capacites_compatibles(
+    capas_possibles_source: List[List[int]],
+    capas_bdd: List[int]
+) -> bool:
+    """
+    Vérifie si les capacités BDD sont compatibles avec les câbles source (C6 ou COMAC).
+    Chaque capacité BDD doit pouvoir être associée à un câble source
+    dont les capacités possibles incluent cette valeur.
+    
+    Ex: source = [[24,36], [24,36]], BDD = [24, 36] → True
+    Ex: source = [[24,36]], BDD = [72] → False
+    
+    Args:
+        capas_possibles_source: Liste de listes de capacités possibles par câble source
+        capas_bdd: Liste des capacités BDD (cab_capa)
+    
+    Returns:
+        True si toutes les capacités BDD matchent un câble source
+    """
+    if len(capas_possibles_source) != len(capas_bdd):
+        return False
+    
+    if not capas_bdd and not capas_possibles_source:
+        return True
+    
+    # Matching glouton : pour chaque capacité BDD, trouver un câble source compatible
+    used = [False] * len(capas_possibles_source)
+    
+    for bdd_capa in sorted(capas_bdd):
+        matched = False
+        for i, possibles in enumerate(capas_possibles_source):
+            if not used[i] and bdd_capa in possibles:
+                used[i] = True
+                matched = True
+                break
+        if not matched:
+            return False
+    
+    return True

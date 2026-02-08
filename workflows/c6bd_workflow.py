@@ -17,6 +17,7 @@ from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
 from qgis.core import Qgis, QgsMessageLog
 from ..C6_vs_Bd import C6_vs_Bd
 from ..async_tasks import C6BdTask, ExcelExportTask, run_async_task
+from ..core_utils import build_export_path
 import os
 
 
@@ -178,13 +179,7 @@ class C6BdWorkflow(QObject):
         state = self._extraction_state
         chemin_export = state['chemin_export']
         
-        # Construire chemin fichier export
-        if os.path.isdir(chemin_export):
-            fichier_export = os.path.join(chemin_export, "analyse_c6_bd.xlsx")
-        elif not chemin_export.endswith('.xlsx'):
-            fichier_export = chemin_export + ".xlsx"
-        else:
-            fichier_export = chemin_export
+        fichier_export = build_export_path(chemin_export, "analyse_c6_bd.xlsx")
         
         params = {
             'repertoire_c6': state['chemin_c6'],
