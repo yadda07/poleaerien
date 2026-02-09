@@ -11,8 +11,10 @@ import os
 import time
 
 from qgis.PyQt.QtCore import QObject
+from qgis.core import QgsMessageLog, Qgis
 
 from .project_detector import DetectionResult
+from .db_layer_loader import DbLayerLoader
 
 
 _VALIDATION_LABELS = {
@@ -75,6 +77,12 @@ class BatchOrchestrator(QObject):
         # Key: sro (str), Value: list[CableSegment]
         self._fddcpi_cache = {}
 
+        # Project mode: DB-loaded layers (temporary or persistent)
+        self._db_loader = None
+        self._pm_lyr_pot = None
+        self._pm_lyr_cap = None
+        self._pm_lyr_com = None
+
         # Register launchers
         self._runner.set_launcher('maj', self._launch_maj)
         self._runner.set_launcher('capft', self._launch_capft)
@@ -108,6 +116,13 @@ class BatchOrchestrator(QObject):
         self._fddcpi_cache = {}
         self._dlg.set_running(True)
         self._dlg.textBrowser.clear()
+
+        # Project mode: load layers from DB before starting batch
+        if self._dlg.is_project_mode:
+            if not self._load_project_mode_layers():
+                self._dlg.reset_after_batch()
+                return
+
         self._runner.start(module_keys)
 
     def _on_cancel(self):
@@ -162,9 +177,13 @@ class BatchOrchestrator(QObject):
                 os.startfile(filepath)
             except Exception as exc:
                 self._dlg.log_message(f"Erreur rapport: {exc}", 'error')
+
+        # Project mode cleanup: remove temp layers if user didn't ask to keep them
+        self._cleanup_project_mode_layers()
         self._dlg.reset_after_batch()
 
     def _on_batch_cancelled(self):
+        self._cleanup_project_mode_layers()
         self._dlg.reset_after_batch()
         self._dlg.log_message("Batch annulé.", 'warning')
 
@@ -178,13 +197,114 @@ class BatchOrchestrator(QObject):
         return self._dlg.get_export_dir()
 
     def _lyr_pot(self):
+        if self._pm_lyr_pot:
+            return self._pm_lyr_pot
         return self._dlg.comboInfraPtPot.currentLayer()
 
     def _lyr_capft(self):
+        if self._pm_lyr_cap:
+            return self._pm_lyr_cap
         return self._dlg.comboEtudeCapFt.currentLayer()
 
     def _lyr_comac(self):
+        if self._pm_lyr_com:
+            return self._pm_lyr_com
         return self._dlg.comboEtudeComac.currentLayer()
+
+    # ------------------------------------------------------------------
+    #  Project Mode: DB layer loading
+    # ------------------------------------------------------------------
+    def _load_project_mode_layers(self) -> bool:
+        """Load filtered layers from PostgreSQL for project mode.
+
+        Returns:
+            True if infra_pt_pot loaded successfully (mandatory).
+        """
+        sro = self._dlg.sro
+        if not sro:
+            self._dlg.log_message("Mode Projet: SRO non disponible", 'error')
+            return False
+
+        self._dlg.log_message(
+            f"Mode Projet: chargement depuis BDD (SRO={sro})", 'info'
+        )
+
+        self._db_loader = DbLayerLoader()
+        if not self._db_loader.connect():
+            self._dlg.log_message(
+                "Mode Projet: connexion PostgreSQL impossible", 'error'
+            )
+            return False
+
+        # Always add layers to QGIS project so that get_layer_safe() and
+        # other name-based lookups work inside workflows.
+        # Cleanup after batch removes them if user didn't ask to keep.
+
+        # Load infra_pt_pot (mandatory)
+        self._pm_lyr_pot = self._db_loader.load_infra_pt_pot(
+            sro, add_to_project=True
+        )
+        if not self._pm_lyr_pot or not self._pm_lyr_pot.isValid():
+            self._dlg.log_message(
+                "Mode Projet: couche infra_pt_pot non chargee", 'error'
+            )
+            return False
+
+        count_pot = self._pm_lyr_pot.featureCount()
+        self._dlg.log_message(
+            f"  infra_pt_pot: {count_pot} poteaux", 'success'
+        )
+
+        # Load etude_cap_ft (optional)
+        self._pm_lyr_cap = self._db_loader.load_etude_cap_ft(
+            sro, add_to_project=True
+        )
+        if self._pm_lyr_cap and self._pm_lyr_cap.isValid():
+            count_cap = self._pm_lyr_cap.featureCount()
+            self._dlg.log_message(
+                f"  etude_cap_ft: {count_cap} zones", 'success'
+            )
+        else:
+            self._dlg.log_message(
+                "  etude_cap_ft: non disponible (modules CAP FT/MAJ limites)",
+                'warning'
+            )
+            self._pm_lyr_cap = None
+
+        # Load etude_comac (optional)
+        self._pm_lyr_com = self._db_loader.load_etude_comac(
+            sro, add_to_project=True
+        )
+        if self._pm_lyr_com and self._pm_lyr_com.isValid():
+            count_com = self._pm_lyr_com.featureCount()
+            self._dlg.log_message(
+                f"  etude_comac: {count_com} zones", 'success'
+            )
+        else:
+            self._dlg.log_message(
+                "  etude_comac: non disponible (module COMAC/MAJ limites)",
+                'warning'
+            )
+            self._pm_lyr_com = None
+
+        return True
+
+    def _cleanup_project_mode_layers(self):
+        """Remove temporary DB layers if user did not ask to keep them."""
+        if not self._db_loader:
+            return
+
+        if not self._dlg.load_layers_in_qgis:
+            self._db_loader.cleanup_layers()
+            QgsMessageLog.logMessage(
+                "Mode Projet: couches temporaires supprimees",
+                "PoleAerien", Qgis.Info
+            )
+
+        self._pm_lyr_pot = None
+        self._pm_lyr_cap = None
+        self._pm_lyr_com = None
+        self._db_loader = None
 
     def _auto_field(self, layer, patterns=None):
         """Auto-detect study field name from layer."""
@@ -439,11 +559,12 @@ class BatchOrchestrator(QObject):
             on_done(False, "Dossier C6 non détecté")
             return
 
-        # Check required layers exist
-        liste_absent = self._police_wf.check_layers_exist()
-        if liste_absent:
-            on_done(False, f"Couches manquantes: {', '.join(liste_absent)}")
-            return
+        # In project mode, skip check_layers_exist (layer comes from DB loader)
+        if not self._dlg.is_project_mode:
+            liste_absent = self._police_wf.check_layers_exist()
+            if liste_absent:
+                on_done(False, f"Couches manquantes: {', '.join(liste_absent)}")
+                return
 
         self._safe_connect_once(
             self._police_wf.analysis_finished, self._on_police_done
@@ -456,6 +577,11 @@ class BatchOrchestrator(QObject):
         )
 
         params = {}
+
+        # Project mode: inject layer reference and SRO directly
+        if self._pm_lyr_pot:
+            params['layer_appuis'] = self._pm_lyr_pot
+            params['sro'] = self._dlg.sro
 
         # Pass study layer info so auto-browse can get study names
         lyr_cap = self._lyr_capft()

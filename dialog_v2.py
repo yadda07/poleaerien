@@ -14,6 +14,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QCheckBox, QFrame,
     QTextBrowser, QProgressBar, QFileDialog,
     QWidget, QScrollArea, QSplitter,
+    QRadioButton, QButtonGroup,
 )
 from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
 from qgis.PyQt.QtGui import QTextCursor, QFont
@@ -265,6 +266,7 @@ class PoleAerienDialogV2(QDialog):
         self._detection = DetectionResult()
         self._is_running = False
         self._module_rows = {}
+        self._project_mode = False
         self.smooth_progress = SmoothProgressController(interval_ms=25)
 
         self._build_ui()
@@ -300,6 +302,7 @@ class PoleAerienDialogV2(QDialog):
         top_lay.setContentsMargins(0, 0, 0, 0)
 
         self._build_project_group(top_lay)
+        self._build_mode_group(top_lay)
         self._build_layers_group(top_lay)
         self._build_modules_group(top_lay)
         splitter.addWidget(top_widget)
@@ -426,9 +429,81 @@ class PoleAerienDialogV2(QDialog):
         grp.setLayout(lay)
         parent.addWidget(grp)
 
+    # ---- Mode group ----
+    def _build_mode_group(self, parent):
+        grp = QgsCollapsibleGroupBox("Mode d'execution")
+        lay = QVBoxLayout()
+        lay.setSpacing(4)
+        lay.setContentsMargins(6, 4, 6, 4)
+
+        # Radio buttons
+        radio_row = QHBoxLayout()
+        radio_row.setSpacing(12)
+
+        self._mode_group = QButtonGroup(self)
+        self._radio_qgis = QRadioButton("Couches QGIS")
+        self._radio_qgis.setToolTip(
+            "Utiliser les couches deja chargees dans le projet QGIS"
+        )
+        self._radio_project = QRadioButton("Mode Projet (BDD)")
+        self._radio_project.setToolTip(
+            "Charger automatiquement les couches depuis PostgreSQL "
+            "en filtrant par le SRO du projet"
+        )
+        self._mode_group.addButton(self._radio_qgis, 0)
+        self._mode_group.addButton(self._radio_project, 1)
+        self._radio_qgis.setChecked(True)
+
+        radio_row.addWidget(self._radio_qgis)
+        radio_row.addWidget(self._radio_project)
+        radio_row.addStretch()
+        lay.addLayout(radio_row)
+
+        # SRO info row (visible only in project mode)
+        self._sro_row = QWidget()
+        sro_lay = QHBoxLayout(self._sro_row)
+        sro_lay.setContentsMargins(0, 2, 0, 0)
+        sro_lay.setSpacing(6)
+
+        sro_lbl = QLabel("SRO :")
+        sro_lbl.setFixedWidth(52)
+        sro_lbl.setStyleSheet("font-weight: 600; font-size: 9pt;")
+        sro_lay.addWidget(sro_lbl)
+
+        self._sro_value = QLabel("-")
+        self._sro_value.setStyleSheet(
+            "font-family: 'Consolas', monospace; font-size: 9pt; "
+            "color: #1565c0; font-weight: bold;"
+        )
+        sro_lay.addWidget(self._sro_value)
+        sro_lay.addStretch()
+
+        self._sro_status = QLabel()
+        self._sro_status.setStyleSheet("font-size: 8pt;")
+        sro_lay.addWidget(self._sro_status)
+
+        self._sro_row.setVisible(False)
+        lay.addWidget(self._sro_row)
+
+        # Load layers checkbox (visible only in project mode)
+        self._chk_load_layers = QCheckBox(
+            "Charger les couches dans le projet QGIS"
+        )
+        self._chk_load_layers.setToolTip(
+            "Si coche, les couches filtrees par SRO seront ajoutees au projet QGIS.\n"
+            "Sinon, elles seront utilisees temporairement pour l'analyse uniquement."
+        )
+        self._chk_load_layers.setChecked(False)
+        self._chk_load_layers.setVisible(False)
+        lay.addWidget(self._chk_load_layers)
+
+        grp.setLayout(lay)
+        parent.addWidget(grp)
+
     # ---- Layers group ----
     def _build_layers_group(self, parent):
-        grp = QgsCollapsibleGroupBox("Couches QGIS")
+        self._layers_grp = QgsCollapsibleGroupBox("Couches QGIS")
+        grp = self._layers_grp
         form = QFormLayout()
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(4)
@@ -615,6 +690,7 @@ class PoleAerienDialogV2(QDialog):
         self.startBtn.clicked.connect(self._on_start_clicked)
         self.cancelBtn.clicked.connect(self._on_cancel_clicked)
         self.helpButton.clicked.connect(lambda: self.help_requested.emit())
+        self._mode_group.buttonClicked.connect(self._on_mode_changed)
 
     # ==================================================================
     #  PROJECT DETECTION
@@ -636,6 +712,23 @@ class PoleAerienDialogV2(QDialog):
         if path:
             self.exportPathEdit.setText(path)
 
+    def _on_mode_changed(self, button):
+        is_project = (button == self._radio_project)
+        self._project_mode = is_project
+
+        # Toggle visibility
+        self._layers_grp.setVisible(not is_project)
+        self._sro_row.setVisible(is_project)
+        self._chk_load_layers.setVisible(is_project)
+
+        # Enable project mode radio only if SRO is available
+        if is_project and not self._detection.sro:
+            self._sro_value.setText("-")
+            self._sro_status.setText("[--] SRO non derivable du nom de projet")
+            self._sro_status.setStyleSheet("color: #c62828; font-size: 8pt;")
+
+        self._validate_start()
+
     def _on_project_path_changed(self, path):
         if not path or not os.path.isdir(path):
             self._reset_detection()
@@ -650,6 +743,22 @@ class PoleAerienDialogV2(QDialog):
         self._project_tag.setText(d.project_name)
         self._project_tag.setVisible(bool(d.project_name))
         self._subtitle.setText(f"  -  {d.project_name}")
+
+        # SRO display
+        if d.sro:
+            self._sro_value.setText(d.sro)
+            self._sro_status.setText("[OK] SRO detecte")
+            self._sro_status.setStyleSheet("color: #2e7d32; font-size: 8pt;")
+            self._radio_project.setEnabled(True)
+        else:
+            self._sro_value.setText("-")
+            self._sro_status.setText("[--] Format nom projet non reconnu")
+            self._sro_status.setStyleSheet("color: #c62828; font-size: 8pt;")
+            # Disable project mode if no SRO
+            if self._project_mode:
+                self._radio_qgis.setChecked(True)
+                self._on_mode_changed(self._radio_qgis)
+            self._radio_project.setEnabled(False)
 
         # Export default
         if not self.exportPathEdit.text():
@@ -680,6 +789,8 @@ class PoleAerienDialogV2(QDialog):
 
         # Log
         self._log_info(f"Projet : {d.project_name}")
+        if d.sro:
+            self._log_ok(f"  SRO : {d.sro}")
         for label, p, found in d.summary_lines():
             if found:
                 self._log_ok(f"  {label} : {os.path.basename(p)}")
@@ -691,6 +802,9 @@ class PoleAerienDialogV2(QDialog):
         self._project_tag.setVisible(False)
         self._subtitle.setText("  -  Selectionnez un dossier projet")
         self._det_summary.setVisible(False)
+        self._sro_value.setText("-")
+        self._sro_status.setText("")
+        self._radio_project.setEnabled(False)
         for row in self._module_rows.values():
             row.set_detected(False)
         self._update_mod_count()
@@ -722,6 +836,10 @@ class PoleAerienDialogV2(QDialog):
             self.projectPathEdit.text() or ''
         )
         has_mod = any(r.is_selected for r in self._module_rows.values())
+        # In project mode, SRO must be available
+        if self._project_mode and not self._detection.sro:
+            self.startBtn.setEnabled(False)
+            return
         self.startBtn.setEnabled(has_proj and has_mod and not self._is_running)
 
     def selected_modules(self):
@@ -828,6 +946,21 @@ class PoleAerienDialogV2(QDialog):
     @property
     def detection(self):
         return self._detection
+
+    @property
+    def is_project_mode(self):
+        """True when 'Mode Projet (BDD)' is selected."""
+        return self._project_mode
+
+    @property
+    def load_layers_in_qgis(self):
+        """True when user wants DB layers added to the QGIS project."""
+        return self._project_mode and self._chk_load_layers.isChecked()
+
+    @property
+    def sro(self):
+        """SRO derived from project name, or empty string."""
+        return self._detection.sro
 
     def get_export_dir(self):
         return self.exportPathEdit.text() or self._detection.export_dir

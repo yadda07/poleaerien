@@ -235,10 +235,15 @@ class PoliceWorkflow(QObject):
         self.message_received.emit(f"Mode auto-browse: {len(c6_files_list)} études trouvées", "blue")
         
         # 3. Extraire appuis et SRO depuis couche infra_pt_pot (MAIN THREAD)
-        layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
+        # Project mode: layer and SRO can be injected via params
+        injected_layer = params.get('layer_appuis')
+        if injected_layer:
+            layer_appuis = [injected_layer]
+        else:
+            layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
         
-        sro = None
-        if layer_appuis:
+        sro = params.get('sro')
+        if not sro and layer_appuis:
             sro = extract_sro_from_layer(layer_appuis[0])
         if not sro:
             first_file = c6_files_list[0][1]

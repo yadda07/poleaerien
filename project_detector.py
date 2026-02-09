@@ -31,11 +31,34 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 
 
+def extract_sro_from_project_name(project_name: str) -> Optional[str]:
+    """Derive SRO code from project directory name.
+
+    Convention: directory uses hyphens, SRO uses slashes.
+    Example: '63041-B1I-PMZ-00003' -> '63041/B1I/PMZ/00003'
+
+    Args:
+        project_name: Basename of the project directory.
+
+    Returns:
+        SRO string or None if the name does not match the expected pattern.
+    """
+    if not project_name:
+        return None
+    sro = project_name.replace('-', '/')
+    if re.match(r'^\d{5}/[A-Z]\d[A-Z]/[A-Z]{3}/\d{5}$', sro):
+        return sro
+    return None
+
+
 @dataclass
 class DetectionResult:
     """Result of project folder auto-detection."""
     project_root: str = ''
     project_name: str = ''
+
+    # SRO derived from project name
+    sro: str = ''
 
     # MAJ FT/BT
     ftbt_excel: str = ''
@@ -272,6 +295,9 @@ def detect_project(project_root: str) -> DetectionResult:
     result.project_root = os.path.normpath(project_root)
     result.project_name = os.path.basename(result.project_root)
     result.export_dir = result.project_root
+
+    # Derive SRO from project name (e.g. 63041-B1I-PMZ-00003 -> 63041/B1I/PMZ/00003)
+    result.sro = extract_sro_from_project_name(result.project_name) or ''
 
     # FT-BT KO Excel (in root)
     ftbt = _find_excel(project_root, _FTBT_PATTERNS)
