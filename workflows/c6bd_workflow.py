@@ -102,52 +102,32 @@ class C6BdWorkflow(QObject):
         }
 
         self.progress_changed.emit(5)
-        self.message_received.emit("Extraction des poteaux FT couverts...", "blue")
+        self.message_received.emit("Extraction des poteaux FT (IN + OUT)...", "blue")
         
-        # Étape 1: Extraction poteaux IN (via QTimer pour libérer l'event loop)
-        QTimer.singleShot(0, self._step1_extract_poteaux_in)
+        # Etape 1: Extraction poteaux IN + OUT en une seule passe
+        QTimer.singleShot(0, self._step1_extract_poteaux)
 
-    def _step1_extract_poteaux_in(self):
-        """Étape 1: Extraction poteaux FT couverts (IN)."""
+    def _step1_extract_poteaux(self):
+        """Etape 1: Extraction poteaux FT IN + OUT en une seule passe."""
         if self._cancelled:
             return
         
         try:
             state = self._extraction_state
-            df_qgis = self.c6bd_logic.liste_poteau_cap_ft(
+            df_qgis, df_out = self.c6bd_logic.extraire_poteaux_in_out(
                 state['lyr_pot_name'], state['lyr_cap_name'], state['col_cap']
             )
             state['df_qgis'] = df_qgis
+            state['df_poteaux_out'] = df_out
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur extraction poteaux IN: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur extraction poteaux: {e}", "PoleAerien", Qgis.Critical)
             self.error_occurred.emit(f"Erreur extraction: {e}")
             return
 
-        self.progress_changed.emit(25)
-        self.message_received.emit("Extraction des poteaux FT hors périmètre...", "blue")
-        
-        # Étape 2 via QTimer
-        QTimer.singleShot(0, self._step2_extract_poteaux_out)
-
-    def _step2_extract_poteaux_out(self):
-        """Étape 2: Extraction poteaux FT hors périmètre (OUT)."""
-        if self._cancelled:
-            return
-        
-        try:
-            state = self._extraction_state
-            df_out = self.c6bd_logic.liste_poteaux_ft_out(
-                state['lyr_pot_name'], state['lyr_cap_name']
-            )
-            state['df_poteaux_out'] = df_out
-        except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur extraction poteaux OUT: {e}", "PoleAerien", Qgis.Warning)
-            state['df_poteaux_out'] = None
-
         self.progress_changed.emit(40)
-        self.message_received.emit("Vérification études vs fichiers C6...", "blue")
+        self.message_received.emit("Verification etudes vs fichiers C6...", "blue")
         
-        # Étape 3 via QTimer
+        # Etape 2 via QTimer
         QTimer.singleShot(0, self._step3_verify_etudes)
 
     def _step3_verify_etudes(self):

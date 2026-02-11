@@ -116,7 +116,8 @@ EXCEL_COL_EFFORT = 7             # H - Effort
 EXCEL_COL_CONDUCTEUR = 11        # L - Conducteur (CU/BT)
 EXCEL_COL_LONGUEUR_FACTURER = 46 # AU - Longueur à facturer (portée)
 
-# Section FIBRE OPTIQUE (colonnes AO+)
+# Section FIBRE OPTIQUE (colonnes AK+)
+EXCEL_COL_BOITIER = 43           # AR - Boîtier fibre optique (oui/non)
 EXCEL_COL_FO_TYPE_LIGNE = 40     # AO - Type de ligne (L1092-xx-P)
 
 # =============================================================================

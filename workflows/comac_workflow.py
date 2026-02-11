@@ -10,7 +10,7 @@ from ..Comac import Comac
 from ..async_tasks import ComacTask, ExcelExportTask, run_async_task
 from ..core_utils import build_export_path
 from ..db_connection import extract_sro_from_layer
-from ..cable_analyzer import extraire_appuis_from_layer
+from ..cable_analyzer import extraire_appuis_wkb
 import os
 import copy
 
@@ -37,33 +37,33 @@ class ComacWorkflow(QObject):
         self.current_task = None
 
     def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export,
-                        fddcpi_cache=None):
+                        fddcpi_cache=None, sro_appuis_cache=None):
         """
         Lance l'analyse COMAC.
         
         Args:
             lyr_pot (QgsVectorLayer): Couche Poteaux (infra_pt_pot)
             lyr_comac (QgsVectorLayer): Couche Etude COMAC
-            col_comac (str): Colonne identifiant l'étude dans la couche COMAC
-            chemin_comac (str): Répertoire des fichiers COMAC
+            col_comac (str): Colonne identifiant l'etude dans la couche COMAC
+            chemin_comac (str): Repertoire des fichiers COMAC
             chemin_export (str): Chemin pour le fichier Excel de sortie
             fddcpi_cache (list|None): CableSegment list from previous fddcpi2 call (batch optimization)
+            sro_appuis_cache (dict|None): {'sro': str, 'appuis_wkb': list} from another module (batch optimization)
         """
         if not lyr_pot or not lyr_comac:
             self.error_occurred.emit("Couches invalides ou manquantes")
             return
 
         if not os.path.isdir(chemin_comac):
-            self.error_occurred.emit("Répertoire COMAC invalide")
+            self.error_occurred.emit("Repertoire COMAC invalide")
             return
 
-        # 1. Extraction des données (Main Thread)
+        # 1. Extraction des donnees (Main Thread) - passe unique
         try:
-            doublons, hors_etude = self.comac_logic.verificationsDonneesComac(
-                lyr_pot.name(), lyr_comac.name(), col_comac
-            )
-            dico_qgis, dico_poteaux_prives = self.comac_logic.liste_poteau_comac(
-                lyr_pot.name(), lyr_comac.name(), col_comac
+            doublons, hors_etude, dico_qgis, dico_poteaux_prives = (
+                self.comac_logic.extraire_donnees_comac(
+                    lyr_pot.name(), lyr_comac.name(), col_comac
+                )
             )
         except ValueError as e:
             self.error_occurred.emit(str(e))
@@ -73,27 +73,21 @@ class ComacWorkflow(QObject):
             self.error_occurred.emit(f"Erreur technique extraction: {e}")
             return
 
-        # 2. Extraction SRO + appuis géométrie pour vérif câbles (Main Thread)
-        sro = extract_sro_from_layer(lyr_pot)
-        appuis_wkb = []
-        if sro:
-            raw_appuis = extraire_appuis_from_layer(lyr_pot)
-            for appui in raw_appuis:
-                geom = appui.get('geom')
-                appuis_wkb.append({
-                    'num_appui': appui.get('num_appui', ''),
-                    'feature_id': appui.get('feature_id'),
-                    'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None
-                })
-            QgsMessageLog.logMessage(
-                f"[COMAC] SRO={sro}, {len(appuis_wkb)} appuis extraits pour vérif câbles",
-                "PoleAerien", Qgis.Info
-            )
+        # 2. Extraction SRO + appuis WKB pour verif cables (Main Thread)
+        # Utiliser le cache batch si disponible (evite double extraction)
+        if sro_appuis_cache:
+            sro = sro_appuis_cache.get('sro')
+            appuis_wkb = sro_appuis_cache.get('appuis_wkb', [])
         else:
-            QgsMessageLog.logMessage(
-                "[COMAC] SRO non trouvé - vérif câbles désactivée",
-                "PoleAerien", Qgis.Warning
-            )
+            sro = extract_sro_from_layer(lyr_pot)
+            appuis_wkb = []
+            if sro:
+                appuis_wkb = extraire_appuis_wkb(lyr_pot)
+            else:
+                QgsMessageLog.logMessage(
+                    "[COMAC] SRO non trouve - verif cables desactivee",
+                    "PoleAerien", Qgis.Warning
+                )
 
         # 3. Préparation des données pour la Task
         fichier_export = build_export_path(chemin_export, "ANALYSE_COMAC.xlsx")
@@ -143,7 +137,8 @@ class ComacWorkflow(QObject):
                 result['resultats'],
                 result['fichier_export'],
                 result.get('dico_verif_secu'),
-                result.get('verif_cables')
+                result.get('verif_cables'),
+                result.get('verif_boitiers')
             ],
             payload=result,
         )

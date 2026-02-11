@@ -135,7 +135,23 @@ def _kpi_capft(r):
     return ok, ne + nq, f"{ok} OK | {ne} absents QGIS | {nq} absents Excel"
 
 def _kpi_comac(r):
-    return _kpi_capft(r)
+    base_ok, base_nok, base_msg = _kpi_capft(r)
+    # Ajouter câbles + boîtiers au bilan
+    verif_cables = r.get('verif_cables')
+    cable_nok = 0
+    if verif_cables:
+        cable_nok = sum(1 for e in verif_cables if e.get('statut') in ('ECART', 'ABSENT_BDD'))
+    verif_boitiers = r.get('verif_boitiers')
+    boitier_nok = 0
+    if verif_boitiers:
+        boitier_nok = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR')
+    total_nok = base_nok + cable_nok + boitier_nok
+    parts = [base_msg] if base_msg else []
+    if cable_nok:
+        parts.append(f"{cable_nok} ecarts cables")
+    if boitier_nok:
+        parts.append(f"{boitier_nok} err boitiers")
+    return base_ok, total_nok, ' | '.join(parts)
 
 def _kpi_c6bd(r):
     df = r.get('final_df')
@@ -235,10 +251,25 @@ def _checks_comac(r):
                             f"{ok_h} OK, {nok_h} insuffisants"))
     verif_cables = r.get('verif_cables')
     if verif_cables:
-        ok_c = sum(1 for e in verif_cables if e.get('statut') == 'OK')
-        nok_c = len(verif_cables) - ok_c
-        checks.append(("Verif cables COMAC vs BDD", ok_c, nok_c,
-                        f"{ok_c} OK, {nok_c} ecarts"))
+        cables_only = [e for e in verif_cables if e.get('statut')]
+        if cables_only:
+            ok_c = sum(1 for e in cables_only if e.get('statut') == 'OK')
+            nok_c = len(cables_only) - ok_c
+            checks.append(("Verif cables COMAC vs BDD", ok_c, nok_c,
+                            f"{ok_c} OK, {nok_c} ecarts"))
+    dico_boitier = r.get('dico_boitier_comac', {})
+    verif_boitiers = r.get('verif_boitiers')
+    if dico_boitier:
+        nb_oui = sum(1 for v in dico_boitier.values() if str(v).lower() == 'oui')
+        nb_non = sum(1 for v in dico_boitier.values() if str(v).lower() == 'non')
+        if verif_boitiers:
+            ok_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'OK')
+            nok_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR')
+            checks.append(("Verif boitiers COMAC vs BPE", ok_b, nok_b,
+                            f"{ok_b} OK, {nok_b} absents BPE ({nb_non} Non)"))
+        else:
+            checks.append(("Verif boitiers COMAC vs BPE", nb_non, 0,
+                            f"{nb_oui} Oui, {nb_non} Non, aucune verif BPE necessaire"))
     if not checks:
         checks = [("Analyse COMAC", 0, 0, "Pas de resultats")]
     return checks
@@ -559,23 +590,40 @@ def write_comac(wb, result):
     verif_cables = result.get('verif_cables')
     if verif_cables:
         ws = wb.create_sheet("COMAC_CABLES")
+        has_boitier = any(e.get('boitier_comac') for e in verif_cables)
         hdrs = ["APPUI", "NB COMAC", "REFS COMAC", "CAPAS COMAC",
                 "NB BDD", "CAPAS BDD", "STATUT", "MESSAGE"]
-        _init_sheet(ws, key, hdrs, [20, 12, 40, 25, 12, 25, 14, 55])
+        widths = [20, 12, 40, 25, 12, 25, 14, 55]
+        if has_boitier:
+            hdrs.extend(["BOITIER COMAC", "BPE TYPE", "BOITIER STATUT"])
+            widths.extend([15, 15, 15])
+        _init_sheet(ws, key, hdrs, widths)
         r = 2
         for e in verif_cables:
             st = e.get('statut', '')
-            _row(ws, r, [
+            vals = [
                 e.get('num_appui', ''), e.get('nb_cables_comac', 0),
                 e.get('cables_comac', ''),
                 '+'.join(e.get('capas_comac', [])),
                 e.get('nb_cables_bdd', 0),
                 '+'.join(str(c) for c in e.get('capas_bdd', [])),
-                st, e.get('message', '')])
+                st, e.get('message', '')]
+            if has_boitier:
+                vals.extend([
+                    e.get('boitier_comac', ''),
+                    e.get('bpe_noe_type', ''),
+                    e.get('boitier_statut', '')])
             fill = _P_OK if st == 'OK' else (_P_CRIT if st == 'ECART' else (
                 _P_WARN if st == 'ABSENT_BDD' else None))
-            if fill:
-                _fill_row(ws, r, fill, 8)
+            _row(ws, r, vals, fill=fill)
+            if has_boitier:
+                bst = e.get('boitier_statut', '')
+                if bst == 'ERREUR':
+                    for c in range(9, 12):
+                        ws.cell(row=r, column=c).fill = _P_CRIT
+                elif bst == 'OK':
+                    for c in range(9, 12):
+                        ws.cell(row=r, column=c).fill = _P_OK
             r += 1
 
 

@@ -55,13 +55,12 @@ class CapFtWorkflow(QObject):
 
         fichier_export = build_export_path(chemin_export, "analyse_cap_ft.xlsx")
 
-        # 1. Extraction des données (Main Thread)
+        # 1. Extraction des données (Main Thread) - passe unique
         try:
-            doublons, hors_etude = self.cap_logic.verificationsDonneesCapft(
-                lyr_pot.name(), lyr_cap.name(), col_cap
-            )
-            dico_qgis, dico_poteaux_prives = self.cap_logic.liste_poteau_cap_ft(
-                lyr_pot.name(), lyr_cap.name(), col_cap
+            doublons, hors_etude, dico_qgis, dico_poteaux_prives = (
+                self.cap_logic.extraire_donnees_capft(
+                    lyr_pot.name(), lyr_cap.name(), col_cap
+                )
             )
         except ValueError as e:
             self.error_occurred.emit(str(e))

@@ -4,17 +4,11 @@ Workflow pour la mise à jour FT/BT.
 Orchestre l'extraction des données et l'exécution asynchrone.
 """
 
-import re
-import time
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
-from qgis.core import QgsApplication, Qgis, QgsMessageLog, QgsFeatureRequest, QgsExpression, NULL
+from qgis.core import QgsApplication, QgsFeatureRequest, QgsExpression, NULL
 from ..Maj_Ft_Bt import MajFtBt, MajFtBtTask
 from ..maj_sql_background import MajSqlBackgroundTask, get_layer_db_uri, reload_layer
-from ..qgis_utils import validate_same_crs
-
-_ETUDE_PATTERNS = [
-    r'nom[_ ]?etudes?', r'etudes?', r'ref_fci', r'nom', r'decoupage', r'zone',
-]
+from ..qgis_utils import validate_same_crs, detect_etude_field as _detect_etude_field
 
 class MajWorkflow(QObject):
     """
@@ -65,14 +59,8 @@ class MajWorkflow(QObject):
 
     @staticmethod
     def _detect_etude_field(layer):
-        """Auto-detect study field name from a layer."""
-        if not layer or not layer.isValid():
-            return None
-        for field in layer.fields():
-            for pat in _ETUDE_PATTERNS:
-                if re.search(pat, field.name(), re.IGNORECASE):
-                    return field.name()
-        return None
+        """Auto-detect study field name from a layer. Delegue a qgis_utils."""
+        return _detect_etude_field(layer, context="MAJ")
 
     def start_analysis(self, lyr_pot, lyr_cap, lyr_com, excel_path,
                        col_cap=None, col_com=None):
@@ -103,7 +91,6 @@ class MajWorkflow(QObject):
         cache_key = self._compute_cache_key(lyr_pot, lyr_cap, lyr_com)
         if MajWorkflow._cache_key == cache_key and MajWorkflow._coords_cache is not None:
             # CACHE HIT - utiliser les données en cache (instantané!)
-            QgsMessageLog.logMessage("[PERF-MAJ] ======= CACHE HIT - extraction instantanée =======", "PoleAerien", Qgis.Info)
             self.message_received.emit("Données en cache...", "green")
             self.progress_changed.emit(15)
             
@@ -118,7 +105,6 @@ class MajWorkflow(QObject):
             return
 
         # CACHE MISS - faire l'extraction complète
-        QgsMessageLog.logMessage("[PERF-MAJ] ======= EXTRACTION COORDS (non-bloquant) =======", "PoleAerien", Qgis.Info)
         
         # Auto-detect study field if not provided
         if not col_cap:
@@ -139,7 +125,6 @@ class MajWorkflow(QObject):
         
         # Initialiser l'état d'extraction
         self._extraction_state = {
-            't0': time.perf_counter(),
             'excel_path': excel_path,
             'cache_key': cache_key,
             'lyr_pot': lyr_pot,
@@ -162,8 +147,6 @@ class MajWorkflow(QObject):
         self._extraction_state['iterator'] = lyr_pot.getFeatures(
             QgsFeatureRequest(QgsExpression("inf_type LIKE 'POT-FT'"))
         )
-        self._extraction_state['t_phase'] = time.perf_counter()
-        
         # Démarrer extraction par lots via QTimer
         QTimer.singleShot(0, self._process_extraction_batch)
 
@@ -243,48 +226,37 @@ class MajWorkflow(QObject):
         """Termine une phase et passe à la suivante."""
         state = self._extraction_state
         phase = state['phase']
-        t_phase = time.perf_counter() - state['t_phase']
         
         if phase == 'pot_ft':
-            QgsMessageLog.logMessage(f"[PERF-MAJ] >> POT-FT: {len(state['poteaux_ft'])} en {t_phase:.3f}s", "PoleAerien", Qgis.Info)
             state['phase'] = 'pot_bt'
             state['iterator'] = state['lyr_pot'].getFeatures(
                 QgsFeatureRequest(QgsExpression("inf_type LIKE 'POT-BT'"))
             )
-            state['t_phase'] = time.perf_counter()
             self.message_received.emit("Extraction POT-BT...", "grey")
             self.progress_changed.emit(8)
             QTimer.singleShot(0, self._process_extraction_batch)
             
         elif phase == 'pot_bt':
-            QgsMessageLog.logMessage(f"[PERF-MAJ] >> POT-BT: {len(state['poteaux_bt'])} en {t_phase:.3f}s", "PoleAerien", Qgis.Info)
             state['phase'] = 'cap_ft'
             state['iterator'] = state['lyr_cap'].getFeatures()
-            state['t_phase'] = time.perf_counter()
             self.message_received.emit("Extraction CAP_FT...", "grey")
             self.progress_changed.emit(12)
             QTimer.singleShot(0, self._process_extraction_batch)
             
         elif phase == 'cap_ft':
-            QgsMessageLog.logMessage(f"[PERF-MAJ] >> CAP_FT: {len(state['etudes_cap_ft'])} en {t_phase:.3f}s", "PoleAerien", Qgis.Info)
             state['phase'] = 'comac'
             state['iterator'] = state['lyr_com'].getFeatures()
-            state['t_phase'] = time.perf_counter()
             self.message_received.emit("Extraction COMAC...", "grey")
             self.progress_changed.emit(16)
             QTimer.singleShot(0, self._process_extraction_batch)
             
         elif phase == 'comac':
-            QgsMessageLog.logMessage(f"[PERF-MAJ] >> COMAC: {len(state['etudes_comac'])} en {t_phase:.3f}s", "PoleAerien", Qgis.Info)
             # Toutes les phases terminées - lancer la task async
             self._launch_async_task()
 
     def _launch_async_task(self):
         """Lance la tâche asynchrone après extraction complète."""
         state = self._extraction_state
-        t_total = time.perf_counter() - state['t0']
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Extraction TOTAL: {t_total:.3f}s", "PoleAerien", Qgis.Info)
-        
         raw_data = {
             'poteaux_ft': state['poteaux_ft'],
             'poteaux_bt': state['poteaux_bt'],
@@ -296,7 +268,6 @@ class MajWorkflow(QObject):
         # Stocker dans le cache pour les prochains appels
         MajWorkflow._coords_cache = raw_data
         MajWorkflow._cache_key = state.get('cache_key')
-        QgsMessageLog.logMessage("[PERF-MAJ] Données mises en cache", "PoleAerien", Qgis.Info)
         
         self._extraction_state = None  # Libérer état temporaire
         

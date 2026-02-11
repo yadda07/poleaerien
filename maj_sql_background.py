@@ -81,14 +81,6 @@ class MajSqlBackgroundTask(QgsTask):
             self._existing_columns = self._get_table_columns(db, schema, table)
             self._skipped_ft = []
             self._skipped_bt = []
-            QgsMessageLog.logMessage(
-                f"[MAJ-SQL-BG] Table: {schema}.{table} ({len(self._existing_columns)} colonnes). "
-                f"inf_num={'OUI' if 'inf_num' in self._existing_columns else 'NON'}, "
-                f"commentair={'OUI' if 'commentair' in self._existing_columns else 'NON'}, "
-                f"dce={'OUI' if 'dce' in self._existing_columns else 'NON'}, "
-                f"etat={'OUI' if 'etat' in self._existing_columns else 'NON'}",
-                "PoleAerien", Qgis.Info
-            )
             
             try:
                 # Démarrer transaction
@@ -208,8 +200,8 @@ class MajSqlBackgroundTask(QgsTask):
                     if self._column_exists("dce"):
                         updates.append("dce = 'O'")
                     mat = self._escape_sql(row["inf_mat_replace"]) if row.get("inf_mat_replace") else "BS8"
-                    if self._column_exists("inf_mat"):
-                        updates.append(f"inf_mat = '{mat}'")
+                    if self._column_exists("inf_mat_replace"):
+                        updates.append(f"inf_mat_replace = '{mat}'")
                     # Sauvegarder ancien inf_num dans nommage_fibees avant de le vider
                     if current_inf_num and self._column_exists("nommage_fibees"):
                         ancien_num = self._escape_sql(current_inf_num)
@@ -223,9 +215,9 @@ class MajSqlBackgroundTask(QgsTask):
                     if row.get("etat") and self._column_exists("etat"):
                         etat = self._escape_sql(row["etat"])
                         updates.append(f"etat = '{etat}'")
-                    if row.get("inf_mat_replace") and self._column_exists("inf_mat"):
+                    if row.get("inf_mat_replace") and self._column_exists("inf_mat_replace"):
                         mat = self._escape_sql(row["inf_mat_replace"])
-                        updates.append(f"inf_mat = '{mat}'")
+                        updates.append(f"inf_mat_replace = '{mat}'")
                     if self._column_exists("dce"):
                         updates.append("dce = 'O'")
                 
@@ -367,9 +359,9 @@ class MajSqlBackgroundTask(QgsTask):
                         updates.append(f"inf_propri = '{val}'")
                     if self._column_exists("noe_usage"):
                         updates.append("noe_usage = 'DI'")
-                    if row.get("typ_po_mod") and self._column_exists("inf_mat"):
+                    if row.get("typ_po_mod") and self._column_exists("inf_mat_replace"):
                         val = self._escape_sql(row["typ_po_mod"])
-                        updates.append(f"inf_mat = '{val}'")
+                        updates.append(f"inf_mat_replace = '{val}'")
                     if row.get("etat") and self._column_exists("etat"):
                         val = self._escape_sql(row["etat"])
                         updates.append(f"etat = '{val}'")

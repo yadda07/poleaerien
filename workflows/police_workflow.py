@@ -16,8 +16,8 @@ from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsVectorLayer, NULL
 from ..PoliceC6 import PoliceC6, PoliceC6Cancelled
 from ..db_connection import extract_sro_from_layer
-from ..cable_analyzer import extraire_appuis_from_layer
-from ..qgis_utils import get_layer_safe
+from ..cable_analyzer import extraire_appuis_wkb
+from ..qgis_utils import get_layer_safe, detect_etude_field as _detect_etude_field
 from ..async_tasks import PoliceC6Task, run_async_task
 from ..core_utils import is_plugin_output_file
 import os
@@ -88,23 +88,8 @@ class PoliceWorkflow(QObject):
         return self.police_logic.extraire_sro()
 
     def detect_etude_field(self, layer):
-        """
-        Auto-détecte le champ étude dans une couche CAP FT.
-        
-        Args:
-            layer: QgsVectorLayer
-            
-        Returns:
-            str: Nom du champ détecté ou None
-        """
-        if not layer or not layer.isValid():
-            return None
-        
-        candidates = ['nom_etudes', 'etudes', 'nom_etude', 'nom', 'decoupage', 'zone', 'ref_fci']
-        for field in layer.fields():
-            if field.name().lower() in [c.lower() for c in candidates]:
-                return field.name()
-        return None
+        """Auto-detecte le champ etude. Delegue a qgis_utils.detect_etude_field()."""
+        return _detect_etude_field(layer, context="PoliceC6")
 
     def find_c6_file(self, repertoire_c6, nom_etude):
         """
@@ -235,37 +220,36 @@ class PoliceWorkflow(QObject):
         self.message_received.emit(f"Mode auto-browse: {len(c6_files_list)} études trouvées", "blue")
         
         # 3. Extraire appuis et SRO depuis couche infra_pt_pot (MAIN THREAD)
-        # Project mode: layer and SRO can be injected via params
-        injected_layer = params.get('layer_appuis')
-        if injected_layer:
-            layer_appuis = [injected_layer]
+        # Utiliser le cache batch si disponible (evite double extraction avec COMAC)
+        sro_appuis_cache = params.get('sro_appuis_cache')
+        if sro_appuis_cache:
+            sro = sro_appuis_cache.get('sro')
+            appuis_data = sro_appuis_cache.get('appuis_wkb', [])
+            self.message_received.emit(f"SRO: {sro} ({len(appuis_data)} appuis depuis cache batch)", "grey")
         else:
-            layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
-        
-        sro = params.get('sro')
-        if not sro and layer_appuis:
-            sro = extract_sro_from_layer(layer_appuis[0])
-        if not sro:
-            first_file = c6_files_list[0][1]
-            sro = self._extract_sro_from_filename(first_file)
-        
-        if not sro:
-            self.error_occurred.emit("SRO non trouvé dans les données QGIS")
-            return
-        
-        self.message_received.emit(f"SRO: {sro}", "grey")
-        appuis_data = []
-        if layer_appuis:
-            raw_appuis = extraire_appuis_from_layer(layer_appuis[0])
-            # Sérialiser les géométries en WKB (QgsGeometry non picklable)
-            for appui in raw_appuis:
-                geom = appui.get('geom')
-                appuis_data.append({
-                    'num_appui': appui.get('num_appui', ''),
-                    'feature_id': appui.get('feature_id'),
-                    'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None
-                })
-            self.message_received.emit(f"Appuis QGIS: {len(appuis_data)}", "grey")
+            # Project mode: layer and SRO can be injected via params
+            injected_layer = params.get('layer_appuis')
+            if injected_layer:
+                layer_appuis = [injected_layer]
+            else:
+                layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
+            
+            sro = params.get('sro')
+            if not sro and layer_appuis:
+                sro = extract_sro_from_layer(layer_appuis[0])
+            if not sro:
+                first_file = c6_files_list[0][1]
+                sro = self._extract_sro_from_filename(first_file)
+            
+            if not sro:
+                self.error_occurred.emit("SRO non trouve dans les donnees QGIS")
+                return
+            
+            self.message_received.emit(f"SRO: {sro}", "grey")
+            appuis_data = []
+            if layer_appuis:
+                appuis_data = extraire_appuis_wkb(layer_appuis[0])
+                self.message_received.emit(f"Appuis QGIS: {len(appuis_data)}", "grey")
         
         # === WORKER THREAD: Lancer tâche async ===
         

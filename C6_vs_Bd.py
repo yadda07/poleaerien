@@ -13,23 +13,11 @@ Fonctionnalités:
 
 from qgis.core import Qgis, QgsProject, QgsFeatureRequest, QgsExpression, NULL, QgsMessageLog, QgsSpatialIndex
 import os
-import re
 import numpy as np
 import pandas as pd
 from openpyxl.styles import PatternFill
 from .core_utils import normalize_appui_num, is_plugin_output_file
-
-
-# Patterns pour auto-détection du champ étude
-ETUDE_FIELD_PATTERNS = [
-    r'^nom[_\s]?etude[s]?$',
-    r'^etude[s]?$',
-    r'^ref_fci$',
-    r'^name$',
-    r'^nom$',
-    r'^decoupage$',
-    r'^zone$',
-]
+from .qgis_utils import detect_etude_field as _detect_etude_field
 
 
 class C6_vs_Bd:
@@ -40,34 +28,8 @@ class C6_vs_Bd:
         pass
 
     def detect_etude_field(self, layer):
-        """
-        Auto-détecte le champ étude dans une couche.
-        
-        Args:
-            layer: QgsVectorLayer (couche CAP FT)
-            
-        Returns:
-            str: Nom du champ détecté ou None si non trouvé
-        """
-        if not layer or not layer.isValid():
-            return None
-        
-        field_names = [f.name() for f in layer.fields()]
-        
-        for pattern in ETUDE_FIELD_PATTERNS:
-            for field_name in field_names:
-                if re.match(pattern, field_name.lower()):
-                    QgsMessageLog.logMessage(
-                        f"[C6_vs_Bd] Champ étude détecté: {field_name}",
-                        "PoleAerien", Qgis.Info
-                    )
-                    return field_name
-        
-        QgsMessageLog.logMessage(
-            f"[C6_vs_Bd] Aucun champ étude détecté. Champs disponibles: {field_names}",
-            "PoleAerien", Qgis.Warning
-        )
-        return None
+        """Auto-detecte le champ etude. Delegue a qgis_utils.detect_etude_field()."""
+        return _detect_etude_field(layer, context="C6_vs_Bd")
 
     def LectureFichiersExcelsC6(self, df, repertoire):
         """
@@ -165,16 +127,20 @@ class C6_vs_Bd:
 
         return df
 
-    def liste_poteau_cap_ft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
+    def extraire_poteaux_in_out(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
         """
-        Récupérer les poteaux FT couverts par les polygones CAP FT.
+        Extraction poteaux FT IN + OUT en une seule passe.
         
-        Optimisé avec index spatial pour éviter O(n*m).
+        Un seul acces couche, un seul index spatial, une seule iteration des features.
+        Fusionne liste_poteau_cap_ft() et liste_poteaux_ft_out().
+        
+        Returns:
+            tuple: (df_in, df_out)
         """
         infra_pt_pot = QgsProject.instance().mapLayersByName(table_poteau)[0]
         etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
 
-        # Index spatial des polygones CAP FT
+        # Index spatial des polygones CAP FT (une seule construction)
         cap_ft_index = QgsSpatialIndex(etude_cap_ft.getFeatures())
         cap_ft_cache = {}
         for feat in etude_cap_ft.getFeatures():
@@ -188,8 +154,8 @@ class C6_vs_Bd:
         fichiers = []
         listeEtat = []
         nature_travaux = []
+        poteaux_out = []
 
-        # Filtrer poteaux FT
         requete = QgsExpression("inf_type LIKE 'POT-FT'")
         request = QgsFeatureRequest(requete)
 
@@ -198,9 +164,9 @@ class C6_vs_Bd:
             if not pt_geom or pt_geom.isEmpty():
                 continue
 
-            # Chercher polygones candidats via index spatial
             candidate_ids = cap_ft_index.intersects(pt_geom.boundingBox())
-            
+            is_covered = False
+
             for cid in candidate_ids:
                 cap_data = cap_ft_cache.get(cid)
                 if cap_data and cap_data['geom'].contains(pt_geom):
@@ -210,61 +176,13 @@ class C6_vs_Bd:
                     etat = "" if feat_pot["etat"] == NULL else feat_pot["etat"]
                     nature = "Recalage" if etat == "A RECALER" else ("Remplacement" if etat == "A REMPLACER" else etat)
 
-                    # Normaliser le numéro d'appui
                     num_appui = normalize_appui_num(inf_num)
-                    if not num_appui:
-                        continue
-
-                    listePoteaux.append(num_appui)
-                    listePoteauxComplet.append(inf_num)
-                    fichiers.append(etudes)
-                    listeEtat.append(etat)
-                    nature_travaux.append(nature)
-                    break  # Un seul polygone par poteau
-
-        df = pd.DataFrame({
-            'N° appui': listePoteaux,
-            "Études": fichiers,
-            "Nature des travaux": nature_travaux,
-            'inf_num (QGIS)': listePoteauxComplet,
-            "Etat": listeEtat
-        })
-
-        return df
-
-    def liste_poteaux_ft_out(self, table_poteau, table_etude_cap_ft):
-        """
-        Liste les poteaux FT NON couverts par aucun polygone CAP FT.
-        
-        Args:
-            table_poteau: Nom de la couche poteaux (infra_pt_pot)
-            table_etude_cap_ft: Nom de la couche polygones CAP FT
-            
-        Returns:
-            pd.DataFrame: Poteaux FT hors périmètre avec colonnes [N° appui, inf_num, etat]
-        """
-        infra_pt_pot = QgsProject.instance().mapLayersByName(table_poteau)[0]
-        etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
-
-        # Index spatial des polygones CAP FT pour performance
-        cap_ft_index = QgsSpatialIndex(etude_cap_ft.getFeatures())
-        cap_ft_geoms = {f.id(): f.geometry() for f in etude_cap_ft.getFeatures()}
-
-        poteaux_out = []
-        requete = QgsExpression("inf_type LIKE 'POT-FT'")
-        request = QgsFeatureRequest(requete)
-
-        for feat_pot in infra_pt_pot.getFeatures(request):
-            pt_geom = feat_pot.geometry()
-            if not pt_geom or pt_geom.isEmpty():
-                continue
-
-            # Chercher les polygones candidats via l'index spatial
-            candidate_ids = cap_ft_index.intersects(pt_geom.boundingBox())
-            is_covered = False
-
-            for cid in candidate_ids:
-                if cap_ft_geoms[cid].contains(pt_geom):
+                    if num_appui:
+                        listePoteaux.append(num_appui)
+                        listePoteauxComplet.append(inf_num)
+                        fichiers.append(etudes)
+                        listeEtat.append(etat)
+                        nature_travaux.append(nature)
                     is_covered = True
                     break
 
@@ -279,12 +197,57 @@ class C6_vs_Bd:
                         'etat': etat
                     })
 
+        df_in = pd.DataFrame({
+            'N° appui': listePoteaux,
+            "Études": fichiers,
+            "Nature des travaux": nature_travaux,
+            'inf_num (QGIS)': listePoteauxComplet,
+            "Etat": listeEtat
+        })
+
         df_out = pd.DataFrame(poteaux_out)
         QgsMessageLog.logMessage(
-            f"[C6_vs_Bd] Poteaux FT hors périmètre: {len(df_out)}",
+            f"[C6_vs_Bd] Poteaux FT: {len(df_in)} IN, {len(df_out)} OUT",
             "PoleAerien", Qgis.Info
         )
-        return df_out
+        return df_in, df_out
+
+    def liste_poteau_cap_ft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
+        """DEPRECATED: Utiliser extraire_poteaux_in_out() pour eviter double extraction."""
+        df_in, _ = self.extraire_poteaux_in_out(table_poteau, table_etude_cap_ft, colonne_cap_ft)
+        return df_in
+
+    def liste_poteaux_ft_out(self, table_poteau, table_etude_cap_ft):
+        """DEPRECATED: Utiliser extraire_poteaux_in_out() pour eviter double extraction."""
+        QgsMessageLog.logMessage(
+            "[C6_vs_Bd] liste_poteaux_ft_out() appelée seule - utiliser extraire_poteaux_in_out()",
+            "PoleAerien", Qgis.Warning
+        )
+        # Cannot call unified without colonne_cap_ft, fallback to basic OUT detection
+        infra_pt_pot = QgsProject.instance().mapLayersByName(table_poteau)[0]
+        etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
+
+        cap_ft_index = QgsSpatialIndex(etude_cap_ft.getFeatures())
+        cap_ft_geoms = {f.id(): f.geometry() for f in etude_cap_ft.getFeatures()}
+
+        poteaux_out = []
+        requete = QgsExpression("inf_type LIKE 'POT-FT'")
+        request = QgsFeatureRequest(requete)
+
+        for feat_pot in infra_pt_pot.getFeatures(request):
+            pt_geom = feat_pot.geometry()
+            if not pt_geom or pt_geom.isEmpty():
+                continue
+            candidate_ids = cap_ft_index.intersects(pt_geom.boundingBox())
+            is_covered = any(cap_ft_geoms[cid].contains(pt_geom) for cid in candidate_ids)
+            if not is_covered:
+                inf_num = feat_pot["inf_num"]
+                etat = "" if feat_pot["etat"] == NULL else str(feat_pot["etat"])
+                num_appui = normalize_appui_num(inf_num)
+                if num_appui:
+                    poteaux_out.append({'N° appui': num_appui, 'inf_num': inf_num, 'etat': etat})
+
+        return pd.DataFrame(poteaux_out)
 
     def verifier_etudes_c6(self, table_etude_cap_ft, colonne_cap_ft, repertoire_c6):
         """

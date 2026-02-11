@@ -11,10 +11,73 @@ import os
 import time
 
 from qgis.PyQt.QtCore import QObject
-from qgis.core import QgsMessageLog, Qgis
+from qgis.core import QgsMessageLog, Qgis, QgsTask, QgsApplication, QgsProject
 
 from .project_detector import DetectionResult
 from .db_layer_loader import DbLayerLoader
+from .qgis_utils import detect_etude_field as _detect_etude_field, reset_crs_cache
+
+
+class _LoadProjectLayersTask(QgsTask):
+    """Background task: PG connection + layer creation for project mode.
+
+    Network I/O (connection, metadata fetch) runs in worker thread.
+    Project registration (addMapLayer) deferred to main thread callback.
+    """
+
+    def __init__(self, sro):
+        super().__init__(f"Chargement couches BDD (SRO={sro})")
+        self.sro = sro
+        self.lyr_pot = None
+        self.lyr_cap = None
+        self.lyr_com = None
+        self.loader = None
+        self.error_msg = None
+        self.counts = {}
+
+    def run(self):
+        self.loader = DbLayerLoader()
+        if not self.loader.connect():
+            self.error_msg = "Mode Projet: connexion PostgreSQL impossible"
+            return False
+
+        if self.isCanceled():
+            return False
+
+        self.lyr_pot = self.loader.load_infra_pt_pot(
+            self.sro, add_to_project=False
+        )
+        if not self.lyr_pot or not self.lyr_pot.isValid():
+            self.error_msg = "Mode Projet: couche infra_pt_pot non chargee"
+            return False
+        self.counts['pot'] = self.lyr_pot.featureCount()
+
+        if self.isCanceled():
+            return False
+
+        self.lyr_cap = self.loader.load_etude_cap_ft(
+            self.sro, add_to_project=False
+        )
+        if self.lyr_cap and self.lyr_cap.isValid():
+            self.counts['cap'] = self.lyr_cap.featureCount()
+        else:
+            self.lyr_cap = None
+
+        if self.isCanceled():
+            return False
+
+        self.lyr_com = self.loader.load_etude_comac(
+            self.sro, add_to_project=False
+        )
+        if self.lyr_com and self.lyr_com.isValid():
+            self.counts['com'] = self.lyr_com.featureCount()
+        else:
+            self.lyr_com = None
+
+        return True
+
+    def finished(self, result):
+        pass
 
 
 _VALIDATION_LABELS = {
@@ -77,11 +140,20 @@ class BatchOrchestrator(QObject):
         # Key: sro (str), Value: list[CableSegment]
         self._fddcpi_cache = {}
 
+        # Shared SRO + appuis WKB cache: avoids duplicate QGIS extraction
+        # when both COMAC and Police C6 need the same data from infra_pt_pot.
+        # Format: {'sro': str, 'appuis_wkb': list[dict]}
+        self._sro_appuis_cache = {}
+
         # Project mode: DB-loaded layers (temporary or persistent)
         self._db_loader = None
         self._pm_lyr_pot = None
         self._pm_lyr_cap = None
         self._pm_lyr_com = None
+
+        # Async layer loading state
+        self._layer_load_task = None
+        self._pending_module_keys = None
 
         # Register launchers
         self._runner.set_launcher('maj', self._launch_maj)
@@ -114,18 +186,137 @@ class BatchOrchestrator(QObject):
     def _on_start(self, module_keys):
         self._batch_results = {}
         self._fddcpi_cache = {}
-        self._dlg.set_running(True)
+        self._sro_appuis_cache = {}
+        reset_crs_cache()
         self._dlg.textBrowser.clear()
 
-        # Project mode: load layers from DB before starting batch
+        # --- Preflight checks (all-at-once before any module runs) ---
+        issues = self._preflight_checks(module_keys)
+        if issues:
+            self._dlg.log_message(
+                f"Verification pre-lancement : {len(issues)} probleme(s) detecte(s)",
+                'error'
+            )
+            for issue in issues:
+                self._dlg.log_message(f"  {issue}", 'warning')
+            self._dlg.log_message(
+                "Corrigez ces problemes puis relancez l'analyse.", 'error'
+            )
+            return
+
+        self._dlg.set_running(True)
+
+        # Project mode: load layers from DB asynchronously, then start batch
         if self._dlg.is_project_mode:
-            if not self._load_project_mode_layers():
-                self._dlg.reset_after_batch()
-                return
+            self._pending_module_keys = module_keys
+            self._start_async_layer_loading()
+            return
 
         self._runner.start(module_keys)
 
+    def _preflight_checks(self, module_keys):
+        """Validate ALL prerequisites upfront. Returns list of actionable messages (empty = OK)."""
+        issues = []
+        det = self._detection()
+        is_pm = self._dlg.is_project_mode
+
+        # --- Export directory ---
+        export_dir = self._export_dir()
+        if export_dir and not os.path.isdir(export_dir):
+            issues.append(
+                f"Dossier d'export introuvable : {export_dir}"
+            )
+        elif export_dir:
+            try:
+                test_path = os.path.join(export_dir, '.poleaerien_test')
+                with open(test_path, 'w') as _f:
+                    pass
+                os.remove(test_path)
+            except OSError:
+                issues.append(
+                    f"Dossier d'export non inscriptible : {export_dir}"
+                )
+
+        # --- Layer checks (QGIS mode only) ---
+        if not is_pm:
+            lyr_pot = self._lyr_pot()
+            lyr_cap = self._lyr_capft()
+            lyr_com = self._lyr_comac()
+
+            needs_pot = set(module_keys) & {'maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a'}
+            needs_cap = set(module_keys) & {'maj', 'capft', 'c6bd', 'c6c3a'}
+            needs_com = set(module_keys) & {'maj', 'comac'}
+
+            if needs_pot and (not lyr_pot or not lyr_pot.isValid()):
+                issues.append(
+                    "Couche infra_pt_pot manquante ou invalide. "
+                    "Chargez la couche poteaux dans le projet QGIS "
+                    "et selectionnez-la dans la liste deroulante."
+                )
+            elif needs_pot and lyr_pot and lyr_pot.featureCount() == 0:
+                issues.append(
+                    f"Couche {lyr_pot.name()} est vide (0 entites). "
+                    "Verifiez le filtre applique sur la couche."
+                )
+
+            if needs_cap and (not lyr_cap or not lyr_cap.isValid()):
+                issues.append(
+                    "Couche etude_cap_ft manquante ou invalide. "
+                    "Chargez la couche de zonage CAP FT dans le projet QGIS."
+                )
+
+            if needs_com and (not lyr_com or not lyr_com.isValid()):
+                issues.append(
+                    "Couche etude_comac manquante ou invalide. "
+                    "Chargez la couche de zonage COMAC dans le projet QGIS."
+                )
+
+        # --- Project mode: SRO ---
+        if is_pm and not self._dlg.sro:
+            issues.append(
+                "Mode Projet: SRO non derivable du nom de dossier. "
+                "Format attendu: XXXXX-YYY-ZZZ-NNNNN (ex: 63041-B1I-PMZ-00003)"
+            )
+
+        # --- Per-module resource checks ---
+        if 'maj' in module_keys and not det.has_ftbt:
+            issues.append(
+                "Module MAJ: fichier FT-BT KO non detecte. "
+                "Placez un fichier Excel contenant 'FT-BT KO' dans le nom a la racine du projet."
+            )
+
+        if 'capft' in module_keys and not det.has_capft:
+            issues.append(
+                "Module CAP_FT: dossier CAP FT non detecte. "
+                "Noms acceptes: CAP FT, CAPFT, ETUDE CAP FT, KPFT."
+            )
+
+        if 'comac' in module_keys and not det.has_comac:
+            issues.append(
+                "Module COMAC: dossier COMAC non detecte. "
+                "Noms acceptes: COMAC, Export COMAC, ETUDE COMAC."
+            )
+
+        c6_modules = set(module_keys) & {'c6bd', 'police_c6', 'c6c3a'}
+        if c6_modules and not det.has_c6:
+            issues.append(
+                f"Module(s) {', '.join(sorted(c6_modules))}: dossier C6 (= CAP FT) non detecte. "
+                "Les annexes C6 sont les fichiers d'etude dans le dossier CAP FT."
+            )
+
+        if 'c6c3a' in module_keys:
+            if not det.has_c7 and not det.has_c3a:
+                issues.append(
+                    "Module C6-C3A-C7-BD: ni fichier C7 ni C3A detecte. "
+                    "Au moins un des deux est necessaire."
+                )
+
+        return issues
+
     def _on_cancel(self):
+        # Cancel layer loading task if in progress
+        if self._layer_load_task:
+            self._layer_load_task.cancel()
         self._runner.cancel()
         # Cancel active workflow
         for wf in (self._maj_wf, self._capft_wf, self._comac_wf,
@@ -166,21 +357,104 @@ class BatchOrchestrator(QObject):
         self._dlg.set_progress(int(mapped))
 
     def _on_batch_finished(self, results):
+        # --- Post-batch recap with metrics ---
+        self._log_batch_recap(results)
+
         # Generate unified Excel report
         if self._batch_results:
             try:
                 from .unified_report import generate_unified_report
                 export_dir = self._export_dir()
                 filepath = generate_unified_report(self._batch_results, export_dir)
-                fname = os.path.basename(filepath)
-                self._dlg.log_message(f"Rapport: {fname}", 'success')
-                os.startfile(filepath)
+                self._dlg.log_result_link(filepath)
             except Exception as exc:
                 self._dlg.log_message(f"Erreur rapport: {exc}", 'error')
 
         # Project mode cleanup: remove temp layers if user didn't ask to keep them
         self._cleanup_project_mode_layers()
         self._dlg.reset_after_batch()
+
+    def _log_batch_recap(self, runner_results):
+        """Log a structured recap with metrics from each completed module."""
+        if not self._batch_results:
+            return
+
+        self._dlg.log_message("--- RECAPITULATIF ---", 'info')
+
+        elapsed = {}
+        for key, t0 in self._module_start_times.items():
+            elapsed[key] = time.time() - t0
+
+        for key, result in self._batch_results.items():
+            name = {
+                'maj': 'MAJ BD', 'capft': 'CAP_FT', 'comac': 'COMAC',
+                'c6bd': 'C6 vs BD', 'police_c6': 'POLICE C6', 'c6c3a': 'C6-C3A-C7-BD',
+            }.get(key, key)
+
+            dur = elapsed.get(key)
+            dur_str = f" ({dur:.1f}s)" if dur else ""
+
+            metrics = self._extract_metrics(key, result)
+            if metrics:
+                self._dlg.log_message(f"  {name}{dur_str}: {metrics}", 'info')
+            else:
+                run_res = runner_results.get(key, {})
+                status = 'OK' if run_res.get('success') else 'ERREUR'
+                self._dlg.log_message(f"  {name}{dur_str}: {status}", 'info')
+
+    def _extract_metrics(self, key, result):
+        """Extract human-readable metrics from a module result dict."""
+        parts = []
+
+        if key == 'maj':
+            liste_ft = result.get('liste_ft', [])
+            liste_bt = result.get('liste_bt', [])
+            ft_count = liste_ft[2] if len(liste_ft) > 2 else 0
+            bt_count = liste_bt[2] if len(liste_bt) > 2 else 0
+            if ft_count or bt_count:
+                parts.append(f"{ft_count} FT, {bt_count} BT a mettre a jour")
+
+        elif key == 'capft':
+            resultats = result.get('resultats', {})
+            if resultats:
+                total = sum(len(v) for v in resultats.values()) if isinstance(resultats, dict) else 0
+                parts.append(f"{len(resultats)} etudes, {total} poteaux analyses")
+
+        elif key == 'comac':
+            resultats = result.get('resultats', {})
+            verif = result.get('verif_cables', [])
+            if resultats:
+                parts.append(f"{len(resultats)} etudes")
+            if verif:
+                nb_ecart = sum(1 for v in verif if v.get('statut') == 'ECART')
+                nb_absent = sum(1 for v in verif if v.get('statut') == 'ABSENT_BDD')
+                if nb_ecart or nb_absent:
+                    parts.append(f"{nb_ecart} ecarts cables, {nb_absent} absents BDD")
+                else:
+                    parts.append("cables OK")
+
+        elif key == 'police_c6':
+            stats = result.get('stats', [])
+            if stats:
+                total_ecart = sum(s.get('nb_ecart', 0) for s in stats)
+                total_absent = sum(s.get('nb_absent', 0) for s in stats)
+                total_boitier = sum(s.get('nb_boitier_err', 0) for s in stats)
+                parts.append(f"{len(stats)} etudes")
+                anomalies = total_ecart + total_absent + total_boitier
+                if anomalies:
+                    parts.append(f"{anomalies} anomalie(s)")
+                else:
+                    parts.append("aucune anomalie")
+
+        elif key == 'c6bd':
+            if result.get('success'):
+                parts.append("OK")
+
+        elif key == 'c6c3a':
+            if result.get('success'):
+                parts.append("OK")
+
+        return ", ".join(parts) if parts else ""
 
     def _on_batch_cancelled(self):
         self._cleanup_project_mode_layers()
@@ -212,57 +486,61 @@ class BatchOrchestrator(QObject):
         return self._dlg.comboEtudeComac.currentLayer()
 
     # ------------------------------------------------------------------
-    #  Project Mode: DB layer loading
+    #  Project Mode: async DB layer loading
     # ------------------------------------------------------------------
-    def _load_project_mode_layers(self) -> bool:
-        """Load filtered layers from PostgreSQL for project mode.
+    def _start_async_layer_loading(self):
+        """Launch background task to load PostgreSQL layers for project mode.
 
-        Returns:
-            True if infra_pt_pot loaded successfully (mandatory).
+        Layer creation (network I/O) runs in a worker thread.
+        On completion, layers are registered in QgsProject on the main thread,
+        then the batch starts.
         """
         sro = self._dlg.sro
         if not sro:
             self._dlg.log_message("Mode Projet: SRO non disponible", 'error')
-            return False
+            self._pending_module_keys = None
+            self._dlg.reset_after_batch()
+            return
 
         self._dlg.log_message(
             f"Mode Projet: chargement depuis BDD (SRO={sro})", 'info'
         )
 
-        self._db_loader = DbLayerLoader()
-        if not self._db_loader.connect():
-            self._dlg.log_message(
-                "Mode Projet: connexion PostgreSQL impossible", 'error'
-            )
-            return False
+        self._layer_load_task = _LoadProjectLayersTask(sro)
+        self._layer_load_task.taskCompleted.connect(self._on_layers_loaded)
+        self._layer_load_task.taskTerminated.connect(self._on_layers_load_failed)
+        QgsApplication.taskManager().addTask(self._layer_load_task)
+
+    def _on_layers_loaded(self):
+        """Main thread callback: register layers in QgsProject, start batch."""
+        task = self._layer_load_task
+        self._layer_load_task = None
+
+        if not task:
+            return
+
+        self._db_loader = task.loader
 
         # Always add layers to QGIS project so that get_layer_safe() and
         # other name-based lookups work inside workflows.
         # Cleanup after batch removes them if user didn't ask to keep.
 
-        # Load infra_pt_pot (mandatory)
-        self._pm_lyr_pot = self._db_loader.load_infra_pt_pot(
-            sro, add_to_project=True
-        )
-        if not self._pm_lyr_pot or not self._pm_lyr_pot.isValid():
-            self._dlg.log_message(
-                "Mode Projet: couche infra_pt_pot non chargee", 'error'
-            )
-            return False
-
-        count_pot = self._pm_lyr_pot.featureCount()
+        # infra_pt_pot (mandatory - guaranteed valid by task.run())
+        self._pm_lyr_pot = task.lyr_pot
+        QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+        self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
         self._dlg.log_message(
-            f"  infra_pt_pot: {count_pot} poteaux", 'success'
+            f"  infra_pt_pot: {task.counts.get('pot', '?')} poteaux", 'success'
         )
 
-        # Load etude_cap_ft (optional)
-        self._pm_lyr_cap = self._db_loader.load_etude_cap_ft(
-            sro, add_to_project=True
-        )
-        if self._pm_lyr_cap and self._pm_lyr_cap.isValid():
-            count_cap = self._pm_lyr_cap.featureCount()
+        # etude_cap_ft (optional)
+        if task.lyr_cap:
+            self._pm_lyr_cap = task.lyr_cap
+            QgsProject.instance().addMapLayer(self._pm_lyr_cap)
+            self._db_loader._loaded_layers.append(self._pm_lyr_cap.id())
             self._dlg.log_message(
-                f"  etude_cap_ft: {count_cap} zones", 'success'
+                f"  etude_cap_ft: {task.counts.get('cap', '?')} zones",
+                'success'
             )
         else:
             self._dlg.log_message(
@@ -271,14 +549,14 @@ class BatchOrchestrator(QObject):
             )
             self._pm_lyr_cap = None
 
-        # Load etude_comac (optional)
-        self._pm_lyr_com = self._db_loader.load_etude_comac(
-            sro, add_to_project=True
-        )
-        if self._pm_lyr_com and self._pm_lyr_com.isValid():
-            count_com = self._pm_lyr_com.featureCount()
+        # etude_comac (optional)
+        if task.lyr_com:
+            self._pm_lyr_com = task.lyr_com
+            QgsProject.instance().addMapLayer(self._pm_lyr_com)
+            self._db_loader._loaded_layers.append(self._pm_lyr_com.id())
             self._dlg.log_message(
-                f"  etude_comac: {count_com} zones", 'success'
+                f"  etude_comac: {task.counts.get('com', '?')} zones",
+                'success'
             )
         else:
             self._dlg.log_message(
@@ -287,7 +565,22 @@ class BatchOrchestrator(QObject):
             )
             self._pm_lyr_com = None
 
-        return True
+        # Start the batch now that layers are ready
+        keys = self._pending_module_keys
+        self._pending_module_keys = None
+        if keys:
+            self._runner.start(keys)
+
+    def _on_layers_load_failed(self):
+        """Main thread callback: layer loading failed or was cancelled."""
+        task = self._layer_load_task
+        self._layer_load_task = None
+        self._pending_module_keys = None
+
+        msg = (task.error_msg if task and task.error_msg
+               else "Mode Projet: erreur chargement couches")
+        self._dlg.log_message(msg, 'error')
+        self._dlg.reset_after_batch()
 
     def _cleanup_project_mode_layers(self):
         """Remove temporary DB layers if user did not ask to keep them."""
@@ -307,20 +600,15 @@ class BatchOrchestrator(QObject):
         self._db_loader = None
 
     def _auto_field(self, layer, patterns=None):
-        """Auto-detect study field name from layer."""
-        if not layer or not layer.isValid():
-            return ''
-        import re
-        if patterns is None:
-            patterns = [r'nom[_ ]?etudes', r'etudes', r'ref_fci']
-        for field in layer.fields():
-            for pat in patterns:
-                if re.search(pat, field.name(), re.IGNORECASE):
-                    return field.name()
+        """Auto-detect study field name from layer. Delegue a qgis_utils."""
+        result = _detect_etude_field(layer, context="BatchOrchestrator")
+        if result:
+            return result
         # Fallback: first text field
-        for field in layer.fields():
-            if field.typeName().lower() in ('string', 'text', 'varchar'):
-                return field.name()
+        if layer and layer.isValid():
+            for field in layer.fields():
+                if field.typeName().lower() in ('string', 'text', 'varchar'):
+                    return field.name()
         return ''
 
     # ------------------------------------------------------------------
@@ -362,15 +650,64 @@ class BatchOrchestrator(QObject):
         )
 
     def _on_maj_done(self, result):
+        import pandas as pd
+
         cb = self._current_done_cb
-        if cb:
-            liste_ft = result.get('liste_ft', [0, None, 0, None])
-            liste_bt = result.get('liste_bt', [0, None, 0, None])
-            ft_count = liste_ft[2] if len(liste_ft) > 2 else 0
-            bt_count = liste_bt[2] if len(liste_bt) > 2 else 0
-            self._batch_results['maj'] = result
-            msg = f"Analyse: {ft_count} FT, {bt_count} BT"
-            cb(True, msg)
+        if not cb:
+            return
+
+        liste_ft = result.get('liste_ft', [0, None, 0, None])
+        liste_bt = result.get('liste_bt', [0, None, 0, None])
+        ft_count = liste_ft[2] if len(liste_ft) > 2 else 0
+        bt_count = liste_bt[2] if len(liste_bt) > 2 else 0
+        self._batch_results['maj'] = result
+
+        # Extract DataFrames of matched rows (index=gid)
+        data_ft = liste_ft[3] if len(liste_ft) > 3 and isinstance(liste_ft[3], pd.DataFrame) else pd.DataFrame()
+        data_bt = liste_bt[3] if len(liste_bt) > 3 and isinstance(liste_bt[3], pd.DataFrame) else pd.DataFrame()
+
+        if data_ft.empty and data_bt.empty:
+            cb(True, f"Analyse: {ft_count} FT, {bt_count} BT (aucune MAJ)")
+            return
+
+        # Get layer for SQL update
+        lyr = self._lyr_pot()
+        if not lyr:
+            cb(True, f"Analyse: {ft_count} FT, {bt_count} BT (couche introuvable)")
+            return
+
+        layer_name = lyr.name()
+        self._dlg.log_message("Mise a jour BD en cours...", "info")
+
+        # Save state for async callbacks
+        self._maj_pending_cb = cb
+        self._maj_ft_count = ft_count
+        self._maj_bt_count = bt_count
+
+        def _on_sql_progress(msg, pct):
+            self._dlg.log_message(msg, "info")
+
+        def _on_sql_finished(ft_updated, bt_updated):
+            self._dlg.log_message(
+                f"MAJ BD terminee: {ft_updated} FT, {bt_updated} BT mis a jour",
+                "success"
+            )
+            done_cb = self._maj_pending_cb
+            if done_cb:
+                done_cb(True,
+                        f"Analyse: {self._maj_ft_count} FT, {self._maj_bt_count} BT"
+                        f" | MAJ: {ft_updated} FT, {bt_updated} BT")
+
+        def _on_sql_error(err):
+            self._dlg.log_message(f"Erreur MAJ SQL: {err}", "error")
+            done_cb = self._maj_pending_cb
+            if done_cb:
+                done_cb(False, f"Erreur MAJ: {err}")
+
+        self._maj_wf.start_updates_sql_background(
+            layer_name, data_ft, data_bt,
+            _on_sql_progress, _on_sql_finished, _on_sql_error
+        )
 
     def _on_maj_error(self, err):
         cb = self._current_done_cb
@@ -464,12 +801,14 @@ class BatchOrchestrator(QObject):
             self._comac_wf.message_received, self._relay_message
         )
 
-        # Pass cached fddcpi2 data if available (e.g. Police C6 ran first)
+        # Pass cached data if available (e.g. Police C6 ran first)
         fddcpi = self._fddcpi_cache.get('cables') if self._fddcpi_cache else None
+        sro_appuis = self._sro_appuis_cache if self._sro_appuis_cache else None
         self._comac_wf.start_analysis(
             lyr_pot, lyr_comac, col_comac,
             det.comac_dir, export_dir,
-            fddcpi_cache=fddcpi
+            fddcpi_cache=fddcpi,
+            sro_appuis_cache=sro_appuis
         )
 
     def _on_comac_analysis(self, result):
@@ -484,6 +823,10 @@ class BatchOrchestrator(QObject):
         sro = result.get('fddcpi_sro')
         if cables_all is not None and sro:
             self._fddcpi_cache = {'sro': sro, 'cables': cables_all}
+        # Cache SRO + appuis WKB for Police C6
+        appuis_wkb = result.get('appuis_wkb')
+        if sro and appuis_wkb is not None and not self._sro_appuis_cache:
+            self._sro_appuis_cache = {'sro': sro, 'appuis_wkb': appuis_wkb}
         self._batch_results['comac'] = result
         cb = self._current_done_cb
         if cb:
@@ -591,9 +934,11 @@ class BatchOrchestrator(QObject):
             if col:
                 params['colonne_etude'] = col
 
-        # Inject cached fddcpi2 data if available (e.g. COMAC ran first)
+        # Inject cached data if available (e.g. COMAC ran first)
         if self._fddcpi_cache:
             params['fddcpi_cables_cache'] = self._fddcpi_cache.get('cables')
+        if self._sro_appuis_cache:
+            params['sro_appuis_cache'] = self._sro_appuis_cache
 
         c6_path = det.c6_dir
         self._police_wf.reset_logic()
@@ -611,6 +956,10 @@ class BatchOrchestrator(QObject):
         sro = result.get('fddcpi_sro')
         if cables_all is not None and sro:
             self._fddcpi_cache = {'sro': sro, 'cables': cables_all}
+        # Cache SRO + appuis WKB for COMAC
+        appuis_wkb = result.get('appuis_wkb')
+        if sro and appuis_wkb is not None and not self._sro_appuis_cache:
+            self._sro_appuis_cache = {'sro': sro, 'appuis_wkb': appuis_wkb}
         self._batch_results['police_c6'] = result
         cb = self._current_done_cb
         if cb:

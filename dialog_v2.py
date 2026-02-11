@@ -21,7 +21,7 @@ from qgis.PyQt.QtGui import QTextCursor, QFont
 from qgis.core import QgsApplication, QgsProject, QgsMapLayerProxyModel
 from qgis.gui import QgsMapLayerComboBox, QgsCollapsibleGroupBox
 
-from .project_detector import detect_project, DetectionResult
+from .project_detector import detect_project, DetectionResult, analyse_livrable
 from .batch_runner import MODULE_REGISTRY
 from .async_tasks import SmoothProgressController
 
@@ -191,10 +191,11 @@ class _ModuleRow(QWidget):
 
     toggled = pyqtSignal(str, bool)
 
-    def __init__(self, key, label, parent=None):
+    def __init__(self, key, label, parent=None, tooltip=''):
         super().__init__(parent)
         self.key = key
         self._found = False
+        self._prereq_tooltip = tooltip
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 2, 4, 2)
@@ -203,12 +204,14 @@ class _ModuleRow(QWidget):
         self.checkbox = QCheckBox(label)
         self.checkbox.setObjectName("moduleCheck")
         self.checkbox.setEnabled(False)
+        if tooltip:
+            self.checkbox.setToolTip(tooltip)
         self.checkbox.toggled.connect(lambda c: self.toggled.emit(self.key, c))
         lay.addWidget(self.checkbox, 1)
 
         self.status_icon = QLabel()
         self.status_icon.setFixedWidth(28)
-        self.status_icon.setToolTip("Non détecté")
+        self.status_icon.setToolTip("Non detecte")
         lay.addWidget(self.status_icon)
 
         self.path_label = QLabel()
@@ -220,11 +223,11 @@ class _ModuleRow(QWidget):
 
         self._update_status_icon(False)
 
-    def set_detected(self, found, path=''):
+    def set_detected(self, found, path='', diagnostic=''):
         self._found = found
         self.checkbox.setEnabled(found)
         self.checkbox.setChecked(found)
-        self._update_status_icon(found)
+        self._update_status_icon(found, diagnostic)
 
         if found:
             display = os.path.basename(path) if path else ''
@@ -234,16 +237,21 @@ class _ModuleRow(QWidget):
             self.path_label.setText("")
             self.path_label.setToolTip("")
 
-    def _update_status_icon(self, found):
+    def _update_status_icon(self, found, diagnostic=''):
         self.status_icon.clear()
         if found:
             self.status_icon.setText("[OK]")
             self.status_icon.setStyleSheet("color: #2e7d32; font-size: 8pt; font-weight: bold;")
-            self.status_icon.setToolTip("Détecté")
+            self.status_icon.setToolTip("Detecte")
         else:
             self.status_icon.setText("[--]")
             self.status_icon.setStyleSheet("color: #c62828; font-size: 8pt; font-weight: bold;")
-            self.status_icon.setToolTip("Non détecté")
+            tip = "Non detecte"
+            if diagnostic:
+                tip += "\n" + diagnostic
+            elif self._prereq_tooltip:
+                tip += "\n" + self._prereq_tooltip
+            self.status_icon.setToolTip(tip)
 
     @property
     def is_selected(self):
@@ -392,6 +400,14 @@ class PoleAerienDialogV2(QDialog):
         self.browseProjectBtn.setToolTip("Parcourir...")
         self.browseProjectBtn.setCursor(Qt.PointingHandCursor)
         row1.addWidget(self.browseProjectBtn)
+
+        self.refreshBtn = QPushButton()
+        self.refreshBtn.setObjectName("btnBrowse")
+        self.refreshBtn.setIcon(_qgs_icon('mActionRefresh.svg'))
+        self.refreshBtn.setIconSize(QSize(16, 16))
+        self.refreshBtn.setToolTip("Re-detecter les dossiers (synchroniser)")
+        self.refreshBtn.setCursor(Qt.PointingHandCursor)
+        row1.addWidget(self.refreshBtn)
 
         lay.addLayout(row1)
 
@@ -563,17 +579,31 @@ class PoleAerienDialogV2(QDialog):
         sep.setFrameShadow(QFrame.Sunken)
         lay.addWidget(sep)
 
-        # Module rows
+        # Module rows with prerequisite tooltips
         modules_def = [
-            ('maj',       'MAJ BD - Import FT-BT KO'),
-            ('capft',     'VERIF CAP_FT - Poteaux vs fiches appuis'),
-            ('comac',     'VERIF COMAC - Poteaux BT vs ExportComac'),
-            ('c6bd',      'C6 vs BD - Annexe C6 vs base de donnees'),
-            ('police_c6', 'POLICE C6 - Analyse complete'),
-            ('c6c3a',     'C6-C3A-C7-BD - Croisement annexes'),
+            ('maj',       'MAJ BD - Import FT-BT KO',
+             "Prerequis: fichier FT-BT KO (.xlsx) a la racine\n"
+             "Couches: infra_pt_pot, etude_cap_ft, etude_comac"),
+            ('capft',     'VERIF CAP_FT - Poteaux vs fiches appuis',
+             "Prerequis: dossier CAP FT avec fiches appuis\n"
+             "Couches: infra_pt_pot, etude_cap_ft"),
+            ('comac',     'VERIF COMAC - Poteaux BT vs ExportComac',
+             "Prerequis: dossier COMAC (ExportComac .xlsx)\n"
+             "Couches: infra_pt_pot, etude_comac\n"
+             "Connexion PostgreSQL (verif cables)"),
+            ('c6bd',      'C6 vs BD - Annexe C6 vs base de donnees',
+             "Prerequis: dossier CAP FT (annexes C6 = etudes .xlsx)\n"
+             "Couches: infra_pt_pot, etude_cap_ft"),
+            ('police_c6', 'POLICE C6 - Analyse complete',
+             "Prerequis: dossier CAP FT (annexes C6)\n"
+             "Couches: infra_pt_pot\n"
+             "Connexion PostgreSQL (fddcpi2)"),
+            ('c6c3a',     'C6-C3A-C7-BD - Croisement annexes',
+             "Prerequis: dossier CAP FT + fichier C7 et/ou C3A\n"
+             "Couches: infra_pt_pot, etude_cap_ft"),
         ]
-        for key, label in modules_def:
-            row = _ModuleRow(key, label)
+        for key, label, tooltip in modules_def:
+            row = _ModuleRow(key, label, tooltip=tooltip)
             row.toggled.connect(self._on_module_toggled)
             self._module_rows[key] = row
             lay.addWidget(row)
@@ -628,6 +658,7 @@ class PoleAerienDialogV2(QDialog):
         self.textBrowser = QTextBrowser()
         self.textBrowser.setObjectName("logBrowser")
         self.textBrowser.setOpenExternalLinks(False)
+        self.textBrowser.setOpenLinks(False)
         lay.addWidget(self.textBrowser, 1)
 
         self._build_progress(lay)
@@ -645,6 +676,17 @@ class PoleAerienDialogV2(QDialog):
         self.helpButton.setIconSize(QSize(16, 16))
         self.helpButton.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.helpButton)
+
+        self.diagButton = QPushButton("Diagnostic")
+        self.diagButton.setObjectName("btnSecondary")
+        self.diagButton.setIcon(_qgs_icon('mActionPropertiesWidget.svg'))
+        self.diagButton.setIconSize(QSize(16, 16))
+        self.diagButton.setCursor(Qt.PointingHandCursor)
+        self.diagButton.setToolTip(
+            "Scanner le projet et afficher un rapport complet\n"
+            "des ressources detectees, manquantes et couches QGIS."
+        )
+        lay.addWidget(self.diagButton)
 
         lay.addStretch()
 
@@ -681,6 +723,7 @@ class PoleAerienDialogV2(QDialog):
 
     def _connect_signals(self):
         self.browseProjectBtn.clicked.connect(self._browse_project)
+        self.refreshBtn.clicked.connect(self._refresh_detection)
         self.browseExportBtn.clicked.connect(self._browse_export)
         self.projectPathEdit.textChanged.connect(self._on_project_path_changed)
         self.selectAllBtn.clicked.connect(self._select_all)
@@ -690,7 +733,9 @@ class PoleAerienDialogV2(QDialog):
         self.startBtn.clicked.connect(self._on_start_clicked)
         self.cancelBtn.clicked.connect(self._on_cancel_clicked)
         self.helpButton.clicked.connect(lambda: self.help_requested.emit())
+        self.diagButton.clicked.connect(self._run_diagnostic)
         self._mode_group.buttonClicked.connect(self._on_mode_changed)
+        self.textBrowser.anchorClicked.connect(self._on_link_clicked)
 
     # ==================================================================
     #  PROJECT DETECTION
@@ -711,6 +756,13 @@ class PoleAerienDialogV2(QDialog):
         )
         if path:
             self.exportPathEdit.setText(path)
+
+    def _refresh_detection(self):
+        """Re-run detection on the current project path (resync after folder rename)."""
+        path = self.projectPathEdit.text()
+        if path and os.path.isdir(path):
+            self._run_detection(path)
+            self._log_info("Detection resynchronisee.")
 
     def _on_mode_changed(self, button):
         is_project = (button == self._radio_project)
@@ -771,31 +823,43 @@ class PoleAerienDialogV2(QDialog):
         self._det_summary.setText("   ".join(parts))
         self._det_summary.setVisible(True)
 
-        # Module rows
+        # Module rows with diagnostic hints
         module_map = {
-            'maj':       (d.has_ftbt,  d.ftbt_excel),
-            'capft':     (d.has_capft, d.capft_dir),
-            'comac':     (d.has_comac, d.comac_dir),
-            'c6bd':      (d.has_c6,    d.c6_dir),
-            'police_c6': (d.has_c6,    d.c6_dir),
-            'c6c3a':     (d.has_c6 and (d.has_c7 or d.has_c3a), d.c6_dir),
+            'maj':       (d.has_ftbt,  d.ftbt_excel,  'FT-BT KO'),
+            'capft':     (d.has_capft, d.capft_dir,   'CAP FT'),
+            'comac':     (d.has_comac, d.comac_dir,   'COMAC'),
+            'c6bd':      (d.has_c6,    d.c6_dir,      'C6 (via CAP FT)'),
+            'police_c6': (d.has_c6,    d.c6_dir,      'C6 (via CAP FT)'),
+            'c6c3a':     (d.has_c6 and (d.has_c7 or d.has_c3a), d.c6_dir, 'C6 (via CAP FT)'),
         }
         for key, row in self._module_rows.items():
-            found, mp = module_map.get(key, (False, ''))
-            row.set_detected(found, mp)
+            found, mp, res_label = module_map.get(key, (False, '', ''))
+            diag = '' if found else d.get_diagnostic(res_label)
+            row.set_detected(found, mp, diagnostic=diag)
 
         self._update_mod_count()
         self._validate_start()
 
-        # Log
+        # Log with diagnostics for missing resources
         self._log_info(f"Projet : {d.project_name}")
         if d.sro:
             self._log_ok(f"  SRO : {d.sro}")
+        has_missing = False
         for label, p, found in d.summary_lines():
             if found:
                 self._log_ok(f"  {label} : {os.path.basename(p)}")
             else:
-                self._log_dim(f"  {label} : -")
+                self._log_dim(f"  {label} : non detecte")
+                has_missing = True
+                diag = d.get_diagnostic(label)
+                if diag:
+                    for line in diag.split('\n'):
+                        self._log_dim(f"      {line}")
+        if has_missing:
+            self._log_warn(
+                "Conseil : verifiez le nommage des dossiers/fichiers "
+                "ou utilisez le bouton Rafraichir apres renommage."
+            )
 
     def _reset_detection(self):
         self._detection = DetectionResult()
@@ -894,6 +958,287 @@ class PoleAerienDialogV2(QDialog):
         self._validate_start()
 
     # ==================================================================
+    #  DIAGNOSTIC
+    # ==================================================================
+
+    def _run_diagnostic(self):
+        """Pre-diagnostic intelligent du livrable et de l'environnement."""
+        self.textBrowser.clear()
+
+        path = self.projectPathEdit.text()
+        if not path or not os.path.isdir(path):
+            self._log_err("Aucun dossier projet selectionne.")
+            return
+
+        # Ensure detection is up-to-date
+        d = self._detection
+        if not d.project_name:
+            self._run_detection(path)
+            d = self._detection
+
+        # Deep analysis
+        analysis = analyse_livrable(d)
+
+        # ── Header ──
+        self._log_info(f"<b>=== PRE-DIAGNOSTIC : {d.project_name or os.path.basename(path)} ===</b>")
+        if d.sro:
+            self._log_ok(f"  SRO : {d.sro}")
+        else:
+            self._log_warn(
+                "  SRO : non reconnu (format attendu : XXXXX-YYY-ZZZ-NNNNN)"
+            )
+
+        # ── 1. Contenu du livrable ──
+        self._log_info("")
+        self._log_info("<b>--- Contenu du livrable ---</b>")
+
+        # CAP FT
+        if d.has_capft:
+            cap = analysis.get('capft', {})
+            parts = []
+            if cap.get('cmd'):
+                parts.append(f"{cap['cmd']} CMD")
+            if cap.get('etudes'):
+                parts.append(f"{cap['etudes']} etude(s)")
+            if cap.get('excels'):
+                parts.append(f"{cap['excels']} fichiers Excel")
+            self._log_ok(f"  CAP FT ........... {' | '.join(parts) if parts else 'detecte'}")
+        else:
+            self._log_warn("  CAP FT ........... Non livre")
+
+        # COMAC
+        if d.has_comac:
+            com = analysis.get('comac', {})
+            parts = []
+            if com.get('sous_dossiers'):
+                parts.append(f"{com['sous_dossiers']} sous-dossier(s)")
+            if com.get('excels'):
+                parts.append(f"{com['excels']} fichiers Excel")
+            self._log_ok(f"  COMAC ............ {' | '.join(parts) if parts else 'detecte'}")
+        else:
+            self._log_warn("  COMAC ............ Non livre")
+
+        # FT-BT KO
+        if d.has_ftbt:
+            nom = analysis.get('ftbt', {}).get('fichier', '?')
+            self._log_ok(f"  FT-BT KO ......... {nom}")
+        else:
+            self._log_warn("  FT-BT KO ......... Non livre")
+
+        # C7 / C3A
+        if d.has_c7:
+            self._log_ok(f"  C7 ............... {analysis.get('c7', {}).get('fichier', '?')}")
+        else:
+            self._log_dim("  C7 ............... Non livre")
+        if d.has_c3a:
+            self._log_ok(f"  C3A .............. {analysis.get('c3a', {}).get('fichier', '?')}")
+        else:
+            self._log_dim("  C3A .............. Non livre")
+
+        # ── 2. Environnement QGIS ──
+        self._log_info("")
+        self._log_info("<b>--- Environnement QGIS ---</b>")
+
+        mode_label = "Projet (PostgreSQL)" if self._project_mode else "Couches QGIS (manuel)"
+        self._log_dim(f"  Mode : {mode_label}")
+
+        # PostgreSQL
+        pg_ok = False
+        if self._project_mode:
+            try:
+                from .db_connection import DatabaseConnection
+                db = DatabaseConnection()
+                conn_name = db.find_auvergne_connection()
+                if conn_name and db.connect():
+                    self._log_ok(f"  PostgreSQL : OK ({conn_name})")
+                    pg_ok = True
+                    db.disconnect()
+                elif conn_name:
+                    self._log_warn(f"  PostgreSQL : connexion '{conn_name}' trouvee mais echec")
+                else:
+                    self._log_warn("  PostgreSQL : aucune connexion 'Auvergne' configuree")
+            except Exception as exc:
+                self._log_warn(f"  PostgreSQL : erreur ({exc})")
+
+            if pg_ok:
+                self._log_dim("  Couches : chargement automatique via SRO")
+            else:
+                self._log_warn("  Couches : chargement impossible sans connexion PG")
+        else:
+            # QGIS layers mode - check selected layers
+            layer_checks = [
+                (self.comboInfraPtPot.currentLayer(), 'infra_pt_pot',
+                 'Poteaux (Point)'),
+                (self.comboEtudeCapFt.currentLayer(), 'etude_cap_ft',
+                 'Zonage CAP FT (Polygone)'),
+                (self.comboEtudeComac.currentLayer(), 'etude_comac',
+                 'Zonage COMAC (Polygone)'),
+            ]
+            crs_set = set()
+            for lyr, key, desc in layer_checks:
+                if lyr:
+                    fc = lyr.featureCount()
+                    crs = lyr.crs().authid() if lyr.crs().isValid() else '?'
+                    crs_set.add(crs)
+                    if fc > 0:
+                        self._log_ok(
+                            f"  {key} : {lyr.name()} ({fc:,} entites, {crs})")
+                    else:
+                        self._log_warn(
+                            f"  {key} : {lyr.name()} (VIDE - 0 entite)")
+                else:
+                    self._log_warn(f"  {key} : non selectionnee ({desc})")
+
+            if len(crs_set) > 1:
+                self._log_warn(
+                    f"  CRS : ATTENTION, CRS heterogenes ({', '.join(crs_set)})")
+            elif len(crs_set) == 1:
+                self._log_ok(f"  CRS : coherent ({crs_set.pop()})")
+
+        # Export
+        export_dir = self.exportPathEdit.text() or d.export_dir
+        if export_dir and os.path.isdir(export_dir):
+            try:
+                test_path = os.path.join(export_dir, '.poleaerien_diag_test')
+                with open(test_path, 'w') as _f:
+                    pass
+                os.remove(test_path)
+                self._log_ok(f"  Export : {export_dir}")
+            except OSError:
+                self._log_err(f"  Export : {export_dir} (NON inscriptible)")
+        elif export_dir:
+            self._log_err(f"  Export : {export_dir} (dossier introuvable)")
+        else:
+            self._log_dim("  Export : racine projet (par defaut)")
+
+        # ── 3. Modules ──
+        self._log_info("")
+        self._log_info("<b>--- Modules ---</b>")
+
+        detected = d.detected_modules()
+
+        module_defs = [
+            ('maj',       'MAJ BD',       self._diag_prereq_maj),
+            ('capft',     'CAP_FT',       self._diag_prereq_capft),
+            ('comac',     'COMAC',        self._diag_prereq_comac),
+            ('c6bd',      'C6 vs BD',     self._diag_prereq_c6),
+            ('police_c6', 'POLICE C6',    self._diag_prereq_c6),
+            ('c6c3a',     'C6-C3A-C7-BD', self._diag_prereq_c6c3a),
+        ]
+
+        n_ready = 0
+        for key, name, prereq_fn in module_defs:
+            if key in detected:
+                detail = prereq_fn(analysis)
+                self._log_ok(f"  PRET    {name:.<16s} {detail}")
+                n_ready += 1
+            else:
+                raison = prereq_fn(analysis, missing=True)
+                self._log_warn(f"  BLOQUE  {name:.<16s} {raison}")
+
+        # ── 4. Recommandations ──
+        recommandations = self._build_recommandations(d, detected, pg_ok)
+        if recommandations:
+            self._log_info("")
+            self._log_info("<b>--- Recommandations ---</b>")
+            for reco in recommandations:
+                self._log_dim(f"  > {reco}")
+
+        # ── Verdict ──
+        self._log_info("")
+        total = len(module_defs)
+        if n_ready == total:
+            self._log_ok(f"<b>Verdict : {n_ready}/{total} modules prets. Livrable complet.</b>")
+        elif n_ready > 0:
+            self._log_warn(
+                f"<b>Verdict : {n_ready}/{total} modules prets. "
+                f"Livrable partiel.</b>")
+        else:
+            self._log_err(f"<b>Verdict : 0/{total} modules prets.</b>")
+
+    # --- Diagnostic helpers ---
+
+    def _diag_prereq_maj(self, analysis, missing=False):
+        if missing:
+            return "fichier FT-BT KO manquant a la racine"
+        return analysis.get('ftbt', {}).get('fichier', '')
+
+    def _diag_prereq_capft(self, analysis, missing=False):
+        if missing:
+            return "dossier CAP FT non detecte"
+        cap = analysis.get('capft', {})
+        parts = []
+        if cap.get('cmd'):
+            parts.append(f"{cap['cmd']} CMD")
+        if cap.get('etudes'):
+            parts.append(f"{cap['etudes']} etudes")
+        return ', '.join(parts) if parts else 'detecte'
+
+    def _diag_prereq_comac(self, analysis, missing=False):
+        if missing:
+            return "dossier COMAC non detecte"
+        com = analysis.get('comac', {})
+        n = com.get('sous_dossiers', 0)
+        return f"{n} etude(s)" if n else 'detecte'
+
+    def _diag_prereq_c6(self, analysis, missing=False):
+        if missing:
+            return "dossier CAP FT requis (C6 = etudes dans CAP FT)"
+        cap = analysis.get('capft', {})
+        n = cap.get('etudes', 0)
+        return f"via CAP FT ({n} etudes)" if n else 'via CAP FT'
+
+    def _diag_prereq_c6c3a(self, analysis, missing=False):
+        if missing:
+            return "C7 et/ou C3A requis en complement de C6"
+        parts = []
+        if 'c7' in analysis:
+            parts.append('C7')
+        if 'c3a' in analysis:
+            parts.append('C3A')
+        return f"C6 + {' + '.join(parts)}" if parts else 'detecte'
+
+    def _build_recommandations(self, d, detected, pg_ok):
+        recos = []
+        if 'maj' not in detected:
+            recos.append(
+                'MAJ BD : placer le fichier Excel FT-BT KO '
+                'a la racine du projet')
+        if 'capft' not in detected:
+            recos.append(
+                'CAP FT / C6 / Police : creer le dossier CAP FT '
+                '(ou ETUDE_CAPFT) avec les CMD a l\'interieur')
+        if 'comac' not in detected:
+            recos.append(
+                'COMAC : creer le dossier COMAC '
+                '(ou ETUDE_COMAC) avec les sous-dossiers d\'etude')
+        if 'c6c3a' not in detected and 'c6bd' in detected:
+            missing = []
+            if not d.has_c7:
+                missing.append('C7')
+            if not d.has_c3a:
+                missing.append('C3A')
+            if missing:
+                recos.append(
+                    f"C6-C3A-C7-BD : ajouter les annexes "
+                    f"{' et '.join(missing)}")
+        if self._project_mode and not pg_ok:
+            recos.append(
+                'Mode Projet : configurer la connexion PostgreSQL '
+                'Auvergne dans QGIS > Parametres > PostgreSQL')
+        if not self._project_mode:
+            any_missing = not all([
+                self.comboInfraPtPot.currentLayer(),
+                self.comboEtudeCapFt.currentLayer(),
+                self.comboEtudeComac.currentLayer(),
+            ])
+            if any_missing:
+                recos.append(
+                    'Mode Couches : selectionner les 3 couches QGIS '
+                    '(poteaux, zonage CAP FT, zonage COMAC)')
+        return recos
+
+    # ==================================================================
     #  LOGGING
     # ==================================================================
 
@@ -917,6 +1262,24 @@ class PoleAerienDialogV2(QDialog):
 
     def _log_dim(self, msg):
         self._log_html(f'<span style="color:gray">{msg}</span>')
+
+    def log_result_link(self, filepath):
+        """Log a clickable link to open a result file."""
+        fname = os.path.basename(filepath)
+        url = filepath.replace('\\', '/')
+        self._log_html(
+            f'<span style="color:#2e7d32">Rapport : '
+            f'<a href="file:///{url}" style="color:#1565c0; '
+            f'text-decoration:underline;">{fname}</a></span>'
+        )
+
+    def _on_link_clicked(self, url):
+        """Open a file link clicked in the log browser."""
+        path = url.toLocalFile()
+        if path and os.path.isfile(path):
+            os.startfile(path)
+        else:
+            self._log_warn(f"Fichier introuvable : {path}")
 
     def log_message(self, msg, level='info'):
         dispatch = {

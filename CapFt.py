@@ -4,10 +4,11 @@
 import os
 import openpyxl
 from .qgis_utils import (
+    extraire_poteaux_etude,
     verifications_donnees_etude,
-    liste_poteaux_par_etude,
-    normalize_appui_num_bt
+    liste_poteaux_par_etude
 )
+from .core_utils import normalize_appui_num
 
 
 class CapFt:
@@ -16,6 +17,17 @@ class CapFt:
     def __init__(self):
         """Le constructeur de ma classe
         Il prend pour attribut de classe les *** """
+
+    def extraire_donnees_capft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
+        """Extraction complete CAP_FT en une seule passe.
+        
+        Returns:
+            tuple: (doublons, hors_etude, dico_qgis, dico_poteaux_prives)
+        """
+        return extraire_poteaux_etude(
+            table_poteau, table_etude_cap_ft, colonne_cap_ft,
+            'POT-FT', 'CAP_FT'
+        )
 
     def verificationsDonneesCapft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
         """Vérifie doublons études + poteaux FT hors étude."""
@@ -60,7 +72,7 @@ class CapFt:
         index_qgis = {}  # clé normalisée -> liste de (etude_cap_ft, inf_num_ft)
         for etude_cap_ft, listePoteauxQgis in dicoEtudeCapFtPoteauQgis.items():
             for inf_num_ft in listePoteauxQgis:
-                cle = normalize_appui_num_bt(inf_num_ft, strip_e_prefix=True)
+                cle = normalize_appui_num(inf_num_ft, strip_e_prefix=True)
                 index_qgis.setdefault(cle, []).append((etude_cap_ft, inf_num_ft))
 
         # Étape 2 : traitement Excel
@@ -69,7 +81,7 @@ class CapFt:
 
             for poteauSt in listePoteau:
                 potSt = poteauSt.replace("FicheAppui_", "").replace(".xlsx", "").strip()
-                potSt = normalize_appui_num_bt(potSt, strip_e_prefix=True)
+                potSt = normalize_appui_num(potSt, strip_e_prefix=True)
 
                 infos_list = index_qgis.get(potSt)
                 if infos_list:

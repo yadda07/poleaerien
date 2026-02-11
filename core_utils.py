@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 
 
 # =============================================================================
-# PARSING HELPERS (centralisés - utilisés par comac_db_reader, comac_loader, pcm_parser)
+# PARSING HELPERS (centralises - utilises par comac_db_reader, pcm_parser)
 # =============================================================================
 
 def safe_float(value, default: float = 0.0) -> float:
@@ -121,14 +121,16 @@ def build_export_path(chemin: str, default_name: str) -> str:
 # NORMALISATION APPUIS
 # =============================================================================
 
-def normalize_appui_num(inf_num):
+def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False):
     """Normalise un numéro d'appui pour comparaison.
     
     Args:
-        inf_num: Numéro d'appui brut (ex: "1016436/63041", "E000123", "123")
+        inf_num: Numéro d'appui brut (ex: "1016436/63041", "E000123", "BT-123")
+        strip_e_prefix: Si True, enlève préfixe E (pour matching existant)
+        strip_bt_prefix: Si True, enlève préfixes BT-/BT
         
     Returns:
-        Numéro normalisé (sans zéros de tête, partie avant le /)
+        str: Numéro normalisé (sans zéros de tête, partie avant le /)
     """
     try:
         if inf_num is None:
@@ -145,9 +147,19 @@ def normalize_appui_num(inf_num):
         if s.endswith(".0"):
             s = s[:-2]
         
-        # Préfixe E: conserver tel quel
+        # Préfixe E: conserver ou enlever selon strip_e_prefix
         if s.startswith("E"):
-            return s
+            if strip_e_prefix:
+                s = s[1:]
+            else:
+                return s
+        
+        # Préfixe BT: enlever si demandé
+        if strip_bt_prefix:
+            if s.startswith("BT-"):
+                s = s[3:]
+            elif s.startswith("BT"):
+                s = s[2:]
         
         # Nettoyer et normaliser
         s_clean = s.replace(" ", "")
@@ -156,56 +168,9 @@ def normalize_appui_num(inf_num):
         if s_clean.isdigit():
             return s_clean.lstrip("0") or "0"
         
-        # Tenter d'extraire les 7 premiers chiffres si présents
-        if len(s_clean) >= 7:
-            prefix = s_clean[:7]
-            if prefix.isdigit():
-                return prefix.lstrip("0") or "0"
-        
         return s
     except Exception:
         return ""
-
-
-def normalize_appui_num_bt(inf_num, strip_bt_prefix=True, strip_e_prefix=False):
-    """Normalise appui BT/FT unifié.
-    
-    Args:
-        inf_num: Numéro brut
-        strip_bt_prefix: Si True, enlève préfixes BT-/BT
-        strip_e_prefix: Si True, enlève préfixe E (pour matching)
-        
-    Returns:
-        str: Numéro normalisé
-    """
-    if inf_num is None:
-        return ""
-    s = str(inf_num).strip()
-    if not s:
-        return ""
-    
-    s = s.split("/")[0].strip()
-    
-    if s.endswith(".0"):
-        s = s[:-2]
-    
-    if s.startswith("E"):
-        if strip_e_prefix:
-            s = s[1:]
-        else:
-            return s
-    
-    if strip_bt_prefix:
-        if s.startswith("BT-"):
-            s = s[3:]
-        elif s.startswith("BT"):
-            s = s[2:]
-    
-    s_clean = s.replace(" ", "")
-    if s_clean.isdigit():
-        return s_clean.lstrip("0") or "0"
-    
-    return s
 
 
 def temps_ecoule(seconde):

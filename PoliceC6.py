@@ -417,7 +417,7 @@ class PoliceC6:
                         boitier_par_appui[current_appui] = boitier_val
                 
                 if current_appui and nom_cable:
-                    is_cable = nom_cable.upper().startswith('L')
+                    is_cable = bool(re.match(r'^L\d', nom_cable, re.IGNORECASE))
                     
                     if is_cable:
                         donnees_par_appui[current_appui].append(nom_cable)
@@ -613,88 +613,19 @@ class PoliceC6:
         donnees_c6: Dict[str, List[str]],
         cables_par_appui: Dict[str, Dict]
     ) -> List[Dict]:
-        """
-        Compare les données C6 avec les câbles comptés par appui.
-        Vérifie le nombre de câbles ET les capacités (C6 via comac PostgreSQL vs BDD cab_capa).
-        
-        Args:
-            donnees_c6: Dict[num_appui, List[nom_cable]] depuis lire_annexe_c6()
-            cables_par_appui: Dict[num_appui, {count, capacites, cables}] depuis compter_cables_par_appui()
-        
-        Returns:
-            Liste de dicts avec comparaison par appui
-        """
-        comparaison = []
-        
-        for num_appui, cables_c6 in donnees_c6.items():
-            bdd_data = cables_par_appui.get(num_appui, {})
-            nb_cables_bdd = bdd_data.get('count', 0)
-            nb_cables_c6 = len(cables_c6)
-            
-            # Résoudre les capacités possibles C6 via comac (PostgreSQL/GPKG)
-            # Chaque référence C6 peut couvrir plusieurs capacités
-            # Ex: L1092-13-P → [24, 36], L1092-14-P → [48, 72]
-            capas_possibles_c6 = []
-            for nom in cables_c6:
-                capas_possibles_c6.append(get_capacites_possibles(nom))
-            
-            capas_bdd = sorted(bdd_data.get('capacites', []))
-            # Affichage: capacités possibles par câble C6
-            capas_c6_display = ['/'.join(str(c) for c in cp) for cp in capas_possibles_c6]
-            
-            # Déterminer le statut
-            messages = []
-            if not bdd_data:
-                statut = "ABSENT_BDD"
-                messages.append("Appui non trouvé dans les appuis QGIS")
-            else:
-                ecart_count = nb_cables_c6 != nb_cables_bdd
-                
-                # Vérifier compatibilité des capacités (matching)
-                # Chaque capacité BDD doit correspondre à un câble C6 compatible
-                ecart_capa = not self._capacites_compatibles(
-                    capas_possibles_c6, capas_bdd
-                )
-                
-                if ecart_count:
-                    diff = nb_cables_bdd - nb_cables_c6
-                    messages.append(
-                        f"Écart nombre: {diff:+d} câble(s) (BDD={nb_cables_bdd}, C6={nb_cables_c6})"
-                    )
-                
-                if ecart_capa:
-                    c6_str = '+'.join(capas_c6_display) or '?'
-                    bdd_str = '+'.join(str(c) for c in capas_bdd) or '?'
-                    messages.append(
-                        f"Écart capacité: C6=[{c6_str}] vs BDD=[{bdd_str}]"
-                    )
-                
-                if ecart_count or ecart_capa:
-                    statut = "ECART"
-                else:
-                    statut = "OK"
-            
-            comparaison.append({
-                'num_appui': num_appui,
-                'nb_cables_c6': nb_cables_c6,
-                'cables_c6': '; '.join(cables_c6),
-                'capas_c6': capas_c6_display,
-                'nb_cables_bdd': nb_cables_bdd,
-                'capas_bdd': capas_bdd,
-                'statut': statut,
-                'message': ' | '.join(messages)
-            })
-        
-        return comparaison
+        """Compare cables C6 vs BDD. Delegue a cable_analyzer.comparer_source_cables()."""
+        from .cable_analyzer import comparer_source_cables
+        return comparer_source_cables(
+            donnees_c6, cables_par_appui,
+            source_label="C6",
+            get_capacites_fn=get_capacites_possibles
+        )
 
     @staticmethod
     def _capacites_compatibles(
         capas_possibles_c6: List[List[int]],
         capas_bdd: List[int]
     ) -> bool:
-        """
-        Vérifie si les capacités BDD sont compatibles avec les câbles C6.
-        Délègue à la fonction partagée cable_analyzer.capacites_compatibles().
-        """
+        """Delegue a cable_analyzer.capacites_compatibles()."""
         from .cable_analyzer import capacites_compatibles
         return capacites_compatibles(capas_possibles_c6, capas_bdd)

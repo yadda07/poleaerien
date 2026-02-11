@@ -317,18 +317,39 @@ def extraire_appuis_from_layer(layer: QgsVectorLayer, field_num_appui: str = 'nu
                     'feature_id': feature.id()
                 })
     
-    QgsMessageLog.logMessage(
-        f"Extrait {len(appuis)} appuis depuis {layer.name()}",
-        "PoleAerien", Qgis.Info
-    )
-    
     return appuis
+
+
+def extraire_appuis_wkb(layer: QgsVectorLayer, field_num_appui: str = 'num_appui') -> List[Dict]:
+    """Extrait appuis depuis couche QGIS et serialise geometries en WKB.
+    
+    Combine extraire_appuis_from_layer() + WKB serialization en un seul appel.
+    Le resultat est thread-safe (pas de QgsGeometry, juste des bytes WKB).
+    
+    Args:
+        layer: Couche de points (poteaux)
+        field_num_appui: Nom du champ contenant le numero d'appui
+    
+    Returns:
+        Liste de dicts {'num_appui': str, 'feature_id': int, 'geom_wkb': bytes|None}
+    """
+    raw_appuis = extraire_appuis_from_layer(layer, field_num_appui)
+    appuis_wkb = []
+    for appui in raw_appuis:
+        geom = appui.get('geom')
+        appuis_wkb.append({
+            'num_appui': appui.get('num_appui', ''),
+            'feature_id': appui.get('feature_id'),
+            'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None
+        })
+    return appuis_wkb
 
 
 def compter_cables_par_appui(
     cables: List[CableSegment],
     appuis: List[Dict],
-    tolerance: float = 0.5
+    tolerance: float = 0.5,
+    group_by_gid: bool = False
 ) -> Dict[str, Dict]:
     """
     Compte les câbles qui touchent chaque appui.
@@ -337,6 +358,10 @@ def compter_cables_par_appui(
         cables: Liste de CableSegment depuis fddcpi2
         appuis: Liste de dicts avec 'num_appui' et 'geom'
         tolerance: Distance max en mètres pour l'intersection
+        group_by_gid: Si True, compte les câbles physiques (distinct GID)
+            au lieu des segments découpés (gid_dc2). Utiliser True pour COMAC
+            (références = câbles physiques), False pour Police C6
+            (références = câbles découpés par zone d'étude).
     
     Returns:
         Dict[num_appui, {'count': int, 'capacites': List[int], 'cables': List}]
@@ -355,7 +380,8 @@ def compter_cables_par_appui(
             result[num] = {
                 'count': 0,
                 'capacites': [],
-                'cables': []
+                'cables': [],
+                '_gids_seen': set()
             }
     
     # Pour chaque câble, trouver les appuis aux extrémités
@@ -397,11 +423,19 @@ def compter_cables_par_appui(
                 dist_end = appui_geom.distance(end_point)
                 
                 if dist_start <= tolerance or dist_end <= tolerance:
+                    # Déduplication par GID physique si demandé
+                    if group_by_gid:
+                        gid = getattr(cable, 'gid', 0)
+                        if gid in result[appui_num]['_gids_seen']:
+                            continue
+                        result[appui_num]['_gids_seen'].add(gid)
+                    
                     result[appui_num]['count'] += 1
                     if cable.cab_capa:
                         result[appui_num]['capacites'].append(cable.cab_capa)
                     result[appui_num]['cables'].append({
                         'id': cable.gid_dc2,
+                        'gid': getattr(cable, 'gid', 0),
                         'capacite': cable.cab_capa,
                         'posemode': cable.posemode
                     })
@@ -411,7 +445,86 @@ def compter_cables_par_appui(
                 "PoleAerien", Qgis.Warning
             )
     
+    # Nettoyer les sets internes
+    for data in result.values():
+        data.pop('_gids_seen', None)
+    
     return result
+
+
+def comparer_source_cables(
+    dico_cables_source: Dict[str, List[str]],
+    cables_par_appui: Dict[str, Dict],
+    source_label: str = "SOURCE",
+    get_capacites_fn=None
+) -> List[Dict]:
+    """Compare les cables declares dans une source (C6 ou COMAC) avec les cables BDD (fddcpi2).
+    
+    Fonction generique qui factorise la logique identique de
+    Comac.comparer_comac_cables() et PoliceC6.comparer_c6_cables().
+    
+    Args:
+        dico_cables_source: {appui_norm -> [refs_cables]} depuis parsing Excel
+        cables_par_appui: {appui_norm -> {count, capacites, cables}} depuis compter_cables_par_appui()
+        source_label: Label pour les messages et cles de sortie ('C6' ou 'COMAC')
+        get_capacites_fn: Callable(ref) -> List[int] pour resoudre capacites possibles.
+            Si None, utilise security_rules.get_capacites_possibles.
+    
+    Returns:
+        Liste de dicts avec comparaison par appui:
+        [{num_appui, nb_cables_source, cables_source, capas_source,
+          nb_cables_bdd, capas_bdd, statut, message}]
+    """
+    if get_capacites_fn is None:
+        from .security_rules import get_capacites_possibles
+        get_capacites_fn = get_capacites_possibles
+
+    comparaison = []
+    label_lower = source_label.lower()
+
+    for num_appui, refs_source in dico_cables_source.items():
+        bdd_data = cables_par_appui.get(num_appui, {})
+        nb_cables_bdd = bdd_data.get('count', 0)
+        nb_cables_source = len(refs_source)
+
+        capas_possibles = [get_capacites_fn(ref) for ref in refs_source]
+        capas_bdd = sorted(bdd_data.get('capacites', []))
+        capas_display = ['/'.join(str(c) for c in cp) for cp in capas_possibles]
+
+        messages = []
+        if not bdd_data:
+            statut = "ABSENT_BDD"
+            messages.append("Appui non trouvé dans les appuis QGIS")
+        else:
+            ecart_count = nb_cables_source != nb_cables_bdd
+            ecart_capa = not capacites_compatibles(capas_possibles, capas_bdd)
+
+            if ecart_count:
+                diff = nb_cables_bdd - nb_cables_source
+                messages.append(
+                    f"Écart nombre: {diff:+d} câble(s) (BDD={nb_cables_bdd}, {source_label}={nb_cables_source})"
+                )
+            if ecart_capa:
+                src_str = '+'.join(capas_display) or '?'
+                bdd_str = '+'.join(str(c) for c in capas_bdd) or '?'
+                messages.append(
+                    f"Écart capacité: {source_label}=[{src_str}] vs BDD=[{bdd_str}]"
+                )
+
+            statut = "ECART" if (ecart_count or ecart_capa) else "OK"
+
+        comparaison.append({
+            'num_appui': num_appui,
+            f'nb_cables_{label_lower}': nb_cables_source,
+            f'cables_{label_lower}': '; '.join(refs_source),
+            f'capas_{label_lower}': capas_display,
+            'nb_cables_bdd': nb_cables_bdd,
+            'capas_bdd': capas_bdd,
+            'statut': statut,
+            'message': ' | '.join(messages)
+        })
+
+    return comparaison
 
 
 def capacites_compatibles(
@@ -453,3 +566,69 @@ def capacites_compatibles(
             return False
     
     return True
+
+
+def verifier_boitiers(
+    boitier_source: Dict[str, str],
+    appuis_data: List[Dict],
+    bpe_geoms: List[Dict],
+    tolerance: float = 1.0
+) -> Dict[str, Dict]:
+    """Verifie la presence de BPE pour chaque appui declarant un boitier.
+    
+    Fonction generique utilisee par ComacTask et PoliceC6Task.
+    
+    Args:
+        boitier_source: {num_appui: valeur_boitier} (ex: "PB", "PEO", "oui")
+        appuis_data: Liste de dicts avec 'num_appui' et 'geom' (QgsGeometry)
+        bpe_geoms: Liste de dicts avec 'geom' (QgsGeometry), 'noe_type', 'gid'
+        tolerance: Distance max en metres pour le matching spatial (defaut 1m)
+    
+    Returns:
+        Dict[num_appui, {boitier_source, bpe_trouve, bpe_noe_type, statut}]
+    """
+    result = {}
+    
+    if not boitier_source:
+        return result
+    
+    appuis_by_num = {}
+    for appui in appuis_data:
+        num = appui.get('num_appui', '')
+        if num and appui.get('geom'):
+            appuis_by_num[num] = appui['geom']
+    
+    for num_appui, type_boitier in boitier_source.items():
+        appui_geom = appuis_by_num.get(num_appui)
+        
+        entry = {
+            'boitier_source': type_boitier,
+            'bpe_trouve': False,
+            'bpe_noe_type': '',
+            'statut': ''
+        }
+        
+        if not appui_geom:
+            entry['statut'] = 'ERREUR'
+            entry['bpe_noe_type'] = 'appui non localisé'
+            result[num_appui] = entry
+            continue
+        
+        bpe_proche = None
+        dist_min = 999999
+        for bpe in bpe_geoms:
+            dist = appui_geom.distance(bpe['geom'])
+            if dist < tolerance and dist < dist_min:
+                dist_min = dist
+                bpe_proche = bpe
+        
+        if bpe_proche:
+            entry['bpe_trouve'] = True
+            entry['bpe_noe_type'] = bpe_proche['noe_type']
+            entry['statut'] = 'OK'
+        else:
+            entry['statut'] = 'ERREUR'
+        
+        result[num_appui] = entry
+    
+    return result

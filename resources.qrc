@@ -1,58 +1,5 @@
 <RCC>
     <qresource prefix="/plugins/PoleAerien" >
         <file>images/icon.svg</file>
-        <file>images/icon2.svg</file>
-        <file>images/logo_NGE.svg</file>
-        <file>images/noun-electric-pole-4591270.svg</file>
-        <file>images/noun-check-1763833.svg</file>
-        <!-- Status Icons -->
-        <file>images/icon-loading.svg</file>
-        <file>images/icon-success.svg</file>
-        <file>images/icon-error.svg</file>
-        <file>images/icon-warning.svg</file>
-        <file>images/icon-info.svg</file>
-        <file>images/icon-help.svg</file>
-        <!-- Action Icons -->
-        <file>images/icon-add.svg</file>
-        <file>images/icon-edit.svg</file>
-        <file>images/icon-delete.svg</file>
-        <file>images/icon-save.svg</file>
-        <file>images/icon-check.svg</file>
-        <file>images/icon-close.svg</file>
-        <file>images/icon-play.svg</file>
-        <file>images/icon-stop.svg</file>
-        <file>images/icon-pause.svg</file>
-        <!-- File Icons -->
-        <file>images/icon-folder.svg</file>
-        <file>images/icon-folder-open.svg</file>
-        <file>images/icon-file.svg</file>
-        <file>images/icon-excel.svg</file>
-        <file>images/icon-export.svg</file>
-        <file>images/icon-import.svg</file>
-        <!-- Navigation Icons -->
-        <file>images/icon-arrow-right.svg</file>
-        <file>images/icon-arrow-down.svg</file>
-        <file>images/icon-refresh.svg</file>
-        <file>images/icon-sync.svg</file>
-        <!-- Utility Icons -->
-        <file>images/icon-settings.svg</file>
-        <file>images/icon-search.svg</file>
-        <file>images/icon-filter.svg</file>
-        <file>images/icon-copy.svg</file>
-        <file>images/icon-link.svg</file>
-        <file>images/icon-zoom-in.svg</file>
-        <file>images/icon-zoom-out.svg</file>
-        <!-- GIS Icons -->
-        <file>images/icon-pole.svg</file>
-        <file>images/icon-map.svg</file>
-        <file>images/icon-layers.svg</file>
-        <file>images/icon-pin.svg</file>
-        <file>images/icon-database.svg</file>
-        <file>images/icon-table.svg</file>
-        <file>images/icon-chart.svg</file>
-        <!-- Time Icons -->
-        <file>images/icon-clock.svg</file>
-        <file>images/icon-calendar.svg</file>
-        <file>images/icon-user.svg</file>
     </qresource>
 </RCC>

@@ -1,7 +1,6 @@
 ﻿#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import time
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import (
     Qgis, QgsFeatureRequest, QgsExpression, QgsProject,
@@ -14,10 +13,39 @@ import re
 import random
 import difflib
 from .qgis_utils import validate_same_crs, get_layer_safe
+from .core_utils import normalize_appui_num
 from .dataclasses_results import (
     ExcelValidationResult, PoteauxPolygoneResult, 
     EtudesValidationResult, ImplantationValidationResult
 )
+
+def _get_etat(action, prefix):
+    """Determine etat poteau selon action Excel. prefix='FT' ou 'BT'."""
+    action_lower = str(action).lower()
+    if "implantation" in action_lower:
+        return f"{prefix} KO"
+    elif "recalage" in action_lower:
+        return "A RECALER"
+    elif "remplacement" in action_lower:
+        return "A REMPLACER"
+    elif "renforcement" in action_lower:
+        return "A RENFORCER"
+    return ""
+
+
+def _get_action(action):
+    """Normalise action Excel en label standardise."""
+    action_lower = str(action).lower()
+    if "implantation" in action_lower:
+        return "IMPLANTATION"
+    elif "recalage" in action_lower:
+        return "RECALAGE"
+    elif "remplacement" in action_lower:
+        return "REMPLACEMENT"
+    elif "renforcement" in action_lower:
+        return "RENFORCEMENT"
+    return ""
+
 
 # REQ-MAJ-003: Colonnes obligatoires pour validation structure Excel
 COLONNES_FT_REQUISES = ['Nom Etudes', 'N° appui', 'Action', 'inf_mat_replace', 
@@ -52,20 +80,14 @@ class MajFtBtTask(QgsTask):
     def run(self):
         """Execute en arriere-plan - traitement spatial pur Python (Worker Thread)"""
         try:
-            t0_task = time.perf_counter()
-            QgsMessageLog.logMessage("[PERF-MAJ] ======= DEBUT TASK ASYNC (Worker Thread) =======", "PoleAerien", Qgis.Info)
-            
             maj = MajFtBt()
             self.signals.progress.emit(random.randint(3, 7))
             self.signals.message.emit("Lecture Excel...", "grey")
 
             # 1. Lecture Excel
-            t1 = time.perf_counter()
             excel_ft, excel_bt, colonnes_warnings = maj.LectureFichiersExcelsFtBtKo(
                 self.params['fichier_excel']
             )
-            t2 = time.perf_counter()
-            QgsMessageLog.logMessage(f"[PERF-MAJ] Lecture Excel: {t2-t1:.3f}s", "PoleAerien", Qgis.Info)
             
             # Afficher les warnings de colonnes mal écrites dans le log du plugin
             for warn in colonnes_warnings:
@@ -78,10 +100,7 @@ class MajFtBtTask(QgsTask):
             self.signals.message.emit("Analyse spatiale FT...", "grey")
 
             # 2. Traitement spatial PUR PYTHON (pas d'accès QGIS)
-            t3 = time.perf_counter()
             bd_ft, bd_bt = self._process_spatial_pure_python()
-            t4 = time.perf_counter()
-            QgsMessageLog.logMessage(f"[PERF-MAJ] Traitement spatial (Worker): {t4-t3:.3f}s", "PoleAerien", Qgis.Info)
             
             if self.isCanceled():
                 return False
@@ -90,27 +109,21 @@ class MajFtBtTask(QgsTask):
             self.signals.message.emit("Comparaison données...", "grey")
 
             # 3. Comparaison
-            t5 = time.perf_counter()
             liste_ft, liste_bt = maj.comparerLesDonnees(
                 excel_ft, excel_bt, bd_ft, bd_bt
             )
-            t6 = time.perf_counter()
-            QgsMessageLog.logMessage(f"[PERF-MAJ] Comparaison données: {t6-t5:.3f}s", "PoleAerien", Qgis.Info)
 
             self.result = {
                 'liste_ft': liste_ft,
                 'liste_bt': liste_bt
             }
             
-            t_total = time.perf_counter() - t0_task
-            QgsMessageLog.logMessage(f"[PERF-MAJ] === TOTAL TASK ASYNC (Worker): {t_total:.3f}s ===", "PoleAerien", Qgis.Warning)
-            
             self.signals.progress.emit(random.randint(48, 52))
             return True
 
         except Exception as e:
             self.exception = str(e)
-            QgsMessageLog.logMessage(f"[PERF-MAJ] ERREUR Task: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"[MAJ] ERREUR Task: {e}", "PoleAerien", Qgis.Critical)
             return False
 
     def _point_in_polygon(self, x, y, vertices):
@@ -141,7 +154,6 @@ class MajFtBtTask(QgsTask):
         etudes_comac = self.raw_data.get('etudes_comac', [])
         
         # === FT: Point-in-polygon ===
-        t1 = time.perf_counter()
         data_ft = []
         for pot in poteaux_ft:
             x, y = pot['x'], pot['y']
@@ -151,10 +163,7 @@ class MajFtBtTask(QgsTask):
                     # Test précis polygon
                     if self._point_in_polygon(x, y, etude['vertices']):
                         inf_num = pot['inf_num']
-                        try:
-                            num_court = str(int(str(inf_num)[:7]))
-                        except (ValueError, TypeError):
-                            num_court = str(inf_num).split("/")[0]
+                        num_court = normalize_appui_num(inf_num)
                         data_ft.append({
                             'gid': pot['gid'],
                             'N° appui': num_court,
@@ -162,9 +171,26 @@ class MajFtBtTask(QgsTask):
                             'Nom Etudes': etude['nom_etudes']
                         })
                         break  # Un poteau = une seule étude
-        t2 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] FT spatial: {len(data_ft)} en {t2-t1:.3f}s", "PoleAerien", Qgis.Info)
         
+        # Diagnostic: combien de correspondances spatiales FT trouvees?
+        QgsMessageLog.logMessage(
+            f"[MAJ_BD] Spatial FT: {len(poteaux_ft)} poteaux, {len(etudes_cap_ft)} polygones "
+            f"-> {len(data_ft)} correspondances",
+            "PoleAerien", Qgis.Info
+        )
+        if data_ft:
+            sample = data_ft[0]
+            QgsMessageLog.logMessage(
+                f"[MAJ_BD] Exemple BD FT: appui='{sample['N° appui']}', etude='{sample['Nom Etudes']}'",
+                "PoleAerien", Qgis.Info
+            )
+        elif poteaux_ft and etudes_cap_ft:
+            QgsMessageLog.logMessage(
+                "[MAJ_BD] ATTENTION: poteaux et polygones existent mais aucune correspondance spatiale. "
+                "Verifier que les poteaux sont geometriquement DANS les polygones etude_cap_ft.",
+                "PoleAerien", Qgis.Warning
+            )
+
         if self.isCanceled():
             return pd.DataFrame(), pd.DataFrame()
         
@@ -172,7 +198,6 @@ class MajFtBtTask(QgsTask):
         self.signals.message.emit("Analyse spatiale BT...", "grey")
         
         # === BT: Point-in-polygon ===
-        t3 = time.perf_counter()
         data_bt = []
         for pot in poteaux_bt:
             x, y = pot['x'], pot['y']
@@ -180,7 +205,7 @@ class MajFtBtTask(QgsTask):
                 if self._point_in_bbox(x, y, etude['bbox']):
                     if self._point_in_polygon(x, y, etude['vertices']):
                         inf_num = pot['inf_num']
-                        num_court = str(inf_num).split("/")[0]
+                        num_court = normalize_appui_num(inf_num)
                         data_bt.append({
                             'gid': pot['gid'],
                             'N° appui': num_court,
@@ -188,9 +213,14 @@ class MajFtBtTask(QgsTask):
                             'Nom Etudes': etude['nom_etudes']
                         })
                         break
-        t4 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] BT spatial: {len(data_bt)} en {t4-t3:.3f}s", "PoleAerien", Qgis.Info)
         
+        # Diagnostic: combien de correspondances spatiales BT trouvees?
+        QgsMessageLog.logMessage(
+            f"[MAJ_BD] Spatial BT: {len(poteaux_bt)} poteaux, {len(etudes_comac)} polygones "
+            f"-> {len(data_bt)} correspondances",
+            "PoleAerien", Qgis.Info
+        )
+
         # Créer DataFrames
         df_ft = pd.DataFrame(data_ft) if data_ft else pd.DataFrame(
             columns=['gid', 'N° appui', 'inf_num', 'Nom Etudes']
@@ -580,32 +610,8 @@ class MajFtBt:
                                    "Etiquette jaune", "Zone privée", "Transition aérosout"]]
 
             # REQ-MAJ-007: Gestion FT Implantation
-            def get_etat_ft(action):
-                action_lower = str(action).lower()
-                if "implantation" in action_lower:
-                    return "FT KO"
-                elif "recalage" in action_lower:
-                    return "A RECALER"
-                elif "remplacement" in action_lower:
-                    return "A REMPLACER"
-                elif "renforcement" in action_lower:
-                    return "A RENFORCER"
-                return ""
-            
-            def get_action_ft(action):
-                action_lower = str(action).lower()
-                if "implantation" in action_lower:
-                    return "IMPLANTATION"
-                elif "recalage" in action_lower:
-                    return "RECALAGE"
-                elif "remplacement" in action_lower:
-                    return "REMPLACEMENT"
-                elif "renforcement" in action_lower:
-                    return "RENFORCEMENT"
-                return ""
-
-            df_ft['etat'] = df_ft['Action'].apply(get_etat_ft)
-            df_ft['action'] = df_ft['Action'].apply(get_action_ft)
+            df_ft['etat'] = df_ft['Action'].apply(lambda a: _get_etat(a, "FT"))
+            df_ft['action'] = df_ft['Action'].apply(_get_action)
             # REQ-MAJ-007: Si implantation, inf_type=POT-AC, inf_propri=RAUV
             df_ft['inf_type'] = df_ft['Action'].apply(lambda x: "POT-AC" if "implantation" in str(x).lower() else "")
             df_ft['inf_propri'] = df_ft['Action'].apply(lambda x: "RAUV" if "implantation" in str(x).lower() else "")
@@ -637,33 +643,9 @@ class MajFtBt:
             df_bt = df_bt.loc[:, cols_bt_excel]
             
             # Traiter toutes les actions BT: implantation, recalage, remplacement, renforcement
-            def get_etat_bt(action):
-                action_lower = str(action).lower()
-                if "implantation" in action_lower:
-                    return "BT KO"
-                elif "recalage" in action_lower:
-                    return "A RECALER"
-                elif "remplacement" in action_lower:
-                    return "A REMPLACER"
-                elif "renforcement" in action_lower:
-                    return "A RENFORCER"
-                return ""
-            
-            def get_action_bt(action):
-                action_lower = str(action).lower()
-                if "implantation" in action_lower:
-                    return "IMPLANTATION"
-                elif "recalage" in action_lower:
-                    return "RECALAGE"
-                elif "remplacement" in action_lower:
-                    return "REMPLACEMENT"
-                elif "renforcement" in action_lower:
-                    return "RENFORCEMENT"
-                return ""
-            
-            df_bt['etat'] = df_bt['Action'].apply(get_etat_bt)
+            df_bt['etat'] = df_bt['Action'].apply(lambda a: _get_etat(a, "BT"))
             df_bt['inf_type'] = df_bt['Action'].apply(lambda x: "POT-AC" if "implantation" in str(x).lower() else "")
-            df_bt['action'] = df_bt['Action'].apply(get_action_bt)
+            df_bt['action'] = df_bt['Action'].apply(_get_action)
             df_bt['inf_propri'] = df_bt['Action'].apply(lambda x: "RAUV" if "implantation" in str(x).lower() else "")
             
             # REQ-NOTE-010: Gestion étiquette orange pour BT si recalage
@@ -694,131 +676,6 @@ class MajFtBt:
 
         return df_ft, df_bt, colonnes_warnings
 
-    def liste_poteau_etudes(self, table_poteau, table_cap_ft, table_comac):
-        """Extraction poteaux avec index spatial (performance O(n log n))"""
-        t0_func = time.perf_counter()
-        
-        # Validation couches
-        lyrs = QgsProject.instance().mapLayersByName
-        infra_pot = lyrs(table_poteau)
-        dcp_cap_ft = lyrs(table_cap_ft)
-        dcp_comac = lyrs(table_comac)
-
-        if not infra_pot or not infra_pot[0].isValid():
-            raise ValueError(f"Couche invalide: {table_poteau}")
-        if not dcp_cap_ft or not dcp_cap_ft[0].isValid():
-            raise ValueError(f"Couche invalide: {table_cap_ft}")
-        if not dcp_comac or not dcp_comac[0].isValid():
-            raise ValueError(f"Couche invalide: {table_comac}")
-
-        infra_pot = infra_pot[0]
-        dcp_cap_ft = dcp_cap_ft[0]
-        dcp_comac = dcp_comac[0]
-
-        validate_same_crs(infra_pot, dcp_cap_ft, "MAJ_FT_BT")
-        validate_same_crs(infra_pot, dcp_comac, "MAJ_FT_BT")
-        
-        # PERF METRICS: Compter features
-        n_pot = infra_pot.featureCount()
-        n_cap_ft = dcp_cap_ft.featureCount()
-        n_comac = dcp_comac.featureCount()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Features: infra_pot={n_pot}, cap_ft={n_cap_ft}, comac={n_comac}", "PoleAerien", Qgis.Info)
-
-        # ===== INDEX SPATIAL FT =====
-        t1 = time.perf_counter()
-        req_ft = QgsFeatureRequest(QgsExpression("inf_type LIKE 'POT-FT'"))
-        idx_ft = QgsSpatialIndex()
-        poteaux_ft = {}
-        n_ft = 0
-        for feat in infra_pot.getFeatures(req_ft):
-            if feat.hasGeometry():
-                idx_ft.addFeature(feat)
-                poteaux_ft[feat.id()] = feat
-                n_ft += 1
-        t2 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Index FT: {n_ft} poteaux en {t2-t1:.3f}s", "PoleAerien", Qgis.Info)
-        
-        # ===== EXTRACTION FT =====
-        t3 = time.perf_counter()
-        data_ft = []
-        for feat_dcp in dcp_cap_ft.getFeatures():
-            if not feat_dcp.hasGeometry():
-                continue
-            raw_etude = feat_dcp["nom_etudes"]
-            etude = str(raw_etude).upper() if raw_etude and raw_etude != NULL else ""
-            bbox = feat_dcp.geometry().boundingBox()
-            candidates = idx_ft.intersects(bbox)
-
-            for fid in candidates:
-                pot = poteaux_ft[fid]
-                if feat_dcp.geometry().contains(pot.geometry()):
-                    inf_num = pot["inf_num"]
-                    try:
-                        num_court = str(int(inf_num[:7]))
-                    except (ValueError, TypeError):
-                        num_court = str(inf_num).split("/")[0]
-                    data_ft.append({
-                        'gid': pot["gid"],
-                        'N° appui': num_court,
-                        'inf_num': inf_num,
-                        'Nom Etudes': etude
-                    })
-        t4 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Extraction FT: {len(data_ft)} resultats en {t4-t3:.3f}s", "PoleAerien", Qgis.Info)
-
-        df_ft = pd.DataFrame(data_ft) if data_ft else pd.DataFrame(
-            columns=['gid', 'N° appui', 'inf_num', 'Nom Etudes']
-        )
-
-        # ===== INDEX SPATIAL BT =====
-        t5 = time.perf_counter()
-        req_bt = QgsFeatureRequest(QgsExpression("inf_type LIKE 'POT-BT'"))
-        idx_bt = QgsSpatialIndex()
-        poteaux_bt = {}
-        n_bt = 0
-        for feat in infra_pot.getFeatures(req_bt):
-            if feat.hasGeometry():
-                idx_bt.addFeature(feat)
-                poteaux_bt[feat.id()] = feat
-                n_bt += 1
-        t6 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Index BT: {n_bt} poteaux en {t6-t5:.3f}s", "PoleAerien", Qgis.Info)
-
-        # ===== EXTRACTION BT =====
-        t7 = time.perf_counter()
-        data_bt = []
-        for feat_dcp in dcp_comac.getFeatures():
-            if not feat_dcp.hasGeometry():
-                continue
-            raw_etude = feat_dcp["nom_etudes"]
-            etude = str(raw_etude).upper() if raw_etude and raw_etude != NULL else ""
-            bbox = feat_dcp.geometry().boundingBox()
-            candidates = idx_bt.intersects(bbox)
-
-            for fid in candidates:
-                pot = poteaux_bt[fid]
-                if feat_dcp.geometry().contains(pot.geometry()):
-                    inf_num = pot["inf_num"]
-                    num_court = str(inf_num).split("/")[0]
-                    data_bt.append({
-                        'gid': pot["gid"],
-                        'N° appui': num_court,
-                        'inf_num': inf_num,
-                        'Nom Etudes': etude
-                    })
-        t8 = time.perf_counter()
-        QgsMessageLog.logMessage(f"[PERF-MAJ] Extraction BT: {len(data_bt)} resultats en {t8-t7:.3f}s", "PoleAerien", Qgis.Info)
-
-        df_bt = pd.DataFrame(data_bt) if data_bt else pd.DataFrame(
-            columns=['gid', 'N° appui', 'inf_num', 'Nom Etudes']
-        )
-        if not df_bt.empty:
-            df_bt = df_bt.set_index('gid', drop=False)
-
-        t_total = time.perf_counter() - t0_func
-        QgsMessageLog.logMessage(f"[PERF-MAJ] === TOTAL liste_poteau_etudes: {t_total:.3f}s ===", "PoleAerien", Qgis.Warning)
-        
-        return df_ft, df_bt
 
     def comparerLesDonnees(self, excel_df_ft, excel_df_bt, bd_df_ft, bd_df_bt):
         """Compare les données Dataframe du fichier Excel par rapport à la base de données"""
@@ -826,8 +683,11 @@ class MajFtBt:
         liste_valeur_introuvbl_ft = pd.DataFrame({})
         liste_valeur_trouve_ft = pd.DataFrame({})
 
-        excel_df_ft["N° appui"] = excel_df_ft["N° appui"].astype(str)
-        bd_df_ft["N° appui"] = bd_df_ft["N° appui"].astype(str)
+        excel_df_ft["N° appui"] = excel_df_ft["N° appui"].astype(str).str.lstrip("'").apply(normalize_appui_num)
+        bd_df_ft["N° appui"] = bd_df_ft["N° appui"].astype(str).apply(normalize_appui_num)
+        excel_df_ft["Nom Etudes"] = excel_df_ft["Nom Etudes"].astype(str).str.strip()
+        if not bd_df_ft.empty:
+            bd_df_ft["Nom Etudes"] = bd_df_ft["Nom Etudes"].astype(str).str.strip()
 
         # CRITICAL: Exclure lignes sans cles valides pour eviter produit cartesien
         excel_df_ft_valid = excel_df_ft[
@@ -840,6 +700,32 @@ class MajFtBt:
             (bd_df_ft["N° appui"].str.strip() != "") &
             (bd_df_ft["N° appui"].str.lower() != "nan")
         ]
+
+        # Diagnostic: afficher tailles et echantillons avant merge
+        QgsMessageLog.logMessage(
+            f"[MAJ_BD] Pre-merge FT: Excel={len(excel_df_ft_valid)} lignes, BD={len(bd_df_ft_valid)} lignes",
+            "PoleAerien", Qgis.Info
+        )
+        if not excel_df_ft_valid.empty:
+            etudes_xls = sorted(excel_df_ft_valid["Nom Etudes"].unique())[:5]
+            appuis_xls = sorted(excel_df_ft_valid["N° appui"].unique())[:5]
+            QgsMessageLog.logMessage(
+                f"[MAJ_BD] Excel FT etudes: {etudes_xls}", "PoleAerien", Qgis.Info)
+            QgsMessageLog.logMessage(
+                f"[MAJ_BD] Excel FT appuis: {appuis_xls}", "PoleAerien", Qgis.Info)
+        if not bd_df_ft_valid.empty:
+            etudes_bd = sorted(bd_df_ft_valid["Nom Etudes"].unique())[:5]
+            appuis_bd = sorted(bd_df_ft_valid["N° appui"].unique())[:5]
+            QgsMessageLog.logMessage(
+                f"[MAJ_BD] BD FT etudes: {etudes_bd}", "PoleAerien", Qgis.Info)
+            QgsMessageLog.logMessage(
+                f"[MAJ_BD] BD FT appuis: {appuis_bd}", "PoleAerien", Qgis.Info)
+        else:
+            QgsMessageLog.logMessage(
+                "[MAJ_BD] BD FT VIDE: aucun poteau FT dans polygones etude_cap_ft. "
+                "Verifier couches et zone geographique.",
+                "PoleAerien", Qgis.Warning
+            )
 
         df_ft = pd.merge(excel_df_ft_valid, bd_df_ft_valid, how="left", on=["N° appui", "Nom Etudes"], indicator=True)
         df_ft.fillna({"etat": "", "Action": "", "inf_mat_replace": ""}, inplace=True)
@@ -888,8 +774,11 @@ class MajFtBt:
         liste_valeur_introuvbl_bt = pd.DataFrame({})
         liste_valeur_trouve_bt = pd.DataFrame({})
 
-        excel_df_bt["N° appui"] = excel_df_bt["N° appui"].astype(str)
-        bd_df_bt["N° appui"] = bd_df_bt["N° appui"].astype(str)
+        excel_df_bt["N° appui"] = excel_df_bt["N° appui"].astype(str).str.lstrip("'").apply(normalize_appui_num)
+        bd_df_bt["N° appui"] = bd_df_bt["N° appui"].astype(str).apply(normalize_appui_num)
+        excel_df_bt["Nom Etudes"] = excel_df_bt["Nom Etudes"].astype(str).str.strip()
+        if not bd_df_bt.empty:
+            bd_df_bt["Nom Etudes"] = bd_df_bt["Nom Etudes"].astype(str).str.strip()
 
         # CRITICAL: Exclure lignes sans cles valides pour eviter produit cartesien
         excel_df_bt_valid = excel_df_bt[
@@ -902,6 +791,18 @@ class MajFtBt:
             (bd_df_bt["N° appui"].str.strip() != "") &
             (bd_df_bt["N° appui"].str.lower() != "nan")
         ]
+
+        # Diagnostic: afficher tailles et echantillons avant merge BT
+        QgsMessageLog.logMessage(
+            f"[MAJ_BD] Pre-merge BT: Excel={len(excel_df_bt_valid)} lignes, BD={len(bd_df_bt_valid)} lignes",
+            "PoleAerien", Qgis.Info
+        )
+        if bd_df_bt_valid.empty and not excel_df_bt_valid.empty:
+            QgsMessageLog.logMessage(
+                "[MAJ_BD] BD BT VIDE: aucun poteau BT dans polygones etude_comac. "
+                "Verifier couches et zone geographique.",
+                "PoleAerien", Qgis.Warning
+            )
 
         df_bt = pd.merge(excel_df_bt_valid, bd_df_bt_valid, how="left", on=["N° appui", "Nom Etudes"], indicator=True)
         df_bt.fillna({"etat": "", "Action": "", "typ_po_mod": ""}, inplace=True)

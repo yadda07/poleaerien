@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <path d="M6 3 L6 21 L18 21 L18 8 L13 3 Z" fill="#dbeafe" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
-  <path d="M13 3 L13 8 L18 8" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
-  <text x="12" y="16" font-family="Arial" font-size="6" font-weight="bold" fill="#1e3a5f" text-anchor="middle">XLS</text>
-</svg>

@@ -10,7 +10,49 @@ from qgis.core import (
     QgsSpatialIndex, QgsFeatureRequest, QgsMapLayer, QgsWkbTypes, NULL
 )
 import re
-from .core_utils import normalize_appui_num, temps_ecoule, find_default_layer_index, normalize_appui_num_bt
+from .core_utils import normalize_appui_num, temps_ecoule, find_default_layer_index
+
+
+# Patterns pour auto-detection du champ etude dans une couche
+_ETUDE_FIELD_PATTERNS = [
+    r'^nom[_\s]?etude[s]?$',
+    r'^etude[s]?$',
+    r'^ref_fci$',
+    r'^name$',
+    r'^nom$',
+    r'^decoupage$',
+    r'^zone$',
+]
+
+
+def detect_etude_field(layer, context=""):
+    """Auto-detecte le champ etude dans une couche vectorielle.
+    
+    Teste les champs de la couche contre une liste de patterns regex
+    ordonnee par priorite.
+    
+    Args:
+        layer: QgsVectorLayer
+        context: Contexte pour message de log
+        
+    Returns:
+        str: Nom du champ detecte ou None
+    """
+    if not layer or not layer.isValid():
+        return None
+    
+    field_names = [f.name() for f in layer.fields()]
+    
+    for pattern in _ETUDE_FIELD_PATTERNS:
+        for field_name in field_names:
+            if re.match(pattern, field_name, re.IGNORECASE):
+                return field_name
+    
+    QgsMessageLog.logMessage(
+        f"[{context or 'detect_etude_field'}] Aucun champ etude detecte. Champs: {field_names}",
+        "PoleAerien", Qgis.Warning
+    )
+    return None
 
 
 def remove_group(name):
@@ -170,18 +212,32 @@ def set_default_layer_for_combobox(combobox, pattern):
     # Aucune correspondance - garde sélection actuelle
 
 
+_crs_validated_pairs = set()
+
+
+def reset_crs_cache():
+    """Vide le cache CRS. Appeler en debut de batch."""
+    _crs_validated_pairs.clear()
+
+
 def validate_same_crs(ref_layer, other_layer, context=""):
-    """Valide que deux couches partagent le même CRS.
+    """Valide que deux couches partagent le meme CRS.
+
+    Resultat cache par paire (layer_id, layer_id) pour eviter
+    ~8 validations redondantes par batch sur les memes couches.
 
     Args:
-        ref_layer: Couche de référence
-        other_layer: Couche à comparer
+        ref_layer: Couche de reference
+        other_layer: Couche a comparer
         context: Contexte pour message d'erreur
 
     Raises:
-        ValueError: CRS différents
+        ValueError: CRS differents
     """
     if ref_layer is None or other_layer is None:
+        return
+    pair = (ref_layer.id(), other_layer.id())
+    if pair in _crs_validated_pairs:
         return
     if ref_layer.crs() != other_layer.crs():
         ref_crs = ref_layer.crs().authid() or ref_layer.crs().toWkt()
@@ -190,6 +246,7 @@ def validate_same_crs(ref_layer, other_layer, context=""):
             f"[{context}] CRS incoherent: {ref_layer.name()}={ref_crs} vs "
             f"{other_layer.name()}={other_crs}"
         )
+    _crs_validated_pairs.add(pair)
 
 
 def validate_crs_compatibility(layer, expected_crs="EPSG:2154", context=""):
@@ -303,79 +360,28 @@ def detect_duplicates(layer, field, request=None):
     return doublons
 
 
-def verifications_donnees_etude(
+def extraire_poteaux_etude(
     table_poteau, table_etude, colonne_etude,
     pot_type_filter, context
 ):
-    """Vérifie doublons études + poteaux hors étude.
+    """Extraction complete poteaux/etude en une seule passe.
+    
+    Fusionne verifications (doublons, hors_etude) et listing (poteaux par etude,
+    terrains prives) en un seul acces couche, un seul index spatial, une seule
+    iteration des features.
     
     Args:
         table_poteau: Nom couche poteaux
-        table_etude: Nom couche études
-        colonne_etude: Champ nom étude
+        table_etude: Nom couche etudes
+        colonne_etude: Champ nom etude
         pot_type_filter: 'POT-FT' ou 'POT-BT'
         context: Contexte erreur
     
     Returns:
-        tuple: (doublons_etudes, poteaux_hors_etude)
+        tuple: (doublons_etudes, poteaux_hors_etude, dict_poteaux_par_etude, dict_poteaux_prives)
         
     Raises:
-        ValueError: Couche introuvable ou CRS incohérent
-    """
-    infra_pt_pot = get_layer_safe(table_poteau, context)
-    etude = get_layer_safe(table_etude, context)
-    validate_same_crs(infra_pt_pot, etude, context)
-    
-    # Request poteaux filtrés
-    req_pot = make_ordered_request('inf_type', f"inf_type LIKE '{pot_type_filter}'")
-    
-    # Request études triées
-    req_etude = make_ordered_request(colonne_etude)
-    
-    # Index spatial études
-    idx_etudes, etudes_dict = build_spatial_index(etude, req_etude)
-    
-    # Poteaux hors étude
-    hors_etude = []
-    for feat_pot in infra_pt_pot.getFeatures(req_pot):
-        raw_inf = feat_pot["inf_num"]
-        if not raw_inf or raw_inf == NULL or not feat_pot.hasGeometry():
-            continue
-        
-        bbox = feat_pot.geometry().boundingBox()
-        dans_etude = False
-        for fid in idx_etudes.intersects(bbox):
-            if etudes_dict[fid].geometry().contains(feat_pot.geometry()):
-                dans_etude = True
-                break
-        
-        if not dans_etude:
-            hors_etude.append(raw_inf)
-    
-    # Doublons études
-    doublons = detect_duplicates(etude, colonne_etude, req_etude)
-    
-    return doublons, hors_etude
-
-
-def liste_poteaux_par_etude(
-    table_poteau, table_etude, colonne_etude,
-    pot_type_filter, context
-):
-    """Liste poteaux par étude avec détection terrains privés.
-    
-    Args:
-        table_poteau: Nom couche poteaux
-        table_etude: Nom couche études
-        colonne_etude: Champ nom étude
-        pot_type_filter: 'POT-FT' ou 'POT-BT'
-        context: Contexte erreur
-    
-    Returns:
-        tuple: (dict_poteaux_par_etude, dict_poteaux_prives)
-        
-    Raises:
-        ValueError: Couche introuvable ou CRS incohérent
+        ValueError: Couche introuvable ou CRS incoherent
     """
     from .security_rules import est_terrain_prive
     
@@ -386,11 +392,14 @@ def liste_poteaux_par_etude(
     req_pot = make_ordered_request('inf_type', f"inf_type LIKE '{pot_type_filter}'")
     req_etude = make_ordered_request(colonne_etude)
     
-    # Index spatial poteaux
+    # Index spatial poteaux (une seule construction)
     idx_pot, poteaux_dict = build_spatial_index(infra_pt_pot, req_pot)
     
-    # Index champ commentaire
+    # Index champ commentaire pour detection terrain prive
     idx_commentaire = infra_pt_pot.fields().indexFromName('commentaire')
+    
+    # Collecter tous les fid trouves dans au moins une etude
+    fids_dans_etude = set()
     
     dico_etude = {}
     dico_prives = {}
@@ -410,6 +419,7 @@ def liste_poteaux_par_etude(
                 raw_inf = feat_pot["inf_num"]
                 if raw_inf and raw_inf != NULL:
                     liste_pot.append(raw_inf)
+                    fids_dans_etude.add(fid)
                     if idx_commentaire >= 0 and est_terrain_prive(feat_pot[idx_commentaire]):
                         liste_priv.append(raw_inf)
         
@@ -418,4 +428,47 @@ def liste_poteaux_par_etude(
         if liste_priv:
             dico_prives[nom_etude] = liste_priv
     
+    # Poteaux hors etude = poteaux valides non trouves dans aucune etude
+    hors_etude = []
+    for fid, feat_pot in poteaux_dict.items():
+        if fid not in fids_dans_etude:
+            raw_inf = feat_pot["inf_num"]
+            if raw_inf and raw_inf != NULL:
+                hors_etude.append(raw_inf)
+    
+    # Doublons etudes
+    doublons = detect_duplicates(etude, colonne_etude, req_etude)
+    
+    return doublons, hors_etude, dico_etude, dico_prives
+
+
+def verifications_donnees_etude(
+    table_poteau, table_etude, colonne_etude,
+    pot_type_filter, context
+):
+    """Verifie doublons etudes + poteaux hors etude.
+    
+    DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
+    Conserve pour compatibilite.
+    """
+    doublons, hors_etude, _, _ = extraire_poteaux_etude(
+        table_poteau, table_etude, colonne_etude,
+        pot_type_filter, context
+    )
+    return doublons, hors_etude
+
+
+def liste_poteaux_par_etude(
+    table_poteau, table_etude, colonne_etude,
+    pot_type_filter, context
+):
+    """Liste poteaux par etude avec detection terrains prives.
+    
+    DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
+    Conserve pour compatibilite.
+    """
+    _, _, dico_etude, dico_prives = extraire_poteaux_etude(
+        table_poteau, table_etude, colonne_etude,
+        pot_type_filter, context
+    )
     return dico_etude, dico_prives

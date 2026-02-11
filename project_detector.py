@@ -6,19 +6,17 @@ Given a project root directory (e.g. '63041-B1I-PMZ-00003'), detects:
 - FT-BT KO Excel file     → MAJ module
 - CAP FT sub-folder        → CAP_FT, C6 vs BD, Police C6 modules
 - COMAC sub-folder          → COMAC module
-- BASE DE DONNEES/NGE      → GraceTHD shapefiles (Police C6)
+- C7 / C3A Excel files     → C6-C3A-C7-BD module
 
 Real project convention:
     <project_root>/
         FT-BT KO *.xlsx
         CAP FT/                   ← studies + C6 annexes inside
-            CMD 1/
-                FTTH-NGE-ETUDE-*/
+            CMD 1/                  (also: CAPFT, ETUDE CAPFT,
+                FTTH-NGE-ETUDE-*/    ETUDE CAP FT, KPFT, etc.)
             CMD 2/
             ...
-        COMAC/
-        BASE DE DONNEES/
-            NGE/                  ← GraceTHD shapefiles
+        COMAC/                    (also: ETUDE COMAC, Export COMAC)
 
 Note: There is NO separate C6 folder. C6 annexes are Excel files
 within the study folders under CAP FT/. For Police C6 and C6 vs BD,
@@ -35,7 +33,14 @@ def extract_sro_from_project_name(project_name: str) -> Optional[str]:
     """Derive SRO code from project directory name.
 
     Convention: directory uses hyphens, SRO uses slashes.
-    Example: '63041-B1I-PMZ-00003' -> '63041/B1I/PMZ/00003'
+    Examples:
+        '63041-B1I-PMZ-00003'      -> '63041/B1I/PMZ/00003'
+        '63471-S05-PMZ-49785_CDC'  -> '63471/S05/PMZ/49785'
+
+    Handles:
+        - Middle segments with digits (S05, B1I, A2B, etc.)
+        - Suffixes after the 5-digit code (_CDC, _v2, etc.)
+        - Case-insensitive matching with uppercase normalization
 
     Args:
         project_name: Basename of the project directory.
@@ -45,9 +50,15 @@ def extract_sro_from_project_name(project_name: str) -> Optional[str]:
     """
     if not project_name:
         return None
-    sro = project_name.replace('-', '/')
-    if re.match(r'^\d{5}/[A-Z]\d[A-Z]/[A-Z]{3}/\d{5}$', sro):
-        return sro
+    # Search for SRO pattern anywhere in the name (ignores suffixes like _CDC)
+    # Accepts both hyphens and underscores as separators
+    match = re.search(
+        r'(\d{5})[-_]([A-Z0-9]{3})[-_]([A-Z]{3})[-_](\d{5})',
+        project_name,
+        re.IGNORECASE
+    )
+    if match:
+        return f"{match.group(1)}/{match.group(2).upper()}/{match.group(3).upper()}/{match.group(4)}"
     return None
 
 
@@ -74,9 +85,6 @@ class DetectionResult:
     # C6 browse dir (= CAP FT dir, or dedicated C6 folder)
     c6_dir: str = ''
 
-    # GraceTHD shapefiles directory
-    gracethd_dir: str = ''
-
     # C7
     c7_file: str = ''
 
@@ -85,6 +93,10 @@ class DetectionResult:
 
     # Export (defaults to project root)
     export_dir: str = ''
+
+    # Diagnostics: hints for missing resources
+    # List of (resource_label, hint_message) for resources NOT found
+    diagnostics: List[tuple] = field(default_factory=list)
 
     @property
     def has_ftbt(self) -> bool:
@@ -101,10 +113,6 @@ class DetectionResult:
     @property
     def has_c6(self) -> bool:
         return bool(self.c6_dir) and os.path.isdir(self.c6_dir)
-
-    @property
-    def has_gracethd(self) -> bool:
-        return bool(self.gracethd_dir) and os.path.isdir(self.gracethd_dir)
 
     @property
     def has_c7(self) -> bool:
@@ -137,10 +145,16 @@ class DetectionResult:
             ('CAP FT', self.capft_dir, self.has_capft),
             ('COMAC', self.comac_dir, self.has_comac),
             ('C6 (via CAP FT)', self.c6_dir, self.has_c6),
-            ('GraceTHD', self.gracethd_dir, self.has_gracethd),
             ('C7', self.c7_file, self.has_c7),
             ('C3A', self.c3a_file, self.has_c3a),
         ]
+
+    def get_diagnostic(self, resource_label: str) -> str:
+        """Get diagnostic hint for a specific missing resource."""
+        for label, hint in self.diagnostics:
+            if label == resource_label:
+                return hint
+        return ''
 
 
 # --- Detection patterns (case-insensitive) ---
@@ -154,26 +168,43 @@ _CAPFT_DIR_PATTERNS = [
     r'^CAP[\s_-]*FT$',
     r'^CAPFT$',
     r'^CAP_FT$',
+    r'^ETUDE[\s_-]*CAP[\s_-]*FT$',
+    r'^ETUDE[\s_-]*CAPFT$',
+    r'^KPFT$',
+    r'^ETUDE[\s_-]*KPFT$',
 ]
 
 _COMAC_DIR_PATTERNS = [
     r'^COMAC$',
     r'^Export[\s_-]*COMAC$',
     r'^ExportComac$',
+    r'^ETUDE[\s_-]*COMAC$',
 ]
 
-_GRACETHD_DIR_PATTERNS = [
-    r'^NGE$',
-    r'^GraceTHD$',
-    r'^GRACETHD$',
-    r'^Grace[\s_-]*THD$',
-]
+# Human-readable expected names for diagnostics
+_EXPECTED_NAMES = {
+    'FT-BT KO': 'Fichier Excel contenant "FT-BT KO" ou "FTBTKO" dans le nom (a la racine du projet)',
+    'CAP FT': 'Dossier nomme: CAP FT, CAPFT, CAP_FT, ETUDE CAP FT, ETUDE CAPFT, KPFT, ETUDE KPFT',
+    'COMAC': 'Dossier nomme: COMAC, Export COMAC, ExportComac, ETUDE COMAC',
+    'C7': 'Fichier Excel contenant "C7" ou dossier "C7" / "Annexe C7" avec un .xlsx dedans',
+    'C3A': 'Fichier Excel contenant "C3A" ou dossier "C3A" / "Annexe C3A" avec un .xlsx dedans',
+}
 
-_BASE_DE_DONNEES_PATTERNS = [
-    r'^BASE[\s_-]*DE[\s_-]*DONN[EÉ]ES$',
-    r'^BDD$',
-    r'^BASE[\s_-]*DONNEES$',
-]
+
+def _list_folder_contents(root: str, max_items: int = 12) -> tuple:
+    """List directories and Excel files in a folder for diagnostics.
+
+    Returns:
+        (dirs: List[str], excels: List[str]) basenames only, sorted.
+    """
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return [], []
+    dirs = sorted(e for e in entries if os.path.isdir(os.path.join(root, e)))
+    excels = sorted(e for e in entries if e.lower().endswith(('.xlsx', '.xls'))
+                    and os.path.isfile(os.path.join(root, e)))
+    return dirs[:max_items], excels[:max_items]
 
 
 def _match_dir(name: str, patterns: list) -> bool:
@@ -222,40 +253,6 @@ def _find_excel_in_dir(directory: str) -> Optional[str]:
     return None
 
 
-def _find_gracethd(project_root: str) -> Optional[str]:
-    """Find GraceTHD directory (NGE shapefiles).
-
-    Searches in:
-    1. <root>/BASE DE DONNEES/NGE/
-    2. <root>/NGE/
-    3. <root>/GraceTHD/
-    4. Any subdir containing bpe.shp and t_cheminement.shp
-    """
-    # Check inside BASE DE DONNEES first
-    bdd = _find_dir(project_root, _BASE_DE_DONNEES_PATTERNS)
-    if bdd:
-        nge = _find_dir(bdd, _GRACETHD_DIR_PATTERNS)
-        if nge and _is_gracethd_dir(nge):
-            return nge
-
-    # Direct subdir
-    nge = _find_dir(project_root, _GRACETHD_DIR_PATTERNS)
-    if nge and _is_gracethd_dir(nge):
-        return nge
-
-    return None
-
-
-def _is_gracethd_dir(path: str) -> bool:
-    """Verify directory contains GraceTHD shapefiles."""
-    try:
-        files = {f.lower() for f in os.listdir(path)}
-    except OSError:
-        return False
-    # Must contain at least bpe.shp or t_cheminement.shp
-    return 'bpe.shp' in files or 't_cheminement.shp' in files
-
-
 def _list_studies(directory: str) -> List[str]:
     """List sub-directories (study names) in a directory."""
     if not directory or not os.path.isdir(directory):
@@ -268,14 +265,134 @@ def _list_studies(directory: str) -> List[str]:
     return result
 
 
+def _build_diagnostics(result: DetectionResult, project_root: str) -> List[tuple]:
+    """Generate actionable diagnostic hints for each missing resource."""
+    diags = []
+    dirs, excels = _list_folder_contents(project_root)
+
+    if not result.has_ftbt:
+        hint = _EXPECTED_NAMES['FT-BT KO']
+        if excels:
+            hint += f"\nFichiers Excel trouves a la racine: {', '.join(excels)}"
+        else:
+            hint += "\nAucun fichier Excel trouve a la racine du projet"
+        diags.append(('FT-BT KO', hint))
+
+    if not result.has_capft:
+        hint = _EXPECTED_NAMES['CAP FT']
+        if dirs:
+            hint += f"\nSous-dossiers trouves: {', '.join(dirs)}"
+        else:
+            hint += "\nAucun sous-dossier trouve dans le projet"
+        diags.append(('CAP FT', hint))
+
+    if not result.has_comac:
+        hint = _EXPECTED_NAMES['COMAC']
+        if dirs:
+            hint += f"\nSous-dossiers trouves: {', '.join(dirs)}"
+        else:
+            hint += "\nAucun sous-dossier trouve dans le projet"
+        diags.append(('COMAC', hint))
+
+    if not result.has_c6:
+        if result.has_capft:
+            diags.append(('C6 (via CAP FT)', 'C6 = dossier CAP FT (deja detecte)'))
+        else:
+            diags.append(('C6 (via CAP FT)',
+                          'Les annexes C6 sont dans le dossier CAP FT. '
+                          'Detecter CAP FT pour activer C6 vs BD et Police C6.'))
+
+    if not result.has_c7:
+        hint = _EXPECTED_NAMES['C7']
+        if excels:
+            hint += f"\nFichiers Excel trouves: {', '.join(excels)}"
+        if dirs:
+            c7_like = [d for d in dirs if 'c7' in d.lower()]
+            if c7_like:
+                hint += f"\nDossier(s) C7-like trouves (sans Excel dedans?): {', '.join(c7_like)}"
+        diags.append(('C7', hint))
+
+    if not result.has_c3a:
+        hint = _EXPECTED_NAMES['C3A']
+        if excels:
+            hint += f"\nFichiers Excel trouves: {', '.join(excels)}"
+        if dirs:
+            c3a_like = [d for d in dirs if 'c3a' in d.lower()]
+            if c3a_like:
+                hint += f"\nDossier(s) C3A-like trouves (sans Excel dedans?): {', '.join(c3a_like)}"
+        diags.append(('C3A', hint))
+
+    return diags
+
+
 def _count_studies_recursive(capft_dir: str) -> int:
     """Count study Excel files (FTTH-NGE-ETUDE-*.xlsx) recursively in CAP FT."""
     count = 0
-    for dirpath, _, filenames in os.walk(capft_dir):
+    for _, _, filenames in os.walk(capft_dir):
         for fn in filenames:
             if fn.lower().endswith('.xlsx') and 'ETUDE' in fn.upper():
                 count += 1
     return count
+
+
+def _count_excels_recursive(directory: str) -> int:
+    """Count all .xlsx/.xls files recursively."""
+    count = 0
+    for _, _, filenames in os.walk(directory):
+        count += sum(1 for f in filenames if f.lower().endswith(('.xlsx', '.xls')))
+    return count
+
+
+def _count_cmd_folders(capft_dir: str) -> int:
+    """Count CMD sub-folders in CAP FT directory."""
+    if not capft_dir or not os.path.isdir(capft_dir):
+        return 0
+    return sum(
+        1 for e in os.listdir(capft_dir)
+        if os.path.isdir(os.path.join(capft_dir, e))
+        and re.match(r'^CMD', e, re.IGNORECASE)
+    )
+
+
+def _count_etude_folders(directory: str) -> int:
+    """Count FTTH-NGE-ETUDE-* study folders recursively."""
+    count = 0
+    for _, dirnames, _ in os.walk(directory):
+        count += sum(1 for d in dirnames if 'ETUDE' in d.upper())
+    return count
+
+
+def analyse_livrable(result: 'DetectionResult') -> dict:
+    """Analyse approfondie du contenu livrable pour le diagnostic.
+
+    Returns:
+        dict with keys per resource, each containing detailed counts.
+    """
+    analysis = {}
+
+    if result.has_capft:
+        cmd = _count_cmd_folders(result.capft_dir)
+        etudes = _count_etude_folders(result.capft_dir)
+        excels = _count_excels_recursive(result.capft_dir)
+        analysis['capft'] = {'cmd': cmd, 'etudes': etudes, 'excels': excels}
+
+    if result.has_comac:
+        excels = _count_excels_recursive(result.comac_dir)
+        analysis['comac'] = {
+            'sous_dossiers': len(result.comac_studies),
+            'excels': excels,
+        }
+
+    if result.has_ftbt:
+        analysis['ftbt'] = {'fichier': os.path.basename(result.ftbt_excel)}
+
+    if result.has_c7:
+        analysis['c7'] = {'fichier': os.path.basename(result.c7_file)}
+
+    if result.has_c3a:
+        analysis['c3a'] = {'fichier': os.path.basename(result.c3a_file)}
+
+    return analysis
 
 
 def detect_project(project_root: str) -> DetectionResult:
@@ -318,11 +435,6 @@ def detect_project(project_root: str) -> DetectionResult:
         result.comac_dir = comac
         result.comac_studies = _list_studies(comac)
 
-    # GraceTHD
-    gracethd = _find_gracethd(project_root)
-    if gracethd:
-        result.gracethd_dir = gracethd
-
     # C7 file (file or directory)
     c7_file = _find_excel(project_root, [r'C7', r'Annexe[\s_-]*C7'])
     if c7_file:
@@ -344,5 +456,8 @@ def detect_project(project_root: str) -> DetectionResult:
             c3a_f = _find_excel_in_dir(c3a_dir)
             if c3a_f:
                 result.c3a_file = c3a_f
+
+    # --- Generate diagnostics for missing resources ---
+    result.diagnostics = _build_diagnostics(result, project_root)
 
     return result

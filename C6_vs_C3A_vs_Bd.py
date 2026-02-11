@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from openpyxl.styles import PatternFill
 from .qgis_utils import get_layer_safe, validate_same_crs
+from .core_utils import normalize_appui_num
 
 
 class C6_vs_C3A_vs_Bd:
@@ -194,9 +195,8 @@ class C6_vs_C3A_vs_Bd:
                     # print(f"etat : {feat_pot['etat']} nature : {nature} ")
                     nature_travaux.append(nature)
                     listePoteauxComplet.append(inf_num)
-                    try:
-                        inf_num = int(inf_num[:7])
-                    except ValueError:
+                    num_court = normalize_appui_num(inf_num)
+                    if not num_court:
                         QgsMessageLog.logMessage(
                             f"[C6_vs_C3A_vs_Bd.liste_poteau_etudes] inf_num invalide: {inf_num}",
                             "PoleAerien",
@@ -204,12 +204,12 @@ class C6_vs_C3A_vs_Bd:
                         )
                         continue
 
-                    listePoteaux.append(str(inf_num))
+                    listePoteaux.append(num_court)
                     listeEtat.append(np.NaN if feat_pot["etat"] == NULL else feat_pot["etat"])
 
                     if nature == "OUI":
-                        listePoteauxComplet_rempl.append(inf_num)
-                        listePoteaux_rempl.append(str(inf_num))
+                        listePoteauxComplet_rempl.append(num_court)
+                        listePoteaux_rempl.append(num_court)
                         listeEtat_rempl.append(np.NaN if feat_pot["etat"] == NULL else feat_pot["etat"])
 
         df = pd.DataFrame({'N° appui': listePoteaux, "Nature des travaux": nature_travaux,
@@ -412,96 +412,56 @@ class C6_vs_C3A_vs_Bd:
 
         return df4
 
-    def ecrictureExcel(self, final, fichier):
-        """Ecriture du résultat final dans un fichier Excel"""
-
-        # headers = ['N° appui', 'Nature des travaux', 'Études', "inf_num (QGIS)", "Excel"]
-        # headers = ['N° appui', 'Nature des travaux', 'Études', 'Excel', 'inf_num (QGIS)', 'Etat']
-        # print(tabulate(final.values, headers, tablefmt='psql'))
-
+    def _ecriture_excel_generique(self, final, fichier, sheet_name, colonnes_absent):
+        """Ecrit un DataFrame dans un fichier Excel avec surlignage orange des lignes ABSENT.
+        
+        Args:
+            final: DataFrame a exporter
+            fichier: Chemin fichier Excel
+            sheet_name: Nom de la feuille
+            colonnes_absent: Liste de colonnes a verifier pour la valeur 'ABSENT'
+        
+        Returns:
+            int: Nombre de lignes en erreur (au moins un ABSENT)
+        """
         nb_erreurs = 0
+        nb_cols = len(final.columns)
+        last_col_letter = chr(ord('A') + nb_cols - 1)
+
         with pd.ExcelWriter(fichier, engine="openpyxl") as writer:
-            sheet_name = "ANALYSE C6, C3A & BD"
-            # Export DataFrame content
             final.to_excel(writer, sheet_name=sheet_name, index=False)
-            # Set backgrund colors depending on cell values
             sheet = writer.sheets[sheet_name]
 
-            alphabet = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
-            index = 1
+            for i in range(nb_cols):
+                sheet.column_dimensions[chr(ord('A') + i)].width = 25
 
-            # Parcourir les lettres
-            for alpha in alphabet:
-                # Largeur des colonnes
-                sheet.column_dimensions[alpha].width = 25
-                index += 1
-
-            for compte, [colA, colB, colC, colD, colE, colF, colG, colH, colI] in enumerate(
-                    sheet[f'A2:I{len(final) + 1}']):
-                value_num = final["inf_num (ETUDES_QGIS)"].iloc[compte]  # value is "True" or "False"
-                value_c3a = final["inf_num (C3A)"].iloc[compte]  # value is "True" or "False"
-                value_excel = final["Excel (C6)"].iloc[compte]  # value is "True" or "False"
-
-                # On met toute la ligne en couleur rouge
-                if "ABSENT" == value_num or "ABSENT" == value_c3a or "ABSENT" == value_excel:
-                    colA.fill = PatternFill("solid", start_color="feb24c")
-                    colB.fill = PatternFill("solid", start_color="feb24c")
-                    colD.fill = PatternFill("solid", start_color="feb24c")
-                    colC.fill = PatternFill("solid", start_color="feb24c")
-                    colE.fill = PatternFill("solid", start_color="feb24c")
-                    colF.fill = PatternFill("solid", start_color="feb24c")
-                    colG.fill = PatternFill("solid", start_color="feb24c")
-                    colH.fill = PatternFill("solid", start_color="feb24c")
-                    colI.fill = PatternFill("solid", start_color="feb24c")
+            orange_fill = PatternFill("solid", start_color="feb24c")
+            for row_idx in range(2, len(final) + 2):
+                compte = row_idx - 2
+                has_absent = any(
+                    final[col].iloc[compte] == "ABSENT"
+                    for col in colonnes_absent
+                    if col in final.columns
+                )
+                if has_absent:
+                    for cell in sheet[f'A{row_idx}:{last_col_letter}{row_idx}'][0]:
+                        cell.fill = orange_fill
                     nb_erreurs += 1
 
         return nb_erreurs
+
+    def ecrictureExcel(self, final, fichier):
+        """Ecriture resultat C6 vs C3A vs BD dans fichier Excel."""
+        return self._ecriture_excel_generique(
+            final, fichier,
+            sheet_name="ANALYSE C6, C3A & BD",
+            colonnes_absent=["inf_num (ETUDES_QGIS)", "inf_num (C3A)", "Excel (C6)"]
+        )
 
     def ecrictureExcelC6C7C3aBd(self, final, fichier):
-        """Ecriture du résultat final dans un fichier Excel"""
-
-        # headers = ['N° appui', 'Nature des travaux', 'Études', "inf_num (QGIS)", "Excel"]
-        # headers = ['N° appui', 'Nature des travaux', 'Études', 'Excel', 'inf_num (QGIS)', 'Etat']
-        # print(tabulate(final.values, headers, tablefmt='psql'))
-
-        nb_erreurs = 0
-        with pd.ExcelWriter(fichier, engine="openpyxl") as writer:
-            sheet_name = "ANALYSE C6, C7, C3A & BD"
-            # Export DataFrame content
-            final.to_excel(writer, sheet_name=sheet_name, index=False)
-            # Set backgrund colors depending on cell values
-            sheet = writer.sheets[sheet_name]
-
-            alphabet = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"]
-            index = 1
-
-            # Parcourir les lettres
-            for alpha in alphabet:
-                # Largeur des colonnes
-                sheet.column_dimensions[alpha].width = 25
-                index += 1
-
-            for compte, [colA, colB, colC, colD, colE, colF, colG, colH, colI, colJ, colK] in enumerate(
-                    sheet[f'A2:K{len(final) + 1}']):
-                value_num = final["inf_num (ETUDES_QGIS)"].iloc[compte]  # value is "True" or "False"
-                value_c3a = final["inf_num (C3A)"].iloc[compte]  # value is "True" or "False"
-                value_excel_c6 = final["Excel (C6)"].iloc[compte]  # value is "True" or "False"
-                value_excel_c7 = final["Fichier (C7) Excel"].iloc[compte]  # value is "True" or "False"
-
-                # On met toute la ligne en couleur rouge
-                if ("ABSENT" == value_num or "ABSENT" == value_c3a or "ABSENT" == value_excel_c6 or
-                        "ABSENT" == value_excel_c7):
-                    colA.fill = PatternFill("solid", start_color="feb24c")
-                    colB.fill = PatternFill("solid", start_color="feb24c")
-                    colD.fill = PatternFill("solid", start_color="feb24c")
-                    colC.fill = PatternFill("solid", start_color="feb24c")
-                    colE.fill = PatternFill("solid", start_color="feb24c")
-                    colF.fill = PatternFill("solid", start_color="feb24c")
-                    colG.fill = PatternFill("solid", start_color="feb24c")
-                    colH.fill = PatternFill("solid", start_color="feb24c")
-                    colI.fill = PatternFill("solid", start_color="feb24c")
-                    colJ.fill = PatternFill("solid", start_color="feb24c")
-                    colK.fill = PatternFill("solid", start_color="feb24c")
-                    nb_erreurs += 1
-
-        return nb_erreurs
+        """Ecriture resultat C6 vs C7 vs C3A vs BD dans fichier Excel."""
+        return self._ecriture_excel_generique(
+            final, fichier,
+            sheet_name="ANALYSE C6, C7, C3A & BD",
+            colonnes_absent=["inf_num (ETUDES_QGIS)", "inf_num (C3A)", "Excel (C6)", "Fichier (C7) Excel"]
+        )

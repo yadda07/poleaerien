@@ -147,70 +147,67 @@ def _extract_fournisseur(nom: str) -> str:
 
 
 def _get_pg_connection():
-    """Tente d'obtenir une connexion PostgreSQL via les credentials QGIS."""
+    """Obtient une connexion PostgreSQL via db_connection.DatabaseConnection.
+    
+    Delegue la decouverte des credentials QGIS a DatabaseConnection
+    (source unique) puis verifie que le schema comac existe.
+    """
     if not _HAS_PSYCOPG2:
         return None
     
     try:
-        from qgis.core import QgsSettings
-        settings = QgsSettings()
-        settings.beginGroup("PostgreSQL/connections")
-        connections = settings.childGroups()
-        settings.endGroup()
-        
-        for name in connections:
-            settings.beginGroup(f"PostgreSQL/connections/{name}")
-            host = settings.value("host", "")
-            database = settings.value("database", "")
-            port = int(settings.value("port", 5432))
-            user = settings.value("username", "")
-            password = settings.value("password", "")
-            settings.endGroup()
-            
-            if host == "10.241.228.107" or "auvergne" in database.lower():
-                conn = psycopg2.connect(
-                    host=host, port=port, database=database,
-                    user=user, password=password
-                )
-                # Vérifier que le schéma comac existe
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
-                    (PG_SCHEMA,)
-                )
-                if cur.fetchone():
-                    return conn
-                else:
-                    conn.close()
-                    return None
+        from .db_connection import DatabaseConnection
+        db = DatabaseConnection()
+        conn_name = db.find_auvergne_connection()
+        if not conn_name:
+            return None
+        params = db.get_connection_params(conn_name)
+        conn = psycopg2.connect(
+            host=params['host'], port=params['port'],
+            database=params['database'],
+            user=params['user'], password=params['password']
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+            (PG_SCHEMA,)
+        )
+        if cur.fetchone():
+            return conn
+        conn.close()
+        return None
     except Exception as e:
         print(f"[COMAC_DB] PostgreSQL non disponible: {e}")
     
     return None
 
 
-def _query_pg(sql: str, params: tuple = ()) -> List[dict]:
-    """Exécute requête sur PostgreSQL (schéma comac)."""
+def _query_with_conn(conn, sql: str, params: tuple = ()) -> List[dict]:
+    """Execute requete sur une connexion PostgreSQL deja ouverte."""
     rows = []
-    conn = _get_pg_connection()
-    if not conn:
-        return rows
-    
     try:
         cursor = conn.cursor()
         cursor.execute(sql, params)
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"[COMAC_DB] Erreur requête PG: {e}")
-    finally:
-        conn.close()
-    
+        print(f"[COMAC_DB] Erreur requete PG: {e}")
     return rows
 
 
+def _query_pg(sql: str, params: tuple = ()) -> List[dict]:
+    """Execute requete sur PostgreSQL (ouvre/ferme connexion)."""
+    conn = _get_pg_connection()
+    if not conn:
+        return []
+    try:
+        return _query_with_conn(conn, sql, params)
+    finally:
+        conn.close()
+
+
 def _query(sql_pg: str, params: tuple = ()) -> List[dict]:
-    """Exécute une requête sur PostgreSQL (schéma comac)."""
+    """Execute une requete sur PostgreSQL (schema comac)."""
     return _query_pg(sql_pg, params)
 
 
@@ -218,11 +215,11 @@ def _query(sql_pg: str, params: tuple = ()) -> List[dict]:
 # LOADERS
 # =============================================================================
 
-def _load_cables() -> Dict[str, CableReference]:
+def _load_cables(conn=None) -> Dict[str, CableReference]:
     """Charge table cables depuis PostgreSQL"""
     cables = {}
-    
-    for row in _query(f"SELECT * FROM {PG_SCHEMA}.cables"):
+    q = _query_with_conn(conn, f"SELECT * FROM {PG_SCHEMA}.cables") if conn else _query(f"SELECT * FROM {PG_SCHEMA}.cables")
+    for row in q:
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -248,11 +245,11 @@ def _load_cables() -> Dict[str, CableReference]:
     return cables
 
 
-def _load_supports() -> Dict[str, SupportReference]:
+def _load_supports(conn=None) -> Dict[str, SupportReference]:
     """Charge table supports depuis PostgreSQL"""
     supports = {}
-    
-    for row in _query(f"SELECT * FROM {PG_SCHEMA}.supports"):
+    q = _query_with_conn(conn, f"SELECT * FROM {PG_SCHEMA}.supports") if conn else _query(f"SELECT * FROM {PG_SCHEMA}.supports")
+    for row in q:
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -271,11 +268,11 @@ def _load_supports() -> Dict[str, SupportReference]:
     return supports
 
 
-def _load_communes() -> Dict[str, CommuneInfo]:
+def _load_communes(conn=None) -> Dict[str, CommuneInfo]:
     """Charge table commune depuis PostgreSQL"""
     communes = {}
-    
-    for row in _query(f"SELECT * FROM {PG_SCHEMA}.commune"):
+    q = _query_with_conn(conn, f"SELECT * FROM {PG_SCHEMA}.commune") if conn else _query(f"SELECT * FROM {PG_SCHEMA}.commune")
+    for row in q:
         insee = row.get('insee', '')
         if not insee:
             continue
@@ -294,11 +291,11 @@ def _load_communes() -> Dict[str, CommuneInfo]:
     return communes
 
 
-def _load_hypotheses() -> Dict[str, HypotheseClimatique]:
+def _load_hypotheses(conn=None) -> Dict[str, HypotheseClimatique]:
     """Charge table hypothese depuis PostgreSQL"""
     hypotheses = {}
-    
-    for row in _query(f"SELECT * FROM {PG_SCHEMA}.hypothese"):
+    q = _query_with_conn(conn, f"SELECT * FROM {PG_SCHEMA}.hypothese") if conn else _query(f"SELECT * FROM {PG_SCHEMA}.hypothese")
+    for row in q:
         nom = row.get('nom', '')
         if not nom:
             continue
@@ -316,13 +313,11 @@ def _load_hypotheses() -> Dict[str, HypotheseClimatique]:
     return hypotheses
 
 
-def _load_capacites_possibles() -> Dict[str, List[int]]:
+def _load_capacites_possibles(conn=None) -> Dict[str, List[int]]:
     """Charge table cable_capacites_possibles depuis PostgreSQL."""
     capas = {}
-    
-    rows = _query_pg(
-        f"SELECT reference, capacite_fo FROM {PG_SCHEMA}.cable_capacites_possibles ORDER BY reference, capacite_fo"
-    )
+    sql = f"SELECT reference, capacite_fo FROM {PG_SCHEMA}.cable_capacites_possibles ORDER BY reference, capacite_fo"
+    rows = _query_with_conn(conn, sql) if conn else _query_pg(sql)
     
     for row in rows:
         ref = row.get('reference', '')
@@ -345,31 +340,30 @@ def _ensure_loaded():
         if _cache_loaded:
             return
         
-        # Vérifier connexion PostgreSQL
+        # Connexion unique pour tout le chargement
         pg_conn = _get_pg_connection()
-        if pg_conn:
-            pg_conn.close()
-            _cache_source = "postgresql"
-            print(f"[COMAC_DB] Source: PostgreSQL (schéma {PG_SCHEMA})")
-        else:
+        if not pg_conn:
             print("[COMAC_DB] ERREUR: PostgreSQL non disponible")
             _cache_loaded = True
             return
         
+        _cache_source = "postgresql"
         try:
-            _cache_cables = _load_cables()
-            _cache_supports = _load_supports()
-            _cache_communes = _load_communes()
-            _cache_hypotheses = _load_hypotheses()
-            _cache_capacites_possibles = _load_capacites_possibles()
+            _cache_cables = _load_cables(pg_conn)
+            _cache_supports = _load_supports(pg_conn)
+            _cache_communes = _load_communes(pg_conn)
+            _cache_hypotheses = _load_hypotheses(pg_conn)
+            _cache_capacites_possibles = _load_capacites_possibles(pg_conn)
             
             print(
-                f"[COMAC_DB] Chargé: {len(_cache_cables)} câbles, "
+                f"[COMAC_DB] Charge: {len(_cache_cables)} cables, "
                 f"{len(_cache_supports)} supports, {len(_cache_communes)} communes, "
                 f"{len(_cache_capacites_possibles)} refs multi-capa"
             )
         except Exception as e:
-            print(f"[COMAC_DB] ERR: Chargement BD échoué: {e}")
+            print(f"[COMAC_DB] ERR: Chargement BD echoue: {e}")
+        finally:
+            pg_conn.close()
         
         _cache_loaded = True
 

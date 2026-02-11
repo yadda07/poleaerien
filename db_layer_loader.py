@@ -114,8 +114,7 @@ class DbLayerLoader:
 
         feat_count = layer.featureCount()
         QgsMessageLog.logMessage(
-            f"Mode Projet: {layer_name} = {feat_count} entites "
-            f"(filtre: {sql_filter})",
+            f"Mode Projet: {layer_name} = {feat_count} entites",
             "PoleAerien", Qgis.Info
         )
         return layer
