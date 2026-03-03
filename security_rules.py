@@ -105,20 +105,22 @@ CAPACITES_POSSIBLES = {
 # =============================================================================
 
 # Positions colonnes (0-indexed pour openpyxl)
+# NB: La colonne B = "N° dans l'étude" décale tout de +1 à partir de C
 EXCEL_COL_NUM_APPUI = 0          # A - N° appui
-EXCEL_COL_TENSION_ELEC = 1       # B - Tension élec.
-EXCEL_COL_TYPE_POTEAU = 2        # C - Type de poteau
-EXCEL_COL_HAUTEUR_TOTALE = 3     # D - Hauteur totale
-EXCEL_COL_SURIMPLANTATION = 4    # E - Surimplantation
-EXCEL_COL_HAUTEUR_HORS_SOL = 5   # F - Hauteur hors sol (= distance câble/sol)
-EXCEL_COL_CLASSE = 6             # G - Classe
-EXCEL_COL_EFFORT = 7             # H - Effort
-EXCEL_COL_CONDUCTEUR = 11        # L - Conducteur (CU/BT)
-EXCEL_COL_LONGUEUR_FACTURER = 46 # AU - Longueur à facturer (portée)
+EXCEL_COL_NUM_ETUDE = 1          # B - N° dans l'étude
+EXCEL_COL_TENSION_ELEC = 2       # C - Tension élec.
+EXCEL_COL_TYPE_POTEAU = 3        # D - Type de poteau
+EXCEL_COL_HAUTEUR_TOTALE = 4     # E - Hauteur totale
+EXCEL_COL_SURIMPLANTATION = 5    # F - Surimplantation
+EXCEL_COL_HAUTEUR_HORS_SOL = 6   # G - Hauteur hors sol (= distance câble/sol)
+EXCEL_COL_CLASSE = 7             # H - Classe
+EXCEL_COL_EFFORT = 8             # I - Effort
+EXCEL_COL_CONDUCTEUR = 12        # M - Conducteur (CU/BT)
+EXCEL_COL_LONGUEUR_FACTURER = 47 # AV - Longueur à facturer (portée)
 
-# Section FIBRE OPTIQUE (colonnes AK+)
-EXCEL_COL_BOITIER = 43           # AR - Boîtier fibre optique (oui/non)
-EXCEL_COL_FO_TYPE_LIGNE = 40     # AO - Type de ligne (L1092-xx-P)
+# Section FIBRE OPTIQUE (colonnes AL+)
+EXCEL_COL_BOITIER = 44           # AS - Boîtier fibre optique (oui/non)
+EXCEL_COL_FO_TYPE_LIGNE = 41     # AP - Type de ligne (L1092-xx-P)
 
 # =============================================================================
 # CONSTANTES - Colonnes BDD PostgreSQL (rip_avg_nge)

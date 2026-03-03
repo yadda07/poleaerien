@@ -89,6 +89,12 @@ class PoleAerien:
 
     def unload(self):
         try:
+            # Release shared DB connection
+            try:
+                from .db_connection import close_shared_connection
+                close_shared_connection()
+            except Exception:
+                pass
             if self._dlg:
                 try:
                     self._dlg.close()

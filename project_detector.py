@@ -85,6 +85,10 @@ class DetectionResult:
     # C6 browse dir (= CAP FT dir, or dedicated C6 folder)
     c6_dir: str = ''
 
+    # C6 annexe Excel file (standalone C6 folder or root-level file)
+    # Used specifically by C6-C3A-C7-BD module
+    c6_annexe_file: str = ''
+
     # C7
     c7_file: str = ''
 
@@ -94,9 +98,16 @@ class DetectionResult:
     # Export (defaults to project root)
     export_dir: str = ''
 
+    # GraceTHD directory (for Axione SROs)
+    gracethd_dir: str = ''
+
     # Diagnostics: hints for missing resources
     # List of (resource_label, hint_message) for resources NOT found
     diagnostics: List[tuple] = field(default_factory=list)
+
+    @property
+    def has_gracethd(self) -> bool:
+        return bool(self.gracethd_dir) and os.path.isdir(self.gracethd_dir)
 
     @property
     def has_ftbt(self) -> bool:
@@ -113,6 +124,10 @@ class DetectionResult:
     @property
     def has_c6(self) -> bool:
         return bool(self.c6_dir) and os.path.isdir(self.c6_dir)
+
+    @property
+    def has_c6_annexe(self) -> bool:
+        return bool(self.c6_annexe_file) and os.path.isfile(self.c6_annexe_file)
 
     @property
     def has_c7(self) -> bool:
@@ -134,7 +149,7 @@ class DetectionResult:
         if self.has_c6:
             modules.append('c6bd')
             modules.append('police_c6')
-        if self.has_c6 and (self.has_c7 or self.has_c3a):
+        if (self.has_c6 or self.has_c6_annexe) and (self.has_c7 or self.has_c3a):
             modules.append('c6c3a')
         return modules
 
@@ -145,8 +160,10 @@ class DetectionResult:
             ('CAP FT', self.capft_dir, self.has_capft),
             ('COMAC', self.comac_dir, self.has_comac),
             ('C6 (via CAP FT)', self.c6_dir, self.has_c6),
+            ('C6 annexe', self.c6_annexe_file, self.has_c6_annexe),
             ('C7', self.c7_file, self.has_c7),
             ('C3A', self.c3a_file, self.has_c3a),
+            ('GraceTHD', self.gracethd_dir, self.has_gracethd),
         ]
 
     def get_diagnostic(self, resource_label: str) -> str:
@@ -181,14 +198,81 @@ _COMAC_DIR_PATTERNS = [
     r'^ETUDE[\s_-]*COMAC$',
 ]
 
+_C6_DIR_PATTERNS = [
+    r'^C6$',
+    r'^Annexe[\s_-]*C6$',
+]
+
+_GRACETHD_DIR_PATTERNS = [
+    r'^GRACE_APD',
+    r'^GRACE[_\s-]*THD$',
+    r'^GraceTHD$',
+    r'^GRACETHD$',
+]
+
+# Prefixes of plugin output files -- must be excluded from input detection
+_OUTPUT_FILE_PREFIXES = (
+    'ANALYSE_', 'RAPPORT_', 'EXPORT_', 'VERIF_',
+    'POLICE_', 'COMAC_VERIF', 'RECAP_',
+)
+
 # Human-readable expected names for diagnostics
 _EXPECTED_NAMES = {
     'FT-BT KO': 'Fichier Excel contenant "FT-BT KO" ou "FTBTKO" dans le nom (a la racine du projet)',
     'CAP FT': 'Dossier nomme: CAP FT, CAPFT, CAP_FT, ETUDE CAP FT, ETUDE CAPFT, KPFT, ETUDE KPFT',
     'COMAC': 'Dossier nomme: COMAC, Export COMAC, ExportComac, ETUDE COMAC',
     'C7': 'Fichier Excel contenant "C7" ou dossier "C7" / "Annexe C7" avec un .xlsx dedans',
+    'C6 annexe': 'Fichier Excel contenant "C6" ou dossier "C6" / "Annexe C6" avec un .xlsx dedans',
     'C3A': 'Fichier Excel contenant "C3A" ou dossier "C3A" / "Annexe C3A" avec un .xlsx dedans',
+    'GraceTHD': 'Dossier GRACE_APD_*, GraceTHD ou dossier contenant t_noeud.shp + t_cableline.shp',
 }
+
+# Fichiers GraceTHD requis pour validation
+_GRACETHD_REQUIRED_FILES = ['t_noeud.shp', 't_cableline.shp']
+_GRACETHD_EXPECTED_FILES = ['t_cable.csv', 't_ptech.csv', 't_ebp.csv', 't_cheminement.shp']
+
+
+def _validate_gracethd_dir(directory: str) -> bool:
+    """Check if directory contains required GraceTHD files."""
+    if not directory or not os.path.isdir(directory):
+        return False
+    for f in _GRACETHD_REQUIRED_FILES:
+        if not os.path.isfile(os.path.join(directory, f)):
+            return False
+    return True
+
+
+def _find_gracethd_dir(root: str) -> Optional[str]:
+    """Find GraceTHD directory in project root.
+
+    Search order:
+    1. Sub-directory matching GRACE_APD_* / GraceTHD patterns
+    2. Sub-directory with a 'shapes' sub-folder containing GraceTHD files
+    3. Root itself if it contains GraceTHD files directly
+    """
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return None
+
+    for entry in sorted(entries):
+        full = os.path.join(root, entry)
+        if not os.path.isdir(full):
+            continue
+
+        if _match_dir(entry, _GRACETHD_DIR_PATTERNS):
+            if _validate_gracethd_dir(full):
+                return full
+            shapes = os.path.join(full, 'shapes')
+            if _validate_gracethd_dir(shapes):
+                return shapes
+
+    for entry in sorted(entries):
+        full = os.path.join(root, entry)
+        if os.path.isdir(full) and _validate_gracethd_dir(full):
+            return full
+
+    return None
 
 
 def _list_folder_contents(root: str, max_items: int = 12) -> tuple:
@@ -228,13 +312,24 @@ def _find_dir(root: str, patterns: list) -> Optional[str]:
     return None
 
 
+def _is_output_file(filename: str) -> bool:
+    """Return True if filename looks like a plugin output file."""
+    upper = filename.upper()
+    return any(upper.startswith(prefix.upper()) for prefix in _OUTPUT_FILE_PREFIXES)
+
+
 def _find_excel(root: str, name_patterns: list) -> Optional[str]:
-    """Find first Excel file matching name patterns in root."""
+    """Find first Excel file matching name patterns in root.
+
+    Skips plugin output files to prevent detecting previous results as input.
+    """
     try:
         entries = os.listdir(root)
     except OSError:
         return None
-    xlsx_files = [e for e in entries if e.lower().endswith(('.xlsx', '.xls'))]
+    xlsx_files = [e for e in entries
+                  if e.lower().endswith(('.xlsx', '.xls'))
+                  and not _is_output_file(e)]
     for pat in name_patterns:
         regex = re.compile(pat, re.IGNORECASE)
         for f in sorted(xlsx_files):
@@ -244,11 +339,14 @@ def _find_excel(root: str, name_patterns: list) -> Optional[str]:
 
 
 def _find_excel_in_dir(directory: str) -> Optional[str]:
-    """Find first .xlsx file in a directory."""
+    """Find first .xlsx file in a directory.
+
+    Skips plugin output files.
+    """
     if not directory or not os.path.isdir(directory):
         return None
     for f in sorted(os.listdir(directory)):
-        if f.lower().endswith(('.xlsx', '.xls')):
+        if f.lower().endswith(('.xlsx', '.xls')) and not _is_output_file(f):
             return os.path.join(directory, f)
     return None
 
@@ -301,6 +399,14 @@ def _build_diagnostics(result: DetectionResult, project_root: str) -> List[tuple
             diags.append(('C6 (via CAP FT)',
                           'Les annexes C6 sont dans le dossier CAP FT. '
                           'Detecter CAP FT pour activer C6 vs BD et Police C6.'))
+
+    if not result.has_c6_annexe and not result.has_c6:
+        hint = _EXPECTED_NAMES['C6 annexe']
+        if dirs:
+            c6_like = [d for d in dirs if 'c6' in d.lower()]
+            if c6_like:
+                hint += f"\nDossier(s) C6-like trouves (sans Excel dedans?): {', '.join(c6_like)}"
+        diags.append(('C6 annexe', hint))
 
     if not result.has_c7:
         hint = _EXPECTED_NAMES['C7']
@@ -395,6 +501,65 @@ def analyse_livrable(result: 'DetectionResult') -> dict:
     return analysis
 
 
+def _deduplicate_files(result: DetectionResult) -> None:
+    """Resolve overlapping or duplicate file detections in-place.
+
+    Rules applied:
+    1. If c6_annexe_file is inside the capft/c6_dir tree, clear it
+       (the standard CAP FT path takes precedence).
+    2. If two different detection fields point to the same absolute path,
+       keep the primary role and clear the secondary.
+    3. If two detected files share the same basename (potential copy),
+       add a warning to diagnostics.
+    """
+    # --- Rule 1: c6_annexe inside capft tree ---
+    if result.c6_annexe_file and result.c6_dir:
+        ann = os.path.normpath(result.c6_annexe_file)
+        c6d = os.path.normpath(result.c6_dir)
+        if ann.startswith(c6d + os.sep):
+            result.c6_annexe_file = ''
+
+    # --- Rule 2: same absolute path across roles ---
+    role_paths = []
+    if result.ftbt_excel:
+        role_paths.append(('FT-BT KO', 'ftbt_excel',
+                           os.path.normpath(result.ftbt_excel)))
+    if result.c6_annexe_file:
+        role_paths.append(('C6 annexe', 'c6_annexe_file',
+                           os.path.normpath(result.c6_annexe_file)))
+    if result.c7_file:
+        role_paths.append(('C7', 'c7_file',
+                           os.path.normpath(result.c7_file)))
+    if result.c3a_file:
+        role_paths.append(('C3A', 'c3a_file',
+                           os.path.normpath(result.c3a_file)))
+
+    seen = {}
+    for label, attr, norm_path in role_paths:
+        if norm_path in seen:
+            # Duplicate -- clear the later detection
+            setattr(result, attr, '')
+        else:
+            seen[norm_path] = label
+
+    # --- Rule 3: same basename across roles (potential copies) ---
+    basename_map = {}
+    for label, attr, norm_path in role_paths:
+        val = getattr(result, attr)
+        if not val:
+            continue
+        bn = os.path.basename(val).upper()
+        if bn in basename_map and basename_map[bn][0] != label:
+            prev_label = basename_map[bn][0]
+            result.diagnostics.append((
+                'Doublon potentiel',
+                f'{label} et {prev_label} utilisent un fichier au meme nom: '
+                f'{os.path.basename(val)}'
+            ))
+        else:
+            basename_map[bn] = (label, val)
+
+
 def detect_project(project_root: str) -> DetectionResult:
     """Detect project structure from root directory.
 
@@ -435,8 +600,22 @@ def detect_project(project_root: str) -> DetectionResult:
         result.comac_dir = comac
         result.comac_studies = _list_studies(comac)
 
+    # C6 annexe file (standalone C6 folder or root-level C6 Excel)
+    c6_annexe = _find_excel(project_root, [r'\bC6\b', r'Annexe[\s_-]*C6'])
+    if c6_annexe:
+        result.c6_annexe_file = c6_annexe
+    else:
+        c6_standalone = _find_dir(project_root, _C6_DIR_PATTERNS)
+        if c6_standalone:
+            c6_f = _find_excel_in_dir(c6_standalone)
+            if c6_f:
+                result.c6_annexe_file = c6_f
+            # If standalone C6 dir exists but no capft, also use as c6_dir
+            if not result.c6_dir:
+                result.c6_dir = c6_standalone
+
     # C7 file (file or directory)
-    c7_file = _find_excel(project_root, [r'C7', r'Annexe[\s_-]*C7'])
+    c7_file = _find_excel(project_root, [r'\bC7\b', r'Annexe[\s_-]*C7\b'])
     if c7_file:
         result.c7_file = c7_file
     else:
@@ -447,7 +626,7 @@ def detect_project(project_root: str) -> DetectionResult:
                 result.c7_file = c7_f
 
     # C3A file (file or directory)
-    c3a_file = _find_excel(project_root, [r'C3A', r'Annexe[\s_-]*C3A'])
+    c3a_file = _find_excel(project_root, [r'\bC3A\b', r'Annexe[\s_-]*C3A\b'])
     if c3a_file:
         result.c3a_file = c3a_file
     else:
@@ -457,7 +636,16 @@ def detect_project(project_root: str) -> DetectionResult:
             if c3a_f:
                 result.c3a_file = c3a_f
 
+    # GraceTHD directory (for Axione SROs)
+    gracethd = _find_gracethd_dir(project_root)
+    if gracethd:
+        result.gracethd_dir = gracethd
+
+    # --- Deduplication: resolve overlapping detections ---
+    _deduplicate_files(result)
+
     # --- Generate diagnostics for missing resources ---
-    result.diagnostics = _build_diagnostics(result, project_root)
+    # Extend rather than replace: _deduplicate_files may have added warnings
+    result.diagnostics.extend(_build_diagnostics(result, project_root))
 
     return result

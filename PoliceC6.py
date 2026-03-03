@@ -44,7 +44,7 @@ from .dataclasses_results import (
     PoliceC6Result, CableCapaciteResult, BoitierValidationResult,
     EtudeC6Result, ParcourAutoC6Result
 )
-from .db_connection import DatabaseConnection, CableSegment, extract_sro_from_layer
+from .db_connection import DatabaseConnection, CableSegment, extract_sro_from_layer, get_shared_connection
 from .cable_analyzer import CableAnalyzer, AppuiChargeResult, extraire_appuis_from_layer
 from .security_rules import get_capacite_fo_from_code, get_capacites_possibles
 
@@ -103,7 +103,7 @@ class PoliceC6:
     def __init__(self):
         """Initialise les attributs de classe."""
         self._cancel_requested = False
-        self.db_connection = DatabaseConnection()
+        self.db_connection = get_shared_connection()
         self.cable_analyzer = CableAnalyzer(tolerance=0.5)
         self._reset_state()
 
@@ -383,24 +383,28 @@ class PoliceC6:
             appuis_edf = set()
             
             for row_idx, row in enumerate(
-                sheet.iter_rows(min_row=header_row_idx + 1, values_only=True),
+                sheet.iter_rows(min_row=header_row_idx + 1, values_only=False),
                 start=header_row_idx + 1
             ):
-                if not row or all(v is None for v in row):
+                if not row or all(c.value is None for c in row):
                     continue
                 
-                raw_num = str(row[col_num_appui] or '').strip() if col_num_appui < len(row) else ''
-                nom_cable = str(row[col_nom_cable] or '').strip() if col_nom_cable >= 0 and col_nom_cable < len(row) else ''
+                raw_num = str(row[col_num_appui].value or '').strip() if col_num_appui < len(row) else ''
+                nom_cable = str(row[col_nom_cable].value or '').strip() if col_nom_cable >= 0 and col_nom_cable < len(row) else ''
+                cable_is_bold = False
+                if col_nom_cable >= 0 and col_nom_cable < len(row):
+                    font = row[col_nom_cable].font
+                    cable_is_bold = bool(font and font.bold)
                 
                 # Détecter appui EDF: colonne "Effort disponible avant ajout câble" renseignée
                 effort_val = None
                 if col_effort_dispo >= 0 and col_effort_dispo < len(row):
-                    effort_val = row[col_effort_dispo]
+                    effort_val = row[col_effort_dispo].value
                 
                 # Détecter pose boîtier (PB ou PEO)
                 boitier_val = ''
                 if col_pose_boitier >= 0 and col_pose_boitier < len(row):
-                    bv = str(row[col_pose_boitier] or '').strip().upper()
+                    bv = str(row[col_pose_boitier].value or '').strip().upper()
                     if bv in ('PB', 'PEO'):
                         boitier_val = bv
                 
@@ -419,7 +423,7 @@ class PoliceC6:
                 if current_appui and nom_cable:
                     is_cable = bool(re.match(r'^L\d', nom_cable, re.IGNORECASE))
                     
-                    if is_cable:
+                    if is_cable and cable_is_bold:
                         donnees_par_appui[current_appui].append(nom_cable)
                     
                     liste_brute.append({
@@ -428,6 +432,7 @@ class PoliceC6:
                         'num_appui_norm': current_appui,
                         'nom_cable': nom_cable,
                         'is_cable': is_cable,
+                        'is_bold': cable_is_bold,
                         'is_edf': current_appui in appuis_edf
                     })
             
@@ -611,14 +616,16 @@ class PoliceC6:
     def comparer_c6_cables(
         self,
         donnees_c6: Dict[str, List[str]],
-        cables_par_appui: Dict[str, Dict]
+        cables_par_appui: Dict[str, Dict],
+        ref_label: str = 'BDD'
     ) -> List[Dict]:
-        """Compare cables C6 vs BDD. Delegue a cable_analyzer.comparer_source_cables()."""
+        """Compare cables C6 vs BDD/GraceTHD. Delegue a cable_analyzer.comparer_source_cables()."""
         from .cable_analyzer import comparer_source_cables
         return comparer_source_cables(
             donnees_c6, cables_par_appui,
             source_label="C6",
-            get_capacites_fn=get_capacites_possibles
+            get_capacites_fn=get_capacites_possibles,
+            ref_label=ref_label
         )
 
     @staticmethod

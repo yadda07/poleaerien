@@ -63,8 +63,22 @@ class CapFt:
 
         return dicoPoteauFt_SousTraitant
 
-    def traitementResultatFinauxCapFt(self, dicoEtudeCapFtPoteauQgis, dicoPoteauFt_SousTraitant):
+    def traitementResultatFinauxCapFt(self, dicoEtudeCapFtPoteauQgis, dicoPoteauFt_SousTraitant,
+                                      all_inf_nums=None):
+        """Compare poteaux QGIS vs Excel CAP_FT.
+        
+        Args:
+            all_inf_nums: Set de tous les inf_num normalises de infra_pt_pot.
+                Permet de distinguer ABSENT vs HORS_PERIMETRE.
+        
+        Returns:
+            tuple: (introuvables_excel, introuvables_qgis, existants, hors_perimetre)
+        """
+        if all_inf_nums is None:
+            all_inf_nums = set()
+
         dicoPotFt_Excel_Introuvable = {}
+        dicoPotFt_HorsPerimetre = {}
         dicoPotFtExistants = {}
         comptabilite = 0
 
@@ -78,6 +92,7 @@ class CapFt:
         # Étape 2 : traitement Excel
         for excel, listePoteau in dicoPoteauFt_SousTraitant.items():
             PotFtintrouvableSt = []
+            PotFtHorsPerimetreSt = []
 
             for poteauSt in listePoteau:
                 potSt = poteauSt.replace("FicheAppui_", "").replace(".xlsx", "").strip()
@@ -102,12 +117,18 @@ class CapFt:
                     if not infos_list:
                         index_qgis.pop(potSt, None)
                 else:
-                    PotFtintrouvableSt.append(poteauSt)
+                    # Poteau non trouve: verifier s'il existe dans la couche (hors perimetre)
+                    if potSt and potSt in all_inf_nums:
+                        PotFtHorsPerimetreSt.append(poteauSt)
+                    else:
+                        PotFtintrouvableSt.append(poteauSt)
 
             if PotFtintrouvableSt:
                 dicoPotFt_Excel_Introuvable[excel] = PotFtintrouvableSt
+            if PotFtHorsPerimetreSt:
+                dicoPotFt_HorsPerimetre[excel] = PotFtHorsPerimetreSt
 
-        return dicoPotFt_Excel_Introuvable, dicoEtudeCapFtPoteauQgis, dicoPotFtExistants
+        return dicoPotFt_Excel_Introuvable, dicoEtudeCapFtPoteauQgis, dicoPotFtExistants, dicoPotFt_HorsPerimetre
 
     def ecrireResultatsAnalyseExcelsCapFt(self, resultatsFinaux, nom):
         """Fonction qui permet d'écrire dans le fichier Excel à partir d'un fichier modèle'"""

@@ -18,7 +18,7 @@ from qgis.core import (
     QgsMessageLog, Qgis
 )
 
-from .db_connection import DatabaseConnection
+from .db_connection import get_shared_connection
 
 
 # Default schema for all RIP AVG NGE tables
@@ -70,7 +70,7 @@ class DbLayerLoader:
         Returns:
             True if connection parameters were found successfully.
         """
-        db = DatabaseConnection()
+        db = get_shared_connection()
         conn_name = db.find_auvergne_connection()
         if not conn_name:
             QgsMessageLog.logMessage(

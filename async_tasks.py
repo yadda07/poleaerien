@@ -645,8 +645,9 @@ class CapFtTask(AsyncTaskBase):
         
 
         # Traitement pur - thread-safe
+        all_inf_nums = self.qgis_data.get('all_inf_nums', set())
 
-        resultats = cap.traitementResultatFinauxCapFt(dico_qgis, dico_excel)
+        resultats = cap.traitementResultatFinauxCapFt(dico_qgis, dico_excel, all_inf_nums)
 
         
 
@@ -669,6 +670,8 @@ class CapFtTask(AsyncTaskBase):
             'dico_excel_introuvable': resultats[0],
 
             'dico_qgis_introuvable': resultats[1],
+
+            'dico_hors_perimetre': resultats[3] if len(resultats) > 3 else {},
 
             'fichier_export': self.params['fichier_export'],
 
@@ -798,7 +801,7 @@ class ComacTask(AsyncTaskBase):
 
         com = Comac()
 
-        doublons, erreurs_lecture, dico_excel, dico_verif_secu, dico_cables_comac, dico_boitier_comac = com.LectureFichiersExcelsComac(
+        doublons, erreurs_lecture, dico_excel, dico_verif_secu, dico_cables_comac, dico_boitier_comac, dico_coords = com.LectureFichiersExcelsComac(
 
             self.params['chemin_comac'],
 
@@ -838,13 +841,20 @@ class ComacTask(AsyncTaskBase):
 
         self.emit_progress(55)
 
-        self.emit_message("Comparaison donnees...", "grey")
+        total_qgis_pot = sum(len(v) for v in dico_qgis.values())
+        total_excel_pot = sum(len(v) for v in dico_excel.values())
+        self.emit_message(
+            f"Comparaison: {total_qgis_pot} poteaux QGIS ({len(dico_qgis)} etudes) vs "
+            f"{total_excel_pot} poteaux Excel ({len(dico_excel)} fichiers)...",
+            "grey"
+        )
 
         
 
         # Traitement pur - thread-safe
+        all_inf_nums = self.qgis_data.get('all_inf_nums', set())
 
-        resultats = com.traitementResultatFinaux(dico_qgis, dico_excel)
+        resultats = com.traitementResultatFinaux(dico_qgis, dico_excel, all_inf_nums)
 
         
 
@@ -876,7 +886,7 @@ class ComacTask(AsyncTaskBase):
 
             try:
 
-                from .db_connection import DatabaseConnection
+                from .db_connection import get_shared_connection
 
                 from .cable_analyzer import compter_cables_par_appui, verifier_boitiers
 
@@ -912,37 +922,46 @@ class ComacTask(AsyncTaskBase):
 
                 
 
-                # Utiliser le cache fddcpi2 si disponible (batch multi-modules)
+                # === Routage NGE / Axione ===
+                be_type = self.params.get('be_type', 'nge')
+                gracethd_dir = self.params.get('gracethd_dir', '')
 
-                cables_all = self.params.get('fddcpi_cables_cache')
-
-                if cables_all is not None:
-
-                    self.emit_message(
-
-                        f"Vérif câbles: fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
-
-                        "grey"
-
-                    )
-
+                if be_type == 'axione' and gracethd_dir:
+                    # Axione: charger cables depuis GraceTHD
+                    from .gracethd_reader import GraceTHDReader
+                    self.emit_message(f"Vérif câbles: GraceTHD ({gracethd_dir})...", "grey")
+                    reader = GraceTHDReader(gracethd_dir)
+                    cables_all = reader.load_cables_as_segments('DI')
+                    bpe_list = reader.load_bpe()
                 else:
+                    # NGE: pipeline fddcpi2 standard
+                    cables_all = self.params.get('fddcpi_cables_cache')
 
-                    self.emit_message(f"Vérif câbles: connexion PostgreSQL fddcpi2({sro})...", "grey")
+                    if cables_all is not None:
 
-                    db = DatabaseConnection()
+                        self.emit_message(
 
-                    if db.connect():
+                            f"Vérif câbles: fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
 
-                        cables_all = db.execute_fddcpi2(sro)
+                            "grey"
 
-                        db.disconnect()
+                        )
 
                     else:
 
-                        cables_all = None
+                        self.emit_message(f"Vérif câbles: connexion PostgreSQL fddcpi2({sro})...", "grey")
 
-                        self.emit_message("Vérif câbles: connexion PostgreSQL impossible", "orange")
+                        db = get_shared_connection()
+
+                        if db.connect():
+
+                            cables_all = db.execute_fddcpi2(sro)
+
+                        else:
+
+                            cables_all = None
+
+                            self.emit_message("Vérif câbles: connexion PostgreSQL impossible", "orange")
 
                 
 
@@ -950,7 +969,11 @@ class ComacTask(AsyncTaskBase):
 
                     cables_all_for_cache = cables_all
 
-                    cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+                    if be_type == 'axione' and gracethd_dir:
+                        # GraceTHD: cables deja filtres DI par le reader
+                        cables = cables_all
+                    else:
+                        cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
 
                     
 
@@ -979,28 +1002,33 @@ class ComacTask(AsyncTaskBase):
                     
 
                     # Compter câbles par appui (group_by_gid=True: câbles physiques, pas segments découpés)
+                    cable_match = 'line' if (be_type == 'axione' and gracethd_dir) else 'endpoint'
 
-                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=0.5, group_by_gid=True)
+                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=0.5, group_by_gid=True, match_mode=cable_match)
 
-                    
+                    # Diagnostic: combien d'appuis ont des cables matches
+                    nb_with_cables = sum(1 for v in cables_par_appui.values() if v.get('count', 0) > 0)
+                    src_label = "GraceTHD" if (be_type == 'axione' and gracethd_dir) else "BDD"
+                    self.emit_message(
+                        f"  {nb_with_cables}/{len(cables_par_appui)} appuis QGIS avec câbles {src_label} (mode={cable_match})",
+                        "blue"
+                    )
 
                     if dico_cables_comac:
 
                         self.emit_progress(80)
 
+                        # Log cles COMAC pour diagnostic
+                        comac_keys = sorted(dico_cables_comac.keys())
                         self.emit_message(
-
-                            f"Vérif câbles: comparaison {len(dico_cables_comac)} appuis COMAC...",
-
+                            f"Vérif câbles: comparaison {len(dico_cables_comac)} appuis COMAC: {comac_keys[:15]}{'...' if len(comac_keys) > 15 else ''}",
                             "grey"
-
                         )
 
                         
 
-                        # Comparer COMAC vs BDD
-
-                        verif_cables = com.comparer_comac_cables(dico_cables_comac, cables_par_appui)
+                        # Comparer COMAC vs cables
+                        verif_cables = com.comparer_comac_cables(dico_cables_comac, cables_par_appui, ref_label=src_label)
 
                         
 
@@ -1012,11 +1040,27 @@ class ComacTask(AsyncTaskBase):
 
                         self.emit_message(
 
-                            f"  Vérif câbles: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents BDD",
+                            f"  Vérif câbles: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents {src_label}",
 
-                            "green" if nb_ecart == 0 else "orange"
+                            "green" if (nb_ecart == 0 and nb_absent == 0) else "orange"
 
                         )
+
+                        # Detail par appui en echec (comme Police C6)
+                        for v in verif_cables:
+                            nb_src = v.get('nb_cables_comac', '?')
+                            if v['statut'] == 'ABSENT_BDD':
+                                self.emit_message(
+                                    f"  [ABSENT] Appui {v['num_appui']}: COMAC={nb_src} câbles, "
+                                    f"{src_label}=0 | {v.get('message', 'Appui non trouvé dans les appuis QGIS')}",
+                                    "orange"
+                                )
+                            elif v['statut'] == 'ECART':
+                                self.emit_message(
+                                    f"  [ECART] Appui {v['num_appui']}: COMAC={nb_src}, "
+                                    f"{src_label}={v.get('nb_cables_bdd', 0)} | {v.get('message', '')}",
+                                    "orange"
+                                )
 
                 
 
@@ -1053,20 +1097,21 @@ class ComacTask(AsyncTaskBase):
                     
 
                     # Récupérer BPE du SRO
-
-                    db_bpe = DatabaseConnection()
-
-                    if db_bpe.connect():
-
-                        bpe_list = db_bpe.query_bpe_by_sro(sro)
-
-                        db_bpe.disconnect()
-
+                    if be_type == 'axione' and gracethd_dir:
+                        # BPE deja charges depuis GraceTHD (plus haut)
+                        pass
                     else:
+                        db_bpe = get_shared_connection()
 
-                        bpe_list = []
+                        if db_bpe.connect():
 
-                        self.emit_message("  BPE: connexion PostgreSQL impossible", "orange")
+                            bpe_list = db_bpe.query_bpe_by_sro(sro)
+
+                        else:
+
+                            bpe_list = []
+
+                            self.emit_message("  BPE: connexion PostgreSQL impossible", "orange")
 
                     
 
@@ -1214,6 +1259,8 @@ class ComacTask(AsyncTaskBase):
 
             'dico_qgis_introuvable': resultats[1],
 
+            'dico_hors_perimetre': resultats[3] if len(resultats) > 3 else {},
+
             'fichier_export': self.params['fichier_export'],
 
             'dico_qgis': dico_qgis,
@@ -1240,12 +1287,39 @@ class ComacTask(AsyncTaskBase):
 
             'appuis_wkb': self.qgis_data.get('appuis', []),
 
+            'be_type': self.params.get('be_type', 'nge'),
+
+            'coords_absents': self._filter_coords_absents(resultats[0], dico_coords),
+
         }
 
         return True
 
-
-
+    @staticmethod
+    def _filter_coords_absents(dico_introuvables, dico_coords):
+        """Filtre les coordonnees pour ne garder que les poteaux absents QGIS.
+        
+        Args:
+            dico_introuvables: {fichier: [noms_poteaux]} depuis traitementResultatFinaux
+            dico_coords: {nompot: (x, y)} depuis LectureFichiersExcelsComac
+        
+        Returns:
+            list[dict]: [{nom, x, y, fichier}] pour les absents avec coordonnees
+        """
+        if not dico_introuvables or not dico_coords:
+            return []
+        result = []
+        for fichier, poteaux in dico_introuvables.items():
+            for pot in poteaux:
+                coords = dico_coords.get(pot)
+                if coords:
+                    result.append({
+                        'nom': pot,
+                        'x': coords[0],
+                        'y': coords[1],
+                        'fichier': fichier
+                    })
+        return result
 
 
 class C6BdTask(AsyncTaskBase):
@@ -1648,9 +1722,9 @@ class PoliceC6Task(AsyncTaskBase):
 
         from .PoliceC6 import PoliceC6
 
-        from .db_connection import DatabaseConnection
+        from .db_connection import get_shared_connection
 
-        from .cable_analyzer import compter_cables_par_appui
+        from .cable_analyzer import compter_cables_par_appui, _parse_attaches_geoms, collect_anomaly_cables
 
         
 
@@ -1724,41 +1798,58 @@ class PoliceC6Task(AsyncTaskBase):
 
         try:
 
-            # Utiliser le cache fddcpi2 si disponible (batch multi-modules)
+            # === Routage NGE / Axione ===
+            be_type = self.params.get('be_type', 'nge')
+            gracethd_dir = self.params.get('gracethd_dir', '')
+            attaches_raw = []
 
-            cables_all = self.params.get('fddcpi_cables_cache')
-
-            if cables_all is not None:
+            if be_type == 'axione' and gracethd_dir:
+                # Axione: charger cables et BPE depuis GraceTHD
+                from .gracethd_reader import GraceTHDReader
+                self.emit_message(f"GraceTHD: chargement ({gracethd_dir})...", "grey")
+                reader = GraceTHDReader(gracethd_dir)
+                cables_all = reader.load_cables_as_segments('DI')
+                cables = cables_all  # deja filtres DI
+                bpe_list = reader.load_bpe()
 
                 self.emit_message(
-
-                    f"fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
-
-                    "grey"
-
+                    f"  {len(cables)} câbles DI + {len(bpe_list)} BPE depuis GraceTHD",
+                    "blue"
                 )
 
             else:
+                # NGE: pipeline fddcpi2 standard
+                cables_all = self.params.get('fddcpi_cables_cache')
 
-                self.emit_message(f"Connexion PostgreSQL et appel fddcpi2({sro})...", "grey")
+                if cables_all is not None:
 
-                db = DatabaseConnection()
+                    self.emit_message(
 
-                if not db.connect():
+                        f"fddcpi2({sro}) depuis cache ({len(cables_all)} segments)",
 
-                    self.result = {'error': 'Connexion PostgreSQL impossible'}
+                        "grey"
 
-                    return True
+                    )
 
-                cables_all = db.execute_fddcpi2(sro)
+                else:
 
-                db.disconnect()
+                    self.emit_message(f"Connexion PostgreSQL et appel fddcpi2({sro})...", "grey")
+
+                    db = get_shared_connection()
+
+                    if not db.connect():
+
+                        self.result = {'error': 'Connexion PostgreSQL impossible'}
+
+                        return True
+
+                    cables_all = db.execute_fddcpi2(sro)
 
             
 
-            # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
+                # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
 
-            cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+                cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
 
             nb_exclu = len(cables_all) - len(cables)
 
@@ -1774,21 +1865,35 @@ class PoliceC6Task(AsyncTaskBase):
 
             
 
-            # Récupérer les BPE du SRO pour vérification boîtier
+            if be_type != 'axione' or not gracethd_dir:
+                # NGE: Récupérer les BPE et attaches du SRO depuis PostgreSQL
+                db_bpe = get_shared_connection()
 
-            db_bpe = DatabaseConnection()
+                if db_bpe.connect():
 
-            if db_bpe.connect():
+                    bpe_list = db_bpe.query_bpe_by_sro(sro)
 
-                bpe_list = db_bpe.query_bpe_by_sro(sro)
+                    attaches_raw = db_bpe.query_attaches_by_sro(sro)
 
-                db_bpe.disconnect()
+                else:
 
-            else:
+                    bpe_list = []
 
-                bpe_list = []
+                    self.emit_message("  BPE: connexion PostgreSQL impossible", "orange")
 
-                self.emit_message("  BPE: connexion PostgreSQL impossible", "orange")
+            
+
+            attaches_parsed = _parse_attaches_geoms(attaches_raw)
+
+            if attaches_parsed:
+
+                self.emit_message(
+
+                    f"  {len(attaches_parsed)} attaches chargees pour detection indirecte",
+
+                    "grey"
+
+                )
 
             
 
@@ -1830,11 +1935,30 @@ class PoliceC6Task(AsyncTaskBase):
 
         
 
-        # 2. Traitement de chaque étude
+        # 2. Pre-calcul cables_par_appui (une seule fois pour toutes les etudes)
+
+        p_match = 'line' if (be_type == 'axione' and gracethd_dir) else 'endpoint'
+        p_src_label = "GraceTHD" if (be_type == 'axione' and gracethd_dir) else "BDD"
+
+        cables_par_appui_cached = compter_cables_par_appui(
+            cables, appuis_data, tolerance=0.5,
+            attaches_parsed=attaches_parsed,
+            match_mode=p_match
+        )
+
+        nb_with = sum(1 for v in cables_par_appui_cached.values() if v.get('count', 0) > 0)
+        self.emit_message(
+            f"Pré-calcul câbles: {nb_with}/{len(cables_par_appui_cached)} appuis avec câbles {p_src_label} (mode={p_match})",
+            "blue"
+        )
+
+        # 3. Traitement de chaque étude
 
         self.emit_progress(20)
 
         stats_globales = []
+
+        all_anomaly_cables = []
 
         police = PoliceC6()
 
@@ -1886,9 +2010,8 @@ class PoliceC6Task(AsyncTaskBase):
 
                 
 
-                # Compter câbles par appui (tolérance 0.5m)
-
-                cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=0.5)
+                # Utiliser le cache pre-calcule (memes cables/appuis pour toutes les etudes)
+                cables_par_appui = cables_par_appui_cached
 
                 
 
@@ -1896,15 +2019,16 @@ class PoliceC6Task(AsyncTaskBase):
 
                 verif_boitier = self._verifier_boitiers(
 
-                    boitier_c6, appuis_data, bpe_geoms
+                    boitier_c6, appuis_data, bpe_geoms,
+
+                    attaches_parsed=attaches_parsed
 
                 )
 
                 
 
-                # Comparer C6 vs câbles BDD
-
-                comparaison = police.comparer_c6_cables(donnees_c6, cables_par_appui)
+                # Comparer C6 vs câbles (BDD ou GraceTHD)
+                comparaison = police.comparer_c6_cables(donnees_c6, cables_par_appui, ref_label=p_src_label)
 
                 
 
@@ -1938,7 +2062,7 @@ class PoliceC6Task(AsyncTaskBase):
 
                 self.emit_message(
 
-                    f"  Résultat: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents BDD"
+                    f"  Résultat: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents {p_src_label}"
 
                     f"{f', {nb_boitier_err} boîtier(s) absent(s)' if nb_boitier_err else ''}",
 
@@ -1954,11 +2078,12 @@ class PoliceC6Task(AsyncTaskBase):
 
                     if c['statut'] != 'OK':
 
+                        display_tag = "ABSENT" if c['statut'] == 'ABSENT_BDD' else c['statut']
                         self.emit_message(
 
-                            f"    [{c['statut']}] Appui {c['num_appui']}: "
+                            f"    [{display_tag}] Appui {c['num_appui']}: "
 
-                            f"C6={c['nb_cables_c6']} câbles, BDD={c['nb_cables_bdd']} | {c['message']}",
+                            f"C6={c['nb_cables_c6']} câbles, {p_src_label}={c['nb_cables_bdd']} | {c['message']}",
 
                             "red" if c['statut'] == 'ABSENT_BDD' else "orange"
 
@@ -1996,7 +2121,12 @@ class PoliceC6Task(AsyncTaskBase):
 
                 })
 
-                
+                # Collecter cables en anomalie pour couche spatiale
+                if nb_ecart > 0:
+                    anom = collect_anomaly_cables(
+                        comparaison, cables_par_appui, cables, etude=etude_name
+                    )
+                    all_anomaly_cables.extend(anom)
 
             except Exception as e:
 
@@ -2028,13 +2158,39 @@ class PoliceC6Task(AsyncTaskBase):
             "green" if nb_etudes_anom == 0 and nb_etudes_skip == 0 else "orange"
         )
 
-        # 3. Export Excel
+        # Bilan consolide absents: BT vs non-BT
+        all_absents_bt = set()
+        all_absents_other = set()
+        total_ok = 0
+        total_ecart = 0
+        for s in stats_globales:
+            total_ok += s.get('nb_ok', 0)
+            total_ecart += s.get('nb_ecart', 0)
+            for c in s.get('detail', []):
+                if c['statut'] == 'ABSENT_BDD':
+                    num = c['num_appui']
+                    if num.startswith('BT'):
+                        all_absents_bt.add(num)
+                    else:
+                        all_absents_other.add(num)
+        self.emit_message(
+            f"Câbles consolidé: {total_ok} OK, {total_ecart} écarts, "
+            f"{len(all_absents_bt)} BT absents (normal), {len(all_absents_other)} non-BT absents",
+            "blue"
+        )
+        if all_absents_other:
+            self.emit_message(
+                f"  Non-BT absents: {sorted(all_absents_other)[:20]}",
+                "orange"
+            )
+
+        # 3. Export Excel (skip en mode batch: le rapport unifie s'en charge)
 
         self.emit_progress(85)
 
-        
+        skip_export = self.params.get('skip_individual_export', False)
 
-        if export_path and stats_globales:
+        if export_path and stats_globales and not skip_export:
 
             self.emit_message("Export Excel...", "grey")
 
@@ -2094,6 +2250,8 @@ class PoliceC6Task(AsyncTaskBase):
 
             'cables': cables_for_layer,
 
+            'anomaly_cables': all_anomaly_cables,
+
             'sro': sro,
 
             'fddcpi_cables_all': cables_all,
@@ -2108,13 +2266,13 @@ class PoliceC6Task(AsyncTaskBase):
 
     
 
-    def _verifier_boitiers(self, boitier_c6, appuis_data, bpe_geoms):
+    def _verifier_boitiers(self, boitier_c6, appuis_data, bpe_geoms, attaches_parsed=None):
 
         """Delegue a cable_analyzer.verifier_boitiers()."""
 
         from .cable_analyzer import verifier_boitiers
 
-        return verifier_boitiers(boitier_c6, appuis_data, bpe_geoms)
+        return verifier_boitiers(boitier_c6, appuis_data, bpe_geoms, attaches_parsed=attaches_parsed)
 
 
 

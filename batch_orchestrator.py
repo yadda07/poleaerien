@@ -140,6 +140,10 @@ class BatchOrchestrator(QObject):
         # Key: sro (str), Value: list[CableSegment]
         self._fddcpi_cache = {}
 
+        # BE type routing: 'nge' (default) or 'axione' (uses GraceTHD)
+        self._be_type = 'nge'
+        self._gracethd_dir = ''
+
         # Shared SRO + appuis WKB cache: avoids duplicate QGIS extraction
         # when both COMAC and Police C6 need the same data from infra_pt_pot.
         # Format: {'sro': str, 'appuis_wkb': list[dict]}
@@ -183,15 +187,34 @@ class BatchOrchestrator(QObject):
     # ------------------------------------------------------------------
     #  Start / Cancel
     # ------------------------------------------------------------------
+    # QP-06: Noms des couches temporaires creees par le plugin
+    _TEMP_LAYER_PREFIXES = (
+        'fddcpi2_', 'Poteaux BT absents', 'Poteaux FT absents',
+        'anomalies_c6_', 'cables_anomalie',
+    )
+
     def _on_start(self, module_keys):
         self._batch_results = {}
         self._fddcpi_cache = {}
         self._sro_appuis_cache = {}
+        self._be_type = 'nge'
+        self._gracethd_dir = ''
         reset_crs_cache()
         self._dlg.textBrowser.clear()
 
+        # QP-06: Nettoyage couches temporaires du batch precedent
+        self._cleanup_temp_layers()
+
+        # Detect BE type (NGE vs Axione) if SRO is available
+        det = self._detection()
+        sro = self._dlg.sro if self._dlg.is_project_mode else ''
+        if not sro and det.sro:
+            sro = det.sro
+        if sro:
+            self._detect_be_type(sro, det)
+
         # --- Preflight checks (all-at-once before any module runs) ---
-        issues = self._preflight_checks(module_keys)
+        issues = self._preflight_checks(module_keys, det)
         if issues:
             self._dlg.log_message(
                 f"Verification pre-lancement : {len(issues)} probleme(s) detecte(s)",
@@ -199,6 +222,20 @@ class BatchOrchestrator(QObject):
             )
             for issue in issues:
                 self._dlg.log_message(f"  {issue}", 'warning')
+            self._dlg.log_message(
+                "Corrigez ces problemes puis relancez l'analyse.", 'error'
+            )
+            return
+
+        # --- Data quality checks (warnings + blockers) ---
+        blockers = self._preflight_data_quality(module_keys)
+        if blockers:
+            self._dlg.log_message(
+                f"Qualite donnees : {len(blockers)} probleme(s) bloquant(s)",
+                'error'
+            )
+            for b in blockers:
+                self._dlg.log_message(f"  {b}", 'error')
             self._dlg.log_message(
                 "Corrigez ces problemes puis relancez l'analyse.", 'error'
             )
@@ -214,10 +251,141 @@ class BatchOrchestrator(QObject):
 
         self._runner.start(module_keys)
 
-    def _preflight_checks(self, module_keys):
+    def _detect_be_type(self, sro, det):
+        """Detect bureau d'etudes (NGE/Axione) and log detailed monitoring."""
+        try:
+            from .db_connection import get_shared_connection
+            db = get_shared_connection()
+            if not db.connect():
+                return
+
+            be = db.query_sro_be(sro)
+            if not be:
+                return
+
+            self._be_type = be
+
+            if be == 'nge':
+                self._dlg.log_message(
+                    f"SRO {sro} — Bureau d'etudes: NGE "
+                    "(source cables: PostgreSQL / fddcpi2)",
+                    'info'
+                )
+                return
+
+            # --- Axione: affichage detaille ---
+            self._dlg.log_message(
+                "═══════════════════════════════════════════",
+                'info'
+            )
+            self._dlg.log_message(
+                f"SRO {sro} — Bureau d'etudes: AXIONE",
+                'info'
+            )
+            self._dlg.log_message(
+                "  Methode: GraceTHD (fichiers locaux SHP + CSV)",
+                'info'
+            )
+
+            if not det.has_gracethd:
+                self._dlg.log_message(
+                    "═══════════════════════════════════════════",
+                    'info'
+                )
+                self._dlg.log_message(
+                    "ATTENTION: Repertoire GraceTHD introuvable dans le projet.",
+                    'warning'
+                )
+                self._dlg.log_message(
+                    "  Placez un dossier GRACE_APD_* ou GraceTHD/ contenant "
+                    "les fichiers t_noeud.shp, t_cableline.shp, t_cable.csv, "
+                    "t_ptech.csv, t_ebp.csv a la racine du projet.",
+                    'warning'
+                )
+                return
+
+            self._gracethd_dir = det.gracethd_dir
+
+            # Inventaire detaille du repertoire GraceTHD
+            self._log_gracethd_inventory(det.gracethd_dir)
+
+            self._dlg.log_message(
+                "═══════════════════════════════════════════",
+                'info'
+            )
+
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erreur detection BE: {e}", "PoleAerien", Qgis.Warning
+            )
+
+    def _log_gracethd_inventory(self, gracethd_dir):
+        """Log a detailed inventory of the GraceTHD directory contents."""
+        from .gracethd_reader import GraceTHDReader
+
+        reader = GraceTHDReader(gracethd_dir)
+        inv = reader.inventory()
+
+        self._dlg.log_message(
+            f"  Repertoire: {inv['dir_name']}/",
+            'info'
+        )
+        self._dlg.log_message(
+            f"  Contenu: {inv['total_files']} fichiers "
+            f"({inv['shp_count']} SHP, {inv['csv_count']} CSV, "
+            f"{inv['other_count']} auxiliaires) — "
+            f"{inv['total_size_mb']} Mo",
+            'info'
+        )
+
+        # Tables cles avec comptage
+        self._dlg.log_message("  Tables cles:", 'info')
+        table_labels = {
+            't_noeud.shp': 'Noeuds (geometries)',
+            't_cableline.shp': 'Traces cables (geometries)',
+            't_cheminement.shp': 'Cheminements (geometries)',
+            't_cable.csv': 'Cables (attributs)',
+            't_ptech.csv': 'Points techniques',
+            't_ebp.csv': 'Boitiers (BPE/PBO)',
+        }
+        for fname, label in table_labels.items():
+            val = inv['key_tables'].get(fname)
+            if val == 'present':
+                status = 'OK'
+                level = 'success'
+            elif val == 'absent':
+                status = 'ABSENT'
+                level = 'warning'
+            elif isinstance(val, int) and val >= 0:
+                status = f'{val} enregistrements'
+                level = 'success'
+            else:
+                status = 'ABSENT'
+                level = 'warning'
+            self._dlg.log_message(
+                f"    {label:.<40s} {status}",
+                level
+            )
+
+        # Fichiers requis manquants
+        if inv['missing_required']:
+            self._dlg.log_message(
+                f"  REQUIS MANQUANTS: {', '.join(inv['missing_required'])}",
+                'error'
+            )
+
+        # Fichiers optionnels manquants (juste info)
+        if inv['missing_optional']:
+            self._dlg.log_message(
+                f"  Optionnels absents: {', '.join(inv['missing_optional'])}",
+                'warning'
+            )
+
+    def _preflight_checks(self, module_keys, det=None):
         """Validate ALL prerequisites upfront. Returns list of actionable messages (empty = OK)."""
         issues = []
-        det = self._detection()
+        if det is None:
+            det = self._detection()
         is_pm = self._dlg.is_project_mode
 
         # --- Export directory ---
@@ -297,14 +465,28 @@ class BatchOrchestrator(QObject):
                 "Noms acceptes: COMAC, Export COMAC, ETUDE COMAC."
             )
 
-        c6_modules = set(module_keys) & {'c6bd', 'police_c6', 'c6c3a'}
-        if c6_modules and not det.has_c6:
+        # Axione SROs: GraceTHD required for cable verification modules
+        cable_modules = set(module_keys) & {'comac', 'police_c6'}
+        if self._be_type == 'axione' and cable_modules and not self._gracethd_dir:
             issues.append(
-                f"Module(s) {', '.join(sorted(c6_modules))}: dossier C6 (= CAP FT) non detecte. "
+                f"SRO Axione: repertoire GraceTHD requis pour {', '.join(sorted(cable_modules))}. "
+                "Placez un dossier GRACE_APD_* ou GraceTHD contenant t_noeud.shp + t_cableline.shp "
+                "dans le repertoire projet."
+            )
+
+        c6_browse_modules = set(module_keys) & {'c6bd', 'police_c6'}
+        if c6_browse_modules and not det.has_c6:
+            issues.append(
+                f"Module(s) {', '.join(sorted(c6_browse_modules))}: dossier C6 (= CAP FT) non detecte. "
                 "Les annexes C6 sont les fichiers d'etude dans le dossier CAP FT."
             )
 
         if 'c6c3a' in module_keys:
+            if not det.has_c6 and not det.has_c6_annexe:
+                issues.append(
+                    "Module C6-C3A-C7-BD: fichier C6 non detecte. "
+                    "Attendu: dossier C6 ou Annexe C6 avec un .xlsx, ou CAP FT."
+                )
             if not det.has_c7 and not det.has_c3a:
                 issues.append(
                     "Module C6-C3A-C7-BD: ni fichier C7 ni C3A detecte. "
@@ -312,6 +494,70 @@ class BatchOrchestrator(QObject):
                 )
 
         return issues
+
+    def _preflight_data_quality(self, module_keys):
+        """Analyse qualite des donnees AVANT lancement.
+        
+        Delegue a preflight_checks.run_data_quality_checks() (module partage
+        avec le bouton Diagnostic).
+        
+        Returns:
+            list[str]: Problemes bloquants (vide = OK).
+        """
+        from .preflight_checks import run_data_quality_checks, format_check_log
+
+        is_pm = self._dlg.is_project_mode
+        lyr_pot = self._pm_lyr_pot if is_pm else self._lyr_pot()
+        lyr_cap = self._pm_lyr_cap if is_pm else self._lyr_capft()
+        lyr_com = self._pm_lyr_com if is_pm else self._lyr_comac()
+
+        if is_pm and not lyr_pot:
+            return []
+
+        det = self._detection()
+        checks = run_data_quality_checks(
+            lyr_pot, lyr_cap, lyr_com,
+            module_keys,
+            auto_field_fn=self._auto_field,
+            be_type=self._be_type,
+            gracethd_dir=self._gracethd_dir,
+            comac_dir=det.comac_dir if det.has_comac else '',
+            capft_dir=det.capft_dir if det.has_capft else '',
+        )
+
+        self._dlg.log_message("--- Qualite donnees ---", 'info')
+        blockers = []
+        for check in checks:
+            msg, level = format_check_log(check)
+            self._dlg.log_message(msg, level)
+            if check['level'] == 'BLOCKER':
+                blockers.append(check['message'])
+
+        if not blockers:
+            self._dlg.log_message("Qualite donnees : OK", 'success')
+
+        return blockers
+
+    def _cleanup_temp_layers(self):
+        """QP-06: Remove temporary layers created by previous batch runs."""
+        from qgis.core import QgsProject, QgsMessageLog, Qgis
+        project = QgsProject.instance()
+        to_remove = []
+        for layer_id, layer in project.mapLayers().items():
+            name = layer.name()
+            if any(name.startswith(prefix) for prefix in self._TEMP_LAYER_PREFIXES):
+                to_remove.append(layer_id)
+        if to_remove:
+            for lid in to_remove:
+                project.removeMapLayer(lid)
+            QgsMessageLog.logMessage(
+                f"Mode Projet: {len(to_remove)} couches temporaires supprimees",
+                "PoleAerien", Qgis.Info
+            )
+            self._dlg.log_message(
+                f"{len(to_remove)} couche(s) temporaire(s) du batch precedent supprimee(s)",
+                'info'
+            )
 
     def _on_cancel(self):
         # Cancel layer loading task if in progress
@@ -369,6 +615,9 @@ class BatchOrchestrator(QObject):
                 self._dlg.log_result_link(filepath)
             except Exception as exc:
                 self._dlg.log_message(f"Erreur rapport: {exc}", 'error')
+
+        # Create temporary layer for absent poteaux with coordinates
+        self._create_absent_poteaux_layers()
 
         # Project mode cleanup: remove temp layers if user didn't ask to keep them
         self._cleanup_project_mode_layers()
@@ -429,7 +678,8 @@ class BatchOrchestrator(QObject):
                 nb_ecart = sum(1 for v in verif if v.get('statut') == 'ECART')
                 nb_absent = sum(1 for v in verif if v.get('statut') == 'ABSENT_BDD')
                 if nb_ecart or nb_absent:
-                    parts.append(f"{nb_ecart} ecarts cables, {nb_absent} absents BDD")
+                    ref_lbl = "GraceTHD" if result.get('be_type') == 'axione' else "BDD"
+                    parts.append(f"{nb_ecart} ecarts cables, {nb_absent} absents {ref_lbl}")
                 else:
                     parts.append("cables OK")
 
@@ -455,6 +705,90 @@ class BatchOrchestrator(QObject):
                 parts.append("OK")
 
         return ", ".join(parts) if parts else ""
+
+    def _create_absent_poteaux_layers(self):
+        """Create temporary point layers for poteaux absent from QGIS but with coords in Excel.
+        
+        Creates separate layers for COMAC (POT-BT style) and CAP_FT (POT-FT style)
+        with dedicated QML styles from the styles/ directory.
+        """
+        try:
+            from qgis.core import (
+                QgsVectorLayer, QgsFeature, QgsGeometry,
+                QgsPointXY, QgsField, QgsProject
+            )
+            from qgis.PyQt.QtCore import QVariant
+
+            STYLE_DIR = os.path.join(os.path.dirname(__file__), 'styles')
+
+            # Collect absent coords by source
+            sources = {
+                'comac': {
+                    'points': [],
+                    'layer_name': 'Poteaux BT absents QGIS (COMAC)',
+                    'style': os.path.join(STYLE_DIR, 'pot_bt_abs_qgis.qml'),
+                },
+                'capft': {
+                    'points': [],
+                    'layer_name': 'Poteaux FT absents QGIS (CAP_FT)',
+                    'style': os.path.join(STYLE_DIR, 'pot_ft_abs_qgis.qml'),
+                },
+            }
+
+            # COMAC absents with coords (Lambert 93)
+            comac_res = self._batch_results.get('comac', {})
+            for pt in comac_res.get('coords_absents', []):
+                sources['comac']['points'].append(pt)
+
+            # CAP_FT absents with coords (future: DMS WGS84 parsing)
+            capft_res = self._batch_results.get('capft', {})
+            for pt in capft_res.get('coords_absents', []):
+                sources['capft']['points'].append(pt)
+
+            for src_key, src_data in sources.items():
+                pts = src_data['points']
+                if not pts:
+                    continue
+
+                lyr = QgsVectorLayer(
+                    "Point?crs=EPSG:2154", src_data['layer_name'], "memory"
+                )
+                pr = lyr.dataProvider()
+                pr.addAttributes([
+                    QgsField("nom", QVariant.String),
+                    QgsField("source", QVariant.String),
+                    QgsField("fichier", QVariant.String),
+                ])
+                lyr.updateFields()
+
+                features = []
+                for pt in pts:
+                    feat = QgsFeature(lyr.fields())
+                    feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(pt['x'], pt['y'])))
+                    feat.setAttribute("nom", pt['nom'])
+                    feat.setAttribute("source", src_key.upper())
+                    feat.setAttribute("fichier", pt['fichier'])
+                    features.append(feat)
+
+                pr.addFeatures(features)
+                lyr.updateExtents()
+                QgsProject.instance().addMapLayer(lyr)
+
+                # Appliquer le style QML
+                qml_path = src_data['style']
+                if os.path.exists(qml_path):
+                    lyr.loadNamedStyle(qml_path)
+                    lyr.triggerRepaint()
+
+                self._dlg.log_message(
+                    f"Couche '{src_data['layer_name']}': {len(features)} poteaux absents positionnes",
+                    'success'
+                )
+
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erreur creation couche absents: {e}", "PoleAerien", Qgis.Warning
+            )
 
     def _on_batch_cancelled(self):
         self._cleanup_project_mode_layers()
@@ -565,10 +899,24 @@ class BatchOrchestrator(QObject):
             )
             self._pm_lyr_com = None
 
-        # Start the batch now that layers are ready
+        # Data quality checks on loaded layers (Mode Projet)
         keys = self._pending_module_keys
         self._pending_module_keys = None
         if keys:
+            blockers = self._preflight_data_quality(keys)
+            if blockers:
+                self._dlg.log_message(
+                    f"Qualite donnees : {len(blockers)} probleme(s) bloquant(s)",
+                    'error'
+                )
+                for b in blockers:
+                    self._dlg.log_message(f"  {b}", 'error')
+                self._dlg.log_message(
+                    "Corrigez ces problemes puis relancez l'analyse.", 'error'
+                )
+                self._cleanup_project_mode_layers()
+                self._dlg.reset_after_batch()
+                return
             self._runner.start(keys)
 
     def _on_layers_load_failed(self):
@@ -808,7 +1156,9 @@ class BatchOrchestrator(QObject):
             lyr_pot, lyr_comac, col_comac,
             det.comac_dir, export_dir,
             fddcpi_cache=fddcpi,
-            sro_appuis_cache=sro_appuis
+            sro_appuis_cache=sro_appuis,
+            be_type=self._be_type,
+            gracethd_dir=self._gracethd_dir
         )
 
     def _on_comac_analysis(self, result):
@@ -940,6 +1290,12 @@ class BatchOrchestrator(QObject):
         if self._sro_appuis_cache:
             params['sro_appuis_cache'] = self._sro_appuis_cache
 
+        # BE type routing (Axione -> GraceTHD)
+        params['be_type'] = self._be_type
+        params['gracethd_dir'] = self._gracethd_dir
+        # En batch, pas d'export individuel: tout va dans le rapport unifie
+        params['skip_individual_export'] = True
+
         c6_path = det.c6_dir
         self._police_wf.reset_logic()
 
@@ -976,14 +1332,15 @@ class BatchOrchestrator(QObject):
         self._current_done_cb = on_done
         det = self._detection()
 
-        if not det.has_c6:
+        if not det.has_c6 and not det.has_c6_annexe:
             on_done(False, "Dossier C6 non détecté")
             return
 
-        # Build params from detected files
+        # Prefer c6_annexe_file (standalone C6 folder/file) over c6_dir search
         c6_file = ''
-        if os.path.isdir(det.c6_dir):
-            # Find first xlsx in c6 dir
+        if det.has_c6_annexe:
+            c6_file = det.c6_annexe_file
+        elif os.path.isdir(det.c6_dir):
             for f in sorted(os.listdir(det.c6_dir)):
                 if f.lower().endswith('.xlsx'):
                     c6_file = os.path.join(det.c6_dir, f)
@@ -1010,6 +1367,7 @@ class BatchOrchestrator(QObject):
         if lyr_cap:
             params['table_decoupage'] = lyr_cap.name()
             params['champs_dcp'] = self._auto_field(lyr_cap)
+            params['valeur_dcp'] = '%'
 
         if det.has_c3a:
             params['fichier_c3a'] = det.c3a_file

@@ -1513,9 +1513,9 @@
     <!-- Hero -->
     <header class="hero" id="demarrage" style="scroll-margin-top: 0;">
         <div class="hero-content">
-            <span class="hero-badge">Plugin QGIS v3.0</span>
+            <span class="hero-badge">Plugin QGIS v3.1</span>
             <h1>Pole Aerien</h1>
-            <p>Controle qualite et analyse des poteaux aeriens ENEDIS (FT/BT). 6 modules d'analyse, execution par lot, rapports Excel.</p>
+            <p>Controle qualite et analyse des poteaux aeriens ENEDIS (FT/BT). 6 modules d'analyse, Mode Projet BDD, GraceTHD Axione, execution par lot, rapports Excel unifies.</p>
             <div class="hero-buttons">
                 <a href="#reference" class="btn btn-primary">
                     Decouvrir
@@ -1553,7 +1553,7 @@
                         <img src="../images/icon-success.svg" alt="Validation" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Verification CAP_FT</h3>
-                    <p>Comparaison des poteaux FT de la base de donnees QGIS avec les fiches appuis du dossier CAP FT. Detection des ecarts et generation de rapport Excel.</p>
+                    <p>Comparaison des poteaux FT vs fiches appuis. Extraction single-pass unifiee (doublons, hors-etude, dico poteaux, terrains prives). Normalisation robuste via <code>normalize_appui_num()</code>.</p>
                 </article>
 
                 <article class="card animate-in delay-2">
@@ -1561,7 +1561,7 @@
                         <img src="../images/icon-database.svg" alt="Database" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Controle COMAC</h3>
-                    <p>Validation croisee des poteaux BT avec les exports COMAC. Verification des cables via PostgreSQL natif (schema comac), comparaison capacites et detection anomalies.</p>
+                    <p>Validation BT + VérifCabCOMAC (fddcpiax, CDI+posemode, capacites). Verification boitiers fibre optique (col AR). Filtrage poteaux par SRO. PostgreSQL natif (schema comac).</p>
                 </article>
 
                 <article class="card animate-in delay-3">
@@ -1569,7 +1569,7 @@
                         <img src="../images/icon-chart.svg" alt="Chart" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Comparaison C6 vs BD</h3>
-                    <p>Croisement asynchrone des annexes C6 Excel avec les couches QGIS via QgsSpatialIndex. Auto-detection des fichiers C6 par nom d'etude. Export rapport Excel.</p>
+                    <p>Extraction IN+OUT single-pass via <code>QgsSpatialIndex</code>. Auto-detection champ etude centralise. Hors-perimetre explicit. Deduplication fichiers output.</p>
                 </article>
 
                 <article class="card animate-in">
@@ -1577,15 +1577,15 @@
                         <img src="../images/icon-search.svg" alt="Search" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Police C6</h3>
-                    <p>Analyse complete via fddcpi2 : SRO, cables decoupes PostgreSQL, intersection appuis, comparaison C6. Filtres CDI/posemode, exclusion appuis EDF, verification securite NFC.</p>
+                    <p>Analyse via fddcpiax (NGE auto + Axione ST_Snap). Filtrage bold-only cables C6. Attaches-aware detection (cables + BPE). Compteur par etude. Exclusion appuis EDF. Securite NFC.</p>
                 </article>
 
                 <article class="card animate-in delay-1">
                     <div class="card-icon blue">
                         <img src="../images/icon-folder-open.svg" alt="Folder" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
-                    <h3>Interface unifiee</h3>
-                    <p>Un seul dialog pour tout : selection du dossier projet, detection automatique des fichiers, choix des modules, execution sequentielle et journal en temps reel.</p>
+                    <h3>Mode Projet (BDD)</h3>
+                    <p>Chargement couches PostgreSQL par SRO derive du nom de dossier. Layers async en background. Disambiguation inline si multi-candidats. Persistance etat via QgsSettings.</p>
                 </article>
 
                 <article class="card animate-in delay-2">
@@ -1593,7 +1593,23 @@
                         <img src="../images/icon-warning.svg" alt="Security" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Verification Securite</h3>
-                    <p>Controle automatique des portees cables selon norme NFC 11201-A1 et zones climatiques ZVN/ZVF. Integration dans les rapports Police C6 et COMAC.</p>
+                    <p>Controle portees cables NFC 11201-A1. Zones ZVN/ZVF. Guards division par zero. Rapport unifie multi-modules avec KPI agreges et checks diagnostiques.</p>
+                </article>
+
+                <article class="card animate-in delay-3">
+                    <div class="card-icon green">
+                        <img src="../images/icon-success.svg" alt="GraceTHD" width="28" height="28" style="filter: brightness(0) invert(1);">
+                    </div>
+                    <h3>GraceTHD Axione</h3>
+                    <p>Pipeline alternatif pour SRO Axione via fichiers locaux SHP+CSV. Detection auto NGE vs Axione. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie. Match mode ligne.</p>
+                </article>
+
+                <article class="card animate-in">
+                    <div class="card-icon purple">
+                        <img src="../images/icon-chart.svg" alt="Diagnostic" width="28" height="28" style="filter: brightness(0) invert(1);">
+                    </div>
+                    <h3>Diagnostic et Preflight</h3>
+                    <p>Mode diagnostic 6 sections (structure, detection, couches, export, PG, modules). Preflight global avant batch. Messages actionnables. Tooltips prerequis par module.</p>
                 </article>
             </div>
         </section>
@@ -1602,12 +1618,12 @@
         <div class="counter-section">
             <div class="counter-grid">
                 <div class="counter-item">
-                    <div class="counter-number" data-target="11900">0</div>
+                    <div class="counter-number" data-target="10500">0</div>
                     <div class="counter-label">Lignes de code</div>
-                    <div class="counter-sublabel">Python pur (hors auto-gen)</div>
+                    <div class="counter-sublabel">Python pur (-1400 lignes dead code)</div>
                 </div>
                 <div class="counter-item">
-                    <div class="counter-number" data-target="34">0</div>
+                    <div class="counter-number" data-target="26">0</div>
                     <div class="counter-label">Fichiers Python</div>
                     <div class="counter-sublabel">Architecture modulaire</div>
                 </div>
@@ -1617,9 +1633,9 @@
                     <div class="counter-sublabel">QgsTask + signaux Qt</div>
                 </div>
                 <div class="counter-item">
-                    <div class="counter-number" data-target="591">0</div>
-                    <div class="counter-label">Cables references</div>
-                    <div class="counter-sublabel">PostgreSQL (schema comac)</div>
+                    <div class="counter-number" data-target="4">0</div>
+                    <div class="counter-label">Sprints optimisation</div>
+                    <div class="counter-sublabel">-30% a -40% temps batch</div>
                 </div>
                 <div class="counter-item">
                     <div class="counter-number" data-target="6">0</div>
@@ -1633,7 +1649,7 @@
         <section id="reference" style="margin-top: 4rem;">
             <div class="section-header">
                 <h2>Architecture et fichiers</h2>
-                <p>Vue d'ensemble des composants du plugin v3.0</p>
+                <p>Vue d'ensemble des composants du plugin v3.1</p>
             </div>
 
             <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -1678,14 +1694,14 @@
                             <td><strong>COMAC</strong></td>
                             <td><code>Comac.py</code></td>
                             <td><code>comac_workflow.py</code></td>
-                            <td>Validation BT + VérifCabCOMAC (fddcpi2, CDI+posemode, capacites), PostgreSQL schema comac</td>
+                            <td>Validation BT + VérifCabCOMAC (fddcpiax, CDI+posemode, capacites, boitiers FO), PostgreSQL schema comac</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-blue">4</span></td>
                             <td><strong>Police C6</strong></td>
                             <td><code>PoliceC6.py</code></td>
                             <td><code>police_workflow.py</code></td>
-                            <td>Analyse fddcpi2 complete, filtres spatiaux bbox, CDI/posemode, exclusion EDF, securite NFC</td>
+                            <td>Analyse fddcpiax complete, bold-only C6, attaches-aware, CDI/posemode, exclusion EDF, securite NFC</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-orange">5</span></td>
@@ -1725,7 +1741,7 @@
                         <tr>
                             <td><span class="badge badge-blue">UI</span></td>
                             <td><code>batch_orchestrator.py</code></td>
-                            <td>Pont dialog-workflows, cache fddcpi2 inter-modules, parametres</td>
+                            <td>Pont dialog-workflows, caches fddcpi2/SRO/appuis_wkb inter-modules, preflight, recap post-batch</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-blue">UI</span></td>
@@ -1735,7 +1751,7 @@
                         <tr>
                             <td><span class="badge badge-blue">UI</span></td>
                             <td><code>project_detector.py</code></td>
-                            <td>Auto-detection structure projet (FT-BT KO, CAP FT, COMAC, GraceTHD, C7, C3A)</td>
+                            <td>Auto-detection structure projet, SRO extraction, multi-candidats, deduplication, diagnostics</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-green">Async</span></td>
@@ -1759,13 +1775,13 @@
                         </tr>
                         <tr>
                             <td><span class="badge badge-orange">Regles</span></td>
-                            <td><code>comac_loader.py</code></td>
-                            <td>Fusion PCM + Excel COMAC, detection automatique zones ZVF/ZVN</td>
+                            <td><code>gracethd_reader.py</code></td>
+                            <td>GraceTHDReader : cables, BPE, poteaux depuis fichiers SHP+CSV locaux (Axione)</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-orange">Regles</span></td>
                             <td><code>cable_analyzer.py</code></td>
-                            <td>Comptage cables par appui, filtre CDI + posemode(1,2), capacites_compatibles()</td>
+                            <td>Comptage cables par appui, CDI+posemode, group_by_gid, attaches, comparer_source_cables()</td>
                         </tr>
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
@@ -1775,7 +1791,7 @@
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
                             <td><code>db_connection.py</code></td>
-                            <td>Connexion psycopg2 auto (credentials QGIS), fddcpi2() cables decoupes</td>
+                            <td>Connexion psycopg2 auto (credentials QGIS), fddcpiax() (NGE auto + Axione ST_Snap)</td>
                         </tr>
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
@@ -1789,8 +1805,18 @@
                         </tr>
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
-                            <td><code>excel_helpers.py</code></td>
-                            <td>Utilitaires export Excel (openpyxl), formatage feuilles rapport</td>
+                            <td><code>unified_report.py</code></td>
+                            <td>Rapport unifie multi-modules : KPI agreges, checks diagnostiques, export Excel</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
+                            <td><code>db_layer_loader.py</code></td>
+                            <td>Mode Projet : chargement couches PostgreSQL filtrees par SRO (infra_pt_pot, etudes)</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
+                            <td><code>dataclasses_results.py</code></td>
+                            <td>Dataclasses structurees pour resultats inter-modules</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1871,9 +1897,9 @@
                 <div class="timeline-item">
                     <div class="timeline-dot" style="background: #10b981; width: 24px; height: 24px; box-shadow: 0 0 25px rgba(16,185,129,0.6);"></div>
                     <div class="timeline-content" style="border-color: #10b981;">
-                        <span class="timeline-date" style="background: #d1fae5; color: #059669;">Fevrier 2026</span>
-                        <h4>v3.0 - Interface unifiee</h4>
-                        <p><strong>Reecriture complete de l'interface :</strong> suppression de l'ancien dialog a onglets (PoleAerienDialog, UIStateController, LogManager, ui_pages, ui_feedback, aboutdialog). Nouveau dialog unique PoleAerienDialogV2 avec detection automatique du projet, execution par lot sequentielle via BatchRunner + BatchOrchestrator. PoleAerien.py reduit de 2100 a 128 lignes. 11 fichiers obsoletes supprimes.</p>
+                        <span class="timeline-date" style="background: #d1fae5; color: #059669;">Mars 2026</span>
+                        <h4>v3.1 - GraceTHD, Mode Projet, Optimisations</h4>
+                        <p><strong>Pipeline GraceTHD Axione</strong> (SHP+CSV locaux, fddcpiax ST_Snap). <strong>Mode Projet BDD</strong> (layers async PostgreSQL par SRO). <strong>4 sprints optimisation</strong> : caches inter-modules (fddcpi2, SRO, appuis_wkb, CRS), extractions single-pass, centralisation credentials PG. <strong>Police C6</strong> : bold-only C6, attaches-aware, compteur etudes. <strong>COMAC</strong> : boitiers FO, group_by_gid. <strong>UX</strong> : disambiguation inline, diagnostic 6 sections, preflight, refresh, persistance etat, liens cliquables. Dead code -1400 lignes.</p>
                         <span class="timeline-badge" style="background: rgba(16,185,129,0.15); color: #10b981;">ACTUELLE</span>
                     </div>
                 </div>
@@ -1881,9 +1907,9 @@
                 <div class="timeline-item">
                     <div class="timeline-dot" style="background: #a855f7;"></div>
                     <div class="timeline-content" style="border-color: #a855f7;">
-                        <span class="timeline-date" style="background: #f3e8ff; color: #7c3aed;">Janvier 2026</span>
-                        <h4>v2.3.0 - Refactoring Majeur</h4>
-                        <p><strong>Architecture Workflows :</strong> God Object decouple en 6 workflows async. Police C6 : filtres spatiaux bbox, CDI/posemode, exclusion EDF. MAJ BD : chemin unique SQL background. COMAC : migration PostgreSQL. Suppression 900+ lignes dead code.</p>
+                        <span class="timeline-date" style="background: #f3e8ff; color: #7c3aed;">Fevrier 2026</span>
+                        <h4>v3.0 - Interface unifiee</h4>
+                        <p><strong>Reecriture complete de l'interface :</strong> PoleAerienDialogV2 avec detection automatique du projet, execution par lot sequentielle via BatchRunner + BatchOrchestrator. PoleAerien.py reduit de 2100 a 128 lignes. 11 fichiers obsoletes supprimes. Architecture Workflows : God Object decouple en 6 workflows async.</p>
                     </div>
                 </div>
 
@@ -2211,29 +2237,29 @@
                         <div class="card-icon blue">
                             <img src="../images/icon-folder-open.svg" alt="Folder" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
-                        <h3>Dossier projet</h3>
-                        <p>Selection du dossier projet avec detection automatique de la structure (FT-BT KO, CAP FT, COMAC, GraceTHD, C7, C3A). Dossier d'export configurable separement.</p>
+                        <h3>Detection intelligente</h3>
+                        <p>Auto-detection projet (FT-BT KO, CAP FT, COMAC, GraceTHD, C6, C3A, C7). Patterns elargis (ETUDE COMAC, KPFT). Deduplication fichiers output. Bouton refresh pour resync.</p>
                     </div>
                     <div class="card">
                         <div class="card-icon green">
                             <img src="../images/icon-layers.svg" alt="Layers" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
-                        <h3>Couches QGIS</h3>
-                        <p>3 QgsMapLayerComboBox avec auto-detection : <code>infra_pt_pot</code> (points), <code>etude_cap_ft</code> (polygones), <code>etude_comac</code> (polygones). Filtres par type de geometrie.</p>
+                        <h3>Mode Projet (BDD)</h3>
+                        <p>Toggle "Couches QGIS" / "Mode Projet". SRO derive du nom de dossier (63041-B1I-PMZ-00003). Chargement async couches PostgreSQL. Option "Charger dans le projet".</p>
                     </div>
                     <div class="card">
                         <div class="card-icon purple">
                             <img src="../images/icon-check.svg" alt="Check" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
-                        <h3>Modules d'analyse</h3>
-                        <p>6 modules avec cases a cocher, auto-coches selon la detection. Boutons "Tout cocher / Tout decocher". Indicateurs [OK] / [--] par module.</p>
+                        <h3>Disambiguation et Diagnostic</h3>
+                        <p>Dropdowns inline si multi-candidats (COMAC, CAP FT, C7, C3A). Bouton Diagnostic : rapport 6 sections. Preflight global. Tooltips prerequis. Persistance etat QgsSettings.</p>
                     </div>
                     <div class="card">
                         <div class="card-icon orange">
                             <img src="../images/icon-chart.svg" alt="Log" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
-                        <h3>Journal et progression</h3>
-                        <p>QTextBrowser avec messages colores (info/succes/warning/erreur). Barre de progression animee (SmoothProgressController). Export du journal en fichier texte.</p>
+                        <h3>Journal et resultats</h3>
+                        <p>Liens cliquables vers rapports Excel. Compteur etude Police C6 [i/N]. Recap post-batch avec metriques. Progression SmoothProgressController. Export log texte.</p>
                     </div>
                 </div>
 
@@ -2241,15 +2267,19 @@
                     <h4 style="margin-bottom: 1rem; font-size: 1rem;">Structure du dossier projet attendue</h4>
                     <div class="code-block">
                         <code>
-<span class="code-string">63041-B1I-PMZ-00003/</span>
+<span class="code-string">63041-B1I-PMZ-00003/</span>              <span class="code-comment">-- SRO = 63041/B1I/PMZ/00003</span>
   <span class="code-function">FT-BT KO B1L_00003.xlsx</span>       <span class="code-comment">-- MAJ BD</span>
   <span class="code-function">CAP FT/</span>                        <span class="code-comment">-- CAP_FT + C6 browse dir</span>
     CMD 1/
       FTTH-NGE-ETUDE-B1L-63041-7/  <span class="code-comment">-- Annexe C6 = study xlsx</span>
     CMD 2/...
-  <span class="code-function">COMAC/</span>                         <span class="code-comment">-- COMAC</span>
+  <span class="code-function">COMAC/</span>                         <span class="code-comment">-- COMAC (ou ETUDE COMAC, ETUDE-COMAC)</span>
+  <span class="code-function">C6/</span>                            <span class="code-comment">-- Standalone C6 (si present)</span>
+  <span class="code-function">C3A/</span>                           <span class="code-comment">-- Annexe C3A</span>
+  <span class="code-function">C7/</span>                            <span class="code-comment">-- Annexe C7</span>
   <span class="code-function">BASE DE DONNEES/</span>
-    <span class="code-function">NGE/</span>                         <span class="code-comment">-- GraceTHD (bpe.shp, t_cheminement.shp)</span>
+    <span class="code-function">NGE/</span>                         <span class="code-comment">-- GraceTHD NGE (bpe.shp, t_cheminement.shp)</span>
+  <span class="code-function">GRACE_APD_DTR_*/</span>               <span class="code-comment">-- GraceTHD Axione (SHP+CSV a plat)</span>
                         </code>
                     </div>
                 </div>
@@ -2277,7 +2307,7 @@
             <div id="diagram-layers" class="diagram-panel">
                 <div class="diagram-container">
                     <h3 class="diagram-title">Architecture applicative en couches</h3>
-                    <svg class="architecture-svg" viewBox="0 0 1100 800" xmlns="http://www.w3.org/2000/svg" style="max-height: 820px;">
+                    <svg class="architecture-svg" viewBox="0 0 1100 840" xmlns="http://www.w3.org/2000/svg" style="max-height: 860px;">
                         <defs>
                             <marker id="arrow-dep" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                                 <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
@@ -2436,11 +2466,11 @@
                             <text x="340" y="570" text-anchor="middle" fill="#fde68a" font-size="7">ISO-8859-1</text>
 
                             <rect x="440" y="505" width="160" height="75" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="520" y="522" text-anchor="middle" fill="white" font-size="11" font-weight="600">comac_loader.py</text>
-                            <text x="520" y="535" text-anchor="middle" fill="#fef3c7" font-size="8">load_etude_comac()</text>
-                            <text x="520" y="545" text-anchor="middle" fill="#fef3c7" font-size="8">Fusion PCM+Excel</text>
-                            <text x="520" y="555" text-anchor="middle" fill="#fef3c7" font-size="8">Détection ZVF/ZVN</text>
-                            <text x="520" y="570" text-anchor="middle" fill="#fde68a" font-size="7">Auto-detect zones</text>
+                            <text x="520" y="522" text-anchor="middle" fill="white" font-size="11" font-weight="600">gracethd_reader.py</text>
+                            <text x="520" y="535" text-anchor="middle" fill="#fef3c7" font-size="8">GraceTHDReader</text>
+                            <text x="520" y="545" text-anchor="middle" fill="#fef3c7" font-size="8">SHP+CSV locaux</text>
+                            <text x="520" y="555" text-anchor="middle" fill="#fef3c7" font-size="8">Cables, BPE, poteaux</text>
+                            <text x="520" y="570" text-anchor="middle" fill="#fde68a" font-size="7">Pipeline Axione</text>
                         </g>
 
                         <!-- Flèche Règles → Données -->
@@ -2448,62 +2478,72 @@
 
                         <!-- COUCHE 5: DONNÉES -->
                         <g class="node">
-                            <rect x="50" y="610" width="1000" height="110" rx="12" fill="url(#grad-data)" stroke="#dc2626" stroke-width="2" opacity="0.95"/>
+                            <rect x="50" y="610" width="1000" height="150" rx="12" fill="url(#grad-data)" stroke="#dc2626" stroke-width="2" opacity="0.95"/>
                             <text x="80" y="635" font-weight="700" fill="white" font-size="16">COUCHE DONNÉES</text>
                             
-                            <rect x="80" y="650" width="200" height="65" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="180" y="667" text-anchor="middle" fill="white" font-size="11" font-weight="600">comac_db_reader.py</text>
-                            <text x="180" y="680" text-anchor="middle" fill="#fee2e2" font-size="8">get_cable_capacite()</text>
-                            <text x="180" y="690" text-anchor="middle" fill="#fee2e2" font-size="8">get_zone_vent_*()</text>
-                            <text x="180" y="700" text-anchor="middle" fill="#fee2e2" font-size="8">Cache thread-safe</text>
+                            <rect x="80" y="645" width="145" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
+                            <text x="152" y="662" text-anchor="middle" fill="white" font-size="10" font-weight="600">comac_db_reader</text>
+                            <text x="152" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">PG only | cache</text>
+                            <text x="152" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">591 cables references</text>
 
-                            <rect x="300" y="650" width="120" height="65" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="360" y="667" text-anchor="middle" fill="white" font-size="10" font-weight="600">PostgreSQL</text>
-                            <text x="360" y="680" text-anchor="middle" fill="#fee2e2" font-size="8">cables (591)</text>
-                            <text x="360" y="690" text-anchor="middle" fill="#fee2e2" font-size="8">hypotheses</text>
-                            <text x="360" y="700" text-anchor="middle" fill="#fee2e2" font-size="8">schema comac</text>
+                            <rect x="235" y="645" width="110" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
+                            <text x="290" y="662" text-anchor="middle" fill="white" font-size="10" font-weight="600">fddcpiax()</text>
+                            <text x="290" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">NGE + Axione</text>
+                            <text x="290" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">ST_Snap 0.70m</text>
 
-                            <rect x="440" y="650" width="120" height="65" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="500" y="667" text-anchor="middle" fill="white" font-size="10" font-weight="600">fddcpi2()</text>
-                            <text x="500" y="680" text-anchor="middle" fill="#fee2e2" font-size="8">cables decoupes</text>
-                            <text x="500" y="690" text-anchor="middle" fill="#fee2e2" font-size="8">cab_type, posemode</text>
-                            <text x="500" y="700" text-anchor="middle" fill="#fee2e2" font-size="8">SQL function PG</text>
+                            <rect x="355" y="645" width="120" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
+                            <text x="415" y="662" text-anchor="middle" fill="white" font-size="10" font-weight="600">Couches QGIS</text>
+                            <text x="415" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">infra_pt_pot</text>
+                            <text x="415" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">etude_cap_ft/comac</text>
 
-                            <rect x="580" y="650" width="140" height="65" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="650" y="667" text-anchor="middle" fill="white" font-size="10" font-weight="600">Couches QGIS</text>
-                            <text x="650" y="680" text-anchor="middle" fill="#fee2e2" font-size="8">infra_pt_pot</text>
-                            <text x="650" y="690" text-anchor="middle" fill="#fee2e2" font-size="8">etude_cap_ft</text>
-                            <text x="650" y="700" text-anchor="middle" fill="#fee2e2" font-size="8">EPSG:2154</text>
+                            <rect x="485" y="645" width="120" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
+                            <text x="545" y="662" text-anchor="middle" fill="white" font-size="10" font-weight="600">Fichiers Excel</text>
+                            <text x="545" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">FT/BT, C6, C3A</text>
+                            <text x="545" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">C7, CAP_FT, COMAC</text>
 
-                            <rect x="740" y="650" width="120" height="65" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
-                            <text x="800" y="667" text-anchor="middle" fill="white" font-size="10" font-weight="600">Fichiers Excel</text>
-                            <text x="800" y="680" text-anchor="middle" fill="#fee2e2" font-size="8">FT/BT KO</text>
-                            <text x="800" y="690" text-anchor="middle" fill="#fee2e2" font-size="8">C6, C3A, C7</text>
-                            <text x="800" y="700" text-anchor="middle" fill="#fee2e2" font-size="8">CAP_FT, COMAC</text>
+                            <rect x="615" y="645" width="130" height="55" rx="6" fill="rgba(255,255,255,0.25)" stroke="#fbbf24" stroke-width="1.5"/>
+                            <text x="680" y="662" text-anchor="middle" fill="#fde68a" font-size="10" font-weight="600">db_layer_loader</text>
+                            <text x="680" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">Mode Projet BDD</text>
+                            <text x="680" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">PG layers par SRO</text>
+
+                            <rect x="755" y="645" width="140" height="55" rx="6" fill="rgba(255,255,255,0.25)" stroke="#fbbf24" stroke-width="1.5"/>
+                            <text x="825" y="662" text-anchor="middle" fill="#fde68a" font-size="10" font-weight="600">GraceTHD (SHP)</text>
+                            <text x="825" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">gracethd_reader.py</text>
+                            <text x="825" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">Axione locaux</text>
+
+                            <rect x="905" y="645" width="130" height="55" rx="6" fill="rgba(255,255,255,0.25)" stroke="#fbbf24" stroke-width="1.5"/>
+                            <text x="970" y="662" text-anchor="middle" fill="#fde68a" font-size="10" font-weight="600">unified_report</text>
+                            <text x="970" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">Rapport multi-modules</text>
+                            <text x="970" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">KPI + checks + export</text>
+
+                            <!-- v3.1 tag -->
+                            <rect x="80" y="710" width="955" height="22" rx="4" fill="rgba(255,255,255,0.08)"/>
+                            <text x="100" y="725" fill="#fde68a" font-size="8" font-weight="600">v3.1</text>
+                            <text x="140" y="725" fill="#fecaca" font-size="8">Bordures jaunes = nouveaux composants v3.1 (db_layer_loader, gracethd_reader, unified_report)</text>
                         </g>
 
                         <!-- Annotations statistiques -->
                         <g opacity="0.9">
-                            <rect x="50" y="735" width="1000" height="50" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+                            <rect x="50" y="775" width="1000" height="50" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
                             <!-- Chart icon SVG -->
-                            <g transform="translate(80, 745)">
+                            <g transform="translate(80, 785)">
                                 <rect x="0" y="8" width="3" height="8" fill="#3b82f6" rx="1"/>
                                 <rect x="5" y="4" width="3" height="12" fill="#3b82f6" rx="1"/>
                                 <rect x="10" y="0" width="3" height="16" fill="#3b82f6" rx="1"/>
                             </g>
-                            <text x="100" y="757" font-weight="600" fill="#334155" font-size="11">Statistiques v3.0</text>
-                            <text x="250" y="757" fill="#64748b" font-size="10">~24 fichiers Python</text>
-                            <text x="400" y="757" fill="#64748b" font-size="10">~9500 lignes</text>
-                            <text x="520" y="757" fill="#64748b" font-size="10">6 workflows</text>
-                            <text x="640" y="757" fill="#64748b" font-size="10">6 modules métier</text>
-                            <text x="790" y="757" fill="#64748b" font-size="10">Thread-safe async</text>
-                            <g transform="translate(940, 747)">
+                            <text x="100" y="797" font-weight="600" fill="#334155" font-size="11">Statistiques v3.1</text>
+                            <text x="250" y="797" fill="#64748b" font-size="10">~26 fichiers Python</text>
+                            <text x="400" y="797" fill="#64748b" font-size="10">~10500 lignes</text>
+                            <text x="520" y="797" fill="#64748b" font-size="10">6 workflows</text>
+                            <text x="640" y="797" fill="#64748b" font-size="10">6 modules métier</text>
+                            <text x="790" y="797" fill="#64748b" font-size="10">Thread-safe async</text>
+                            <g transform="translate(940, 787)">
                                 <circle cx="5" cy="5" r="8" fill="#10b981"/>
                                 <polyline points="2,5 4.5,7.5 8,3" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </g>
-                            <text x="960" y="757" fill="#10b981" font-size="10" font-weight="600">QGIS 3.28+</text>
+                            <text x="960" y="797" fill="#10b981" font-size="10" font-weight="600">QGIS 3.28+</text>
                             
-                            <text x="80" y="775" fill="#94a3b8" font-size="9">Architecture en 5 couches : UI → Workflows → Métier → Règles → Données</text>
+                            <text x="80" y="815" fill="#94a3b8" font-size="9">Architecture en 5 couches : UI → Workflows → Métier → Règles → Données</text>
                         </g>
                     </svg>
 
@@ -2532,235 +2572,320 @@
                 </div>
             </div>
 
-            <!-- Global Architecture Diagram - Clean Hierarchical Flow -->
+            <!-- Global Architecture Diagram - v3.1 Complete -->
             <div id="diagram-global" class="diagram-panel active">
                 <div class="diagram-container" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border: none;">
-                    <h3 class="diagram-title" style="color: white;">Vue d'ensemble - Architecture en flux (v3.0)</h3>
-                    <svg class="architecture-svg" viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg">
+                    <h3 class="diagram-title" style="color: white;">Vue d'ensemble - Architecture en flux (v3.1)</h3>
+                    <svg class="architecture-svg" viewBox="0 0 1200 820" xmlns="http://www.w3.org/2000/svg" style="max-height: 840px;">
                         <defs>
-                            <!-- Gradients modernes -->
-                            <linearGradient id="grad-core" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
-                            </linearGradient>
-                            <linearGradient id="grad-gold" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1" />
-                            </linearGradient>
-                            <linearGradient id="grad-emerald" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#34d399;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
-                            </linearGradient>
-                            <linearGradient id="grad-violet" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
-                            </linearGradient>
-                            <filter id="glow-blue" x="-50%" y="-50%" width="200%" height="200%">
-                                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                                <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                            </filter>
-                            <filter id="glow-gold" x="-50%" y="-50%" width="200%" height="200%">
-                                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                                <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                            </filter>
-                            <marker id="arrow-neon" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
-                                <polygon points="0 0, 12 4, 0 8" fill="#60a5fa"/>
-                            </marker>
+                            <linearGradient id="grad-core" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1"/><stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1"/></linearGradient>
+                            <linearGradient id="grad-gold" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1"/><stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1"/></linearGradient>
+                            <linearGradient id="grad-emerald" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#34d399;stop-opacity:1"/><stop offset="100%" style="stop-color:#10b981;stop-opacity:1"/></linearGradient>
+                            <linearGradient id="grad-violet" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1"/><stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1"/></linearGradient>
+                            <linearGradient id="grad-cyan" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1"/><stop offset="100%" style="stop-color:#06b6d4;stop-opacity:1"/></linearGradient>
+                            <linearGradient id="grad-rose" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#fb7185;stop-opacity:1"/><stop offset="100%" style="stop-color:#e11d48;stop-opacity:1"/></linearGradient>
+                            <filter id="glow-blue" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                            <filter id="glow-gold" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                            <marker id="arrow-neon" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0, 12 4, 0 8" fill="#60a5fa"/></marker>
+                            <marker id="arrow-cache" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b"/></marker>
+                            <marker id="arrow-out" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#10b981"/></marker>
                         </defs>
                         
-                        <!-- Background pattern -->
-                        <pattern id="grid-dark" width="40" height="40" patternUnits="userSpaceOnUse">
-                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
-                        </pattern>
-                        <rect width="1200" height="700" fill="url(#grid-dark)"/>
+                        <pattern id="grid-dark" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/></pattern>
+                        <rect width="1200" height="820" fill="url(#grid-dark)"/>
 
-                        <!-- Visual Zones (Background grouping) -->
-                        <rect x="30" y="150" width="180" height="400" rx="16" fill="rgba(251,191,36,0.08)" stroke="rgba(251,191,36,0.2)" stroke-width="1"/>
-                        <text x="120" y="180" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600">INPUTS</text>
+                        <!-- ===== ZONE BACKGROUNDS ===== -->
+                        <rect x="20" y="55" width="180" height="520" rx="16" fill="rgba(251,191,36,0.08)" stroke="rgba(251,191,36,0.2)" stroke-width="1"/>
+                        <text x="110" y="80" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600" letter-spacing="1">INPUTS</text>
                         
-                        <rect x="250" y="100" width="200" height="500" rx="16" fill="rgba(59,130,246,0.08)" stroke="rgba(59,130,246,0.2)" stroke-width="1"/>
-                        <text x="350" y="130" text-anchor="middle" fill="#60a5fa" font-size="10" font-weight="600">CORE</text>
+                        <rect x="220" y="30" width="240" height="570" rx="16" fill="rgba(59,130,246,0.08)" stroke="rgba(59,130,246,0.2)" stroke-width="1"/>
+                        <text x="340" y="50" text-anchor="middle" fill="#60a5fa" font-size="10" font-weight="600" letter-spacing="1">CORE + ORCHESTRATION</text>
                         
-                        <rect x="490" y="50" width="320" height="600" rx="16" fill="rgba(139,92,246,0.08)" stroke="rgba(139,92,246,0.2)" stroke-width="1"/>
-                        <text x="650" y="80" text-anchor="middle" fill="#a78bfa" font-size="10" font-weight="600">WORKFLOWS</text>
+                        <rect x="480" y="30" width="320" height="570" rx="16" fill="rgba(139,92,246,0.08)" stroke="rgba(139,92,246,0.2)" stroke-width="1"/>
+                        <text x="640" y="50" text-anchor="middle" fill="#a78bfa" font-size="10" font-weight="600" letter-spacing="1">WORKFLOWS</text>
                         
-                        <rect x="850" y="100" width="320" height="500" rx="16" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.2)" stroke-width="1"/>
-                        <text x="1010" y="130" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">MODULES</text>
+                        <rect x="820" y="30" width="360" height="570" rx="16" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.2)" stroke-width="1"/>
+                        <text x="1000" y="50" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600" letter-spacing="1">MODULES METIER</text>
 
-                        <!-- COLONNE 2: CORE -->
-                        <g class="node" filter="url(#glow-blue)">
-                            <rect x="270" y="280" width="160" height="140" rx="16" fill="url(#grad-core)" stroke="#60a5fa" stroke-width="3"/>
-                            <text x="350" y="310" text-anchor="middle" font-weight="700" fill="white" font-size="18">CORE</text>
-                            <text x="350" y="335" text-anchor="middle" fill="#bfdbfe" font-size="12">PoleAerien.py</text>
-                            <text x="350" y="355" text-anchor="middle" fill="#93c5fd" font-size="10">Point d'entree</text>
-                            <text x="350" y="375" text-anchor="middle" fill="#60a5fa" font-size="9">128 lignes</text>
-                        </g>
-
-                        <!-- COLONNE 3: WORKFLOWS (Centre) -->
-                        <g class="node">
-                            <rect x="520" y="150" width="240" height="60" rx="10" fill="rgba(251,191,36,0.2)" stroke="#fbbf24" stroke-width="2"/>
-                            <text x="550" y="175" text-anchor="start" font-weight="600" fill="#fbbf24" font-size="11">MajWorkflow</text>
-                            <text x="550" y="193" text-anchor="start" fill="#fde68a" font-size="8">maj_workflow.py</text>
-                            <circle cx="730" cy="180" r="18" fill="#fbbf24"/>
-                            <text x="730" y="186" text-anchor="middle" fill="#78350f" font-size="11" font-weight="700">0</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="520" y="225" width="240" height="60" rx="10" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="2"/>
-                            <text x="550" y="250" text-anchor="start" font-weight="600" fill="#34d399" font-size="11">CapFtWorkflow</text>
-                            <text x="550" y="268" text-anchor="start" fill="#a7f3d0" font-size="8">capft_workflow.py</text>
-                            <circle cx="730" cy="255" r="18" fill="#34d399"/>
-                            <text x="730" y="261" text-anchor="middle" fill="#064e3b" font-size="11" font-weight="700">2</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="520" y="300" width="240" height="60" rx="10" fill="rgba(59,130,246,0.2)" stroke="#3b82f6" stroke-width="2"/>
-                            <text x="550" y="325" text-anchor="start" font-weight="600" fill="#60a5fa" font-size="11">ComacWorkflow</text>
-                            <text x="550" y="343" text-anchor="start" fill="#bfdbfe" font-size="8">comac_workflow.py</text>
-                            <circle cx="730" cy="330" r="18" fill="#3b82f6"/>
-                            <text x="730" y="336" text-anchor="middle" fill="white" font-size="11" font-weight="700">3</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="520" y="375" width="240" height="60" rx="10" fill="rgba(236,72,153,0.2)" stroke="#ec4899" stroke-width="2"/>
-                            <text x="550" y="400" text-anchor="start" font-weight="600" fill="#f472b6" font-size="11">C6BdWorkflow</text>
-                            <text x="550" y="418" text-anchor="start" fill="#fbcfe8" font-size="8">c6bd_workflow.py</text>
-                            <circle cx="730" cy="405" r="18" fill="#ec4899"/>
-                            <text x="730" y="411" text-anchor="middle" fill="white" font-size="11" font-weight="700">1</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="520" y="450" width="240" height="60" rx="10" fill="rgba(139,92,246,0.2)" stroke="#8b5cf6" stroke-width="2"/>
-                            <text x="550" y="475" text-anchor="start" font-weight="600" fill="#a78bfa" font-size="11">C6C3AWorkflow</text>
-                            <text x="550" y="493" text-anchor="start" fill="#ddd6fe" font-size="8">c6c3a_workflow.py</text>
-                            <circle cx="730" cy="480" r="18" fill="#8b5cf6"/>
-                            <text x="730" y="486" text-anchor="middle" fill="white" font-size="11" font-weight="700">5</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="520" y="525" width="240" height="60" rx="10" fill="rgba(168,85,247,0.2)" stroke="#a855f7" stroke-width="2"/>
-                            <text x="550" y="550" text-anchor="start" font-weight="600" fill="#c084fc" font-size="11">PoliceWorkflow</text>
-                            <text x="550" y="568" text-anchor="start" fill="#e9d5ff" font-size="8">police_workflow.py</text>
-                            <circle cx="730" cy="555" r="18" fill="#a855f7"/>
-                            <text x="730" y="561" text-anchor="middle" fill="white" font-size="11" font-weight="700">4</text>
-                        </g>
-
-                        <!-- COLONNE 4: MODULES (Droite) -->
-                        <g class="node">
-                            <rect x="880" y="150" width="270" height="60" rx="10" fill="rgba(251,191,36,0.15)" stroke="#fbbf24" stroke-width="2"/>
-                            <text x="1015" y="175" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">MAJ FT/BT</text>
-                            <text x="1015" y="193" text-anchor="middle" fill="#fcd34d" font-size="9">Maj_Ft_Bt.py (800 lignes)</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="880" y="225" width="270" height="60" rx="10" fill="rgba(52,211,153,0.15)" stroke="#34d399" stroke-width="2"/>
-                            <text x="1015" y="250" text-anchor="middle" fill="#34d399" font-size="12" font-weight="600">CAP_FT</text>
-                            <text x="1015" y="268" text-anchor="middle" fill="#6ee7b7" font-size="9">CapFt.py (154 lignes)</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="880" y="300" width="270" height="60" rx="10" fill="rgba(59,130,246,0.15)" stroke="#3b82f6" stroke-width="2"/>
-                            <text x="1015" y="325" text-anchor="middle" fill="#60a5fa" font-size="12" font-weight="600">COMAC</text>
-                            <text x="1015" y="343" text-anchor="middle" fill="#93c5fd" font-size="9">Comac.py (564 lignes)</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="880" y="375" width="270" height="60" rx="10" fill="rgba(236,72,153,0.15)" stroke="#ec4899" stroke-width="2"/>
-                            <text x="1015" y="400" text-anchor="middle" fill="#f472b6" font-size="12" font-weight="600">C6 vs BD</text>
-                            <text x="1015" y="418" text-anchor="middle" fill="#f9a8d4" font-size="9">C6_vs_Bd.py (382 lignes)</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="880" y="450" width="270" height="60" rx="10" fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" stroke-width="2"/>
-                            <text x="1015" y="475" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="600">C6/C3A/C7/BD</text>
-                            <text x="1015" y="493" text-anchor="middle" fill="#c4b5fd" font-size="9">C6_vs_C3A_vs_Bd.py (406 lignes)</text>
-                        </g>
-
-                        <g class="node">
-                            <rect x="880" y="525" width="270" height="60" rx="10" fill="rgba(168,85,247,0.15)" stroke="#a855f7" stroke-width="2"/>
-                            <text x="1015" y="550" text-anchor="middle" fill="#c084fc" font-size="12" font-weight="600">Police C6</text>
-                            <text x="1015" y="568" text-anchor="middle" fill="#e9d5ff" font-size="9">PoliceC6.py (718 lignes)</text>
-                        </g>
-
-                        <!-- COLONNE 1: INPUTS (Gauche) -->
+                        <!-- ===== COLONNE 1: INPUTS ===== -->
                         <g class="node" filter="url(#glow-gold)">
-                            <rect x="50" y="200" width="140" height="70" rx="12" fill="url(#grad-gold)" stroke="#fbbf24" stroke-width="2"/>
-                            <text x="120" y="225" text-anchor="middle" font-weight="600" fill="#78350f" font-size="12">EXCEL</text>
-                            <text x="120" y="245" text-anchor="middle" fill="#92400e" font-size="9">FT/BT, C6</text>
-                            <text x="120" y="258" text-anchor="middle" fill="#a16207" font-size="9">C3A, C7</text>
+                            <rect x="35" y="100" width="150" height="70" rx="12" fill="url(#grad-gold)" stroke="#fbbf24" stroke-width="2"/>
+                            <text x="110" y="125" text-anchor="middle" font-weight="600" fill="#78350f" font-size="12">EXCEL</text>
+                            <text x="110" y="143" text-anchor="middle" fill="#92400e" font-size="9">FT/BT, C6, C3A, C7</text>
+                            <text x="110" y="158" text-anchor="middle" fill="#a16207" font-size="8">COMAC, CAP FT</text>
                         </g>
 
                         <g class="node">
-                            <rect x="50" y="290" width="140" height="70" rx="12" fill="url(#grad-emerald)" stroke="#34d399" stroke-width="2"/>
-                            <text x="120" y="315" text-anchor="middle" font-weight="600" fill="#064e3b" font-size="12">QGIS</text>
-                            <text x="120" y="335" text-anchor="middle" fill="#065f46" font-size="9">infra_pt_pot</text>
-                            <text x="120" y="348" text-anchor="middle" fill="#047857" font-size="9">études</text>
+                            <rect x="35" y="185" width="150" height="70" rx="12" fill="url(#grad-emerald)" stroke="#34d399" stroke-width="2"/>
+                            <text x="110" y="210" text-anchor="middle" font-weight="600" fill="#064e3b" font-size="12">QGIS LAYERS</text>
+                            <text x="110" y="228" text-anchor="middle" fill="#065f46" font-size="9">infra_pt_pot</text>
+                            <text x="110" y="243" text-anchor="middle" fill="#047857" font-size="8">etude_cap_ft / comac</text>
                         </g>
 
                         <g class="node">
-                            <rect x="50" y="380" width="140" height="70" rx="12" fill="rgba(99,102,241,0.8)" stroke="#818cf8" stroke-width="2"/>
-                            <text x="120" y="405" text-anchor="middle" font-weight="600" fill="white" font-size="12">COMAC_DB</text>
-                            <text x="120" y="425" text-anchor="middle" fill="#c7d2fe" font-size="9">PostgreSQL</text>
-                            <text x="120" y="438" text-anchor="middle" fill="#a5b4fc" font-size="9">591 câbles</text>
+                            <rect x="35" y="270" width="150" height="75" rx="12" fill="rgba(99,102,241,0.8)" stroke="#818cf8" stroke-width="2"/>
+                            <text x="110" y="295" text-anchor="middle" font-weight="600" fill="white" font-size="12">PostgreSQL</text>
+                            <text x="110" y="313" text-anchor="middle" fill="#c7d2fe" font-size="9">fddcpiax(SRO)</text>
+                            <text x="110" y="328" text-anchor="middle" fill="#a5b4fc" font-size="8">schema comac</text>
                         </g>
 
-
-                        <!-- UI Dialog (Haut) -->
+                        <!-- NEW: GraceTHD input -->
                         <g class="node">
-                            <rect x="270" y="150" width="160" height="80" rx="16" fill="url(#grad-violet)" stroke="#a78bfa" stroke-width="2"/>
-                            <text x="350" y="180" text-anchor="middle" font-weight="600" fill="white" font-size="13">INTERFACE UI</text>
-                            <text x="350" y="198" text-anchor="middle" fill="#ddd6fe" font-size="10">PoleAerienDialogV2</text>
-                            <text x="350" y="215" text-anchor="middle" fill="#c4b5fd" font-size="9">Dialog unifie</text>
+                            <rect x="35" y="360" width="150" height="70" rx="12" fill="url(#grad-cyan)" stroke="#22d3ee" stroke-width="2"/>
+                            <text x="110" y="385" text-anchor="middle" font-weight="600" fill="#083344" font-size="11">GraceTHD</text>
+                            <text x="110" y="403" text-anchor="middle" fill="#164e63" font-size="9">SHP + CSV locaux</text>
+                            <text x="110" y="418" text-anchor="middle" fill="#155e75" font-size="8">Axione (auto-detect)</text>
                         </g>
-                        <path d="M 350 230 L 350 280" stroke="#a78bfa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.7"/>
 
-                        <!-- CONNEXIONS: Inputs → CORE (simples flèches) -->
-                        <path d="M 190 235 L 270 320" stroke="#fbbf24" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
-                        <path d="M 190 325 L 270 340" stroke="#34d399" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
-                        <path d="M 190 415 L 270 380" stroke="#818cf8" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+                        <!-- NEW: Mode Projet BDD input -->
+                        <g class="node">
+                            <rect x="35" y="445" width="150" height="70" rx="12" fill="url(#grad-rose)" stroke="#fb7185" stroke-width="2"/>
+                            <text x="110" y="470" text-anchor="middle" font-weight="600" fill="white" font-size="11">MODE PROJET</text>
+                            <text x="110" y="488" text-anchor="middle" fill="#ffe4e6" font-size="9">db_layer_loader.py</text>
+                            <text x="110" y="503" text-anchor="middle" fill="#fecdd3" font-size="8">PG layers par SRO</text>
+                        </g>
 
-                        <!-- CONNEXIONS: CORE → Workflows (flèches horizontales) -->
-                        <path d="M 430 310 L 520 180" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
-                        <path d="M 430 330 L 520 255" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
-                        <path d="M 430 350 L 520 330" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
-                        <path d="M 430 370 L 520 405" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
-                        <path d="M 430 390 L 520 480" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
-                        <path d="M 430 410 L 520 555" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.6" class="flow-arrow"/>
+                        <!-- ===== COLONNE 2: CORE + ORCHESTRATION ===== -->
+                        <!-- UI Dialog -->
+                        <g class="node">
+                            <rect x="240" y="65" width="200" height="70" rx="14" fill="url(#grad-violet)" stroke="#a78bfa" stroke-width="2"/>
+                            <text x="340" y="90" text-anchor="middle" font-weight="600" fill="white" font-size="12">PoleAerienDialogV2</text>
+                            <text x="340" y="108" text-anchor="middle" fill="#ddd6fe" font-size="9">Detection + Disambiguation + Diagnostic</text>
+                            <text x="340" y="124" text-anchor="middle" fill="#c4b5fd" font-size="8">Mode Projet toggle | QgsSettings</text>
+                        </g>
 
-                        <!-- CONNEXIONS: Workflows → Modules (flèches horizontales directes) -->
-                        <path d="M 760 180 L 880 180" stroke="#fbbf24" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
-                        <path d="M 760 255 L 880 255" stroke="#34d399" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
-                        <path d="M 760 330 L 880 330" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
-                        <path d="M 760 405 L 880 405" stroke="#ec4899" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
-                        <path d="M 760 480 L 880 480" stroke="#8b5cf6" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
-                        <path d="M 760 555 L 880 555" stroke="#a855f7" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <!-- BatchOrchestrator -->
+                        <g class="node" filter="url(#glow-blue)">
+                            <rect x="240" y="155" width="200" height="90" rx="14" fill="url(#grad-core)" stroke="#60a5fa" stroke-width="3"/>
+                            <text x="340" y="178" text-anchor="middle" font-weight="700" fill="white" font-size="13">BatchOrchestrator</text>
+                            <text x="340" y="196" text-anchor="middle" fill="#bfdbfe" font-size="9">Preflight global</text>
+                            <text x="340" y="212" text-anchor="middle" fill="#93c5fd" font-size="9">Caches inter-modules</text>
+                            <text x="340" y="228" text-anchor="middle" fill="#60a5fa" font-size="8">fddcpi2 | SRO | appuis_wkb</text>
+                        </g>
 
-                        <!-- Flow Direction Legend (Bottom) -->
+                        <!-- PoleAerien.py -->
+                        <g class="node">
+                            <rect x="260" y="260" width="160" height="50" rx="10" fill="rgba(59,130,246,0.3)" stroke="#3b82f6" stroke-width="2"/>
+                            <text x="340" y="282" text-anchor="middle" font-weight="600" fill="#bfdbfe" font-size="11">PoleAerien.py</text>
+                            <text x="340" y="300" text-anchor="middle" fill="#60a5fa" font-size="8">Point d'entree (128 lig.)</text>
+                        </g>
+
+                        <!-- BatchRunner -->
+                        <g class="node">
+                            <rect x="260" y="325" width="160" height="50" rx="10" fill="rgba(59,130,246,0.3)" stroke="#3b82f6" stroke-width="2"/>
+                            <text x="340" y="347" text-anchor="middle" font-weight="600" fill="#bfdbfe" font-size="11">BatchRunner</text>
+                            <text x="340" y="365" text-anchor="middle" fill="#60a5fa" font-size="8">Execution sequentielle</text>
+                        </g>
+
+                        <!-- project_detector -->
+                        <g class="node">
+                            <rect x="250" y="390" width="180" height="55" rx="10" fill="rgba(59,130,246,0.2)" stroke="#3b82f6" stroke-width="1.5"/>
+                            <text x="340" y="412" text-anchor="middle" font-weight="600" fill="#93c5fd" font-size="10">project_detector.py</text>
+                            <text x="340" y="428" text-anchor="middle" fill="#60a5fa" font-size="8">SRO | multi-candidats | dedup</text>
+                            <text x="340" y="440" text-anchor="middle" fill="#60a5fa" font-size="7">diagnostics | patterns elargis</text>
+                        </g>
+
+                        <!-- Arrows: UI -> Orchestrator -> Runner -->
+                        <path d="M 340 135 L 340 155" stroke="#a78bfa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.7"/>
+                        <path d="M 340 245 L 340 260" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5"/>
+                        <path d="M 340 310 L 340 325" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5"/>
+
+                        <!-- Arrows: Inputs -> Core -->
+                        <path d="M 185 135 L 240 130" stroke="#fbbf24" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+                        <path d="M 185 220 L 240 210" stroke="#34d399" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+                        <path d="M 185 307 L 240 240" stroke="#818cf8" stroke-width="2" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+                        <path d="M 185 395 L 240 230" stroke="#22d3ee" stroke-width="2" fill="none" opacity="0.5" stroke-dasharray="4 2"/>
+                        <path d="M 185 480 L 240 240" stroke="#fb7185" stroke-width="2" fill="none" opacity="0.5" stroke-dasharray="4 2"/>
+
+                        <!-- ===== COLONNE 3: WORKFLOWS ===== -->
+                        <g class="node">
+                            <rect x="510" y="70" width="260" height="52" rx="10" fill="rgba(251,191,36,0.2)" stroke="#fbbf24" stroke-width="2"/>
+                            <text x="540" y="93" text-anchor="start" font-weight="600" fill="#fbbf24" font-size="11">MajWorkflow</text>
+                            <text x="540" y="110" text-anchor="start" fill="#fde68a" font-size="8">SQL background | rollback atomique</text>
+                            <circle cx="740" cy="96" r="16" fill="#fbbf24"/><text x="740" y="101" text-anchor="middle" fill="#78350f" font-size="10" font-weight="700">0</text>
+                        </g>
+                        <g class="node">
+                            <rect x="510" y="135" width="260" height="52" rx="10" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="2"/>
+                            <text x="540" y="158" text-anchor="start" font-weight="600" fill="#34d399" font-size="11">CapFtWorkflow</text>
+                            <text x="540" y="175" text-anchor="start" fill="#a7f3d0" font-size="8">single-pass extraction</text>
+                            <circle cx="740" cy="161" r="16" fill="#34d399"/><text x="740" y="166" text-anchor="middle" fill="#064e3b" font-size="10" font-weight="700">2</text>
+                        </g>
+                        <g class="node">
+                            <rect x="510" y="200" width="260" height="52" rx="10" fill="rgba(59,130,246,0.2)" stroke="#3b82f6" stroke-width="2"/>
+                            <text x="540" y="223" text-anchor="start" font-weight="600" fill="#60a5fa" font-size="11">ComacWorkflow</text>
+                            <text x="540" y="240" text-anchor="start" fill="#bfdbfe" font-size="8">boitiers FO | group_by_gid | SRO cache</text>
+                            <circle cx="740" cy="226" r="16" fill="#3b82f6"/><text x="740" y="231" text-anchor="middle" fill="white" font-size="10" font-weight="700">3</text>
+                        </g>
+                        <g class="node">
+                            <rect x="510" y="265" width="260" height="52" rx="10" fill="rgba(236,72,153,0.2)" stroke="#ec4899" stroke-width="2"/>
+                            <text x="540" y="288" text-anchor="start" font-weight="600" fill="#f472b6" font-size="11">C6BdWorkflow</text>
+                            <text x="540" y="305" text-anchor="start" fill="#fbcfe8" font-size="8">IN+OUT single-pass | dedup output</text>
+                            <circle cx="740" cy="291" r="16" fill="#ec4899"/><text x="740" y="296" text-anchor="middle" fill="white" font-size="10" font-weight="700">1</text>
+                        </g>
+                        <g class="node">
+                            <rect x="510" y="330" width="260" height="52" rx="10" fill="rgba(139,92,246,0.2)" stroke="#8b5cf6" stroke-width="2"/>
+                            <text x="540" y="353" text-anchor="start" font-weight="600" fill="#a78bfa" font-size="11">C6C3AWorkflow</text>
+                            <text x="540" y="370" text-anchor="start" fill="#ddd6fe" font-size="8">standalone C6 folder | c6_annexe_file</text>
+                            <circle cx="740" cy="356" r="16" fill="#8b5cf6"/><text x="740" y="361" text-anchor="middle" fill="white" font-size="10" font-weight="700">5</text>
+                        </g>
+                        <g class="node">
+                            <rect x="510" y="395" width="260" height="52" rx="10" fill="rgba(168,85,247,0.2)" stroke="#a855f7" stroke-width="2"/>
+                            <text x="540" y="418" text-anchor="start" font-weight="600" fill="#c084fc" font-size="11">PoliceWorkflow</text>
+                            <text x="540" y="435" text-anchor="start" fill="#e9d5ff" font-size="8">bold-only | attaches | fddcpiax</text>
+                            <circle cx="740" cy="421" r="16" fill="#a855f7"/><text x="740" y="426" text-anchor="middle" fill="white" font-size="10" font-weight="700">4</text>
+                        </g>
+
+                        <!-- async_tasks.py annotation -->
                         <g>
-                            <rect x="350" y="620" width="500" height="50" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-                            <text x="600" y="640" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="600">FLUX DE DONNÉES</text>
-                            <path d="M 380 655 L 480 655" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)"/>
-                            <text x="430" y="650" text-anchor="middle" fill="#60a5fa" font-size="9">Inputs</text>
-                            <path d="M 510 655 L 610 655" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)"/>
-                            <text x="560" y="650" text-anchor="middle" fill="#60a5fa" font-size="9">Core</text>
-                            <path d="M 640 655 L 740 655" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)"/>
-                            <text x="690" y="650" text-anchor="middle" fill="#60a5fa" font-size="9">Workflows</text>
-                            <path d="M 770 655 L 820 655" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)"/>
-                            <text x="795" y="650" text-anchor="middle" fill="#60a5fa" font-size="9">Modules</text>
+                            <rect x="510" y="460" width="260" height="42" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                            <text x="640" y="478" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="600">async_tasks.py (6 QgsTask)</text>
+                            <text x="640" y="494" text-anchor="middle" fill="#64748b" font-size="8">Background threads | Signaux Qt</text>
                         </g>
+
+                        <!-- Arrows: Core -> Workflows -->
+                        <path d="M 460 180 L 510 96" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+                        <path d="M 460 190 L 510 161" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+                        <path d="M 460 200 L 510 226" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+                        <path d="M 460 210 L 510 291" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+                        <path d="M 460 220 L 510 356" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+                        <path d="M 460 230 L 510 421" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#arrow-neon)" opacity="0.5" class="flow-arrow"/>
+
+                        <!-- ===== COLONNE 4: MODULES ===== -->
+                        <g class="node">
+                            <rect x="850" y="70" width="310" height="52" rx="10" fill="rgba(251,191,36,0.15)" stroke="#fbbf24" stroke-width="2"/>
+                            <text x="1005" y="93" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">MAJ FT/BT</text>
+                            <text x="1005" y="110" text-anchor="middle" fill="#fcd34d" font-size="9">Maj_Ft_Bt.py + maj_sql_background.py</text>
+                        </g>
+                        <g class="node">
+                            <rect x="850" y="135" width="310" height="52" rx="10" fill="rgba(52,211,153,0.15)" stroke="#34d399" stroke-width="2"/>
+                            <text x="1005" y="158" text-anchor="middle" fill="#34d399" font-size="12" font-weight="600">CAP_FT</text>
+                            <text x="1005" y="175" text-anchor="middle" fill="#6ee7b7" font-size="9">CapFt.py | normalize_appui_num(strip_e)</text>
+                        </g>
+                        <g class="node">
+                            <rect x="850" y="200" width="310" height="52" rx="10" fill="rgba(59,130,246,0.15)" stroke="#3b82f6" stroke-width="2"/>
+                            <text x="1005" y="223" text-anchor="middle" fill="#60a5fa" font-size="12" font-weight="600">COMAC + VerifCab + Boitiers</text>
+                            <text x="1005" y="240" text-anchor="middle" fill="#93c5fd" font-size="9">Comac.py | cable_analyzer | security_rules</text>
+                        </g>
+                        <g class="node">
+                            <rect x="850" y="265" width="310" height="52" rx="10" fill="rgba(236,72,153,0.15)" stroke="#ec4899" stroke-width="2"/>
+                            <text x="1005" y="288" text-anchor="middle" fill="#f472b6" font-size="12" font-weight="600">C6 vs BD</text>
+                            <text x="1005" y="305" text-anchor="middle" fill="#f9a8d4" font-size="9">C6_vs_Bd.py | QgsSpatialIndex</text>
+                        </g>
+                        <g class="node">
+                            <rect x="850" y="330" width="310" height="52" rx="10" fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" stroke-width="2"/>
+                            <text x="1005" y="353" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="600">C6/C3A/C7/BD</text>
+                            <text x="1005" y="370" text-anchor="middle" fill="#c4b5fd" font-size="9">C6_vs_C3A_vs_Bd.py | standalone C6</text>
+                        </g>
+                        <g class="node">
+                            <rect x="850" y="395" width="310" height="52" rx="10" fill="rgba(168,85,247,0.15)" stroke="#a855f7" stroke-width="2"/>
+                            <text x="1005" y="418" text-anchor="middle" fill="#c084fc" font-size="12" font-weight="600">Police C6</text>
+                            <text x="1005" y="435" text-anchor="middle" fill="#e9d5ff" font-size="9">PoliceC6.py | bold-only | attaches-aware | NFC</text>
+                        </g>
+
+                        <!-- Arrows: Workflows -> Modules -->
+                        <path d="M 770 96 L 850 96" stroke="#fbbf24" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <path d="M 770 161 L 850 161" stroke="#34d399" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <path d="M 770 226 L 850 226" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <path d="M 770 291 L 850 291" stroke="#ec4899" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <path d="M 770 356 L 850 356" stroke="#8b5cf6" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+                        <path d="M 770 421 L 850 421" stroke="#a855f7" stroke-width="2.5" fill="none" marker-end="url(#arrow-neon)" opacity="0.8" class="flow-arrow"/>
+
+                        <!-- ===== CACHE LAYER (horizontal band) ===== -->
+                        <rect x="480" y="518" width="700" height="55" rx="12" fill="rgba(245,158,11,0.08)" stroke="rgba(245,158,11,0.25)" stroke-width="1.5" stroke-dasharray="6 3"/>
+                        <text x="500" y="538" fill="#f59e0b" font-size="9" font-weight="700">CACHES INTER-MODULES</text>
+                        <rect x="665" y="528" width="100" height="22" rx="6" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="715" y="543" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="600">fddcpi2</text>
+                        <rect x="775" y="528" width="80" height="22" rx="6" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="815" y="543" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="600">SRO</text>
+                        <rect x="865" y="528" width="100" height="22" rx="6" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="915" y="543" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="600">appuis_wkb</text>
+                        <rect x="975" y="528" width="70" height="22" rx="6" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="1010" y="543" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="600">CRS</text>
+                        <rect x="1055" y="528" width="110" height="22" rx="6" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="1110" y="543" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="600">detect_etude</text>
+                        <!-- Cache arrows from workflows -->
+                        <path d="M 640 447 L 640 518" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+                        <path d="M 640 573 L 640 447" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity="0.4" stroke-dasharray="4 2"/>
+
+                        <!-- ===== OUTPUT LAYER ===== -->
+                        <rect x="220" y="605" width="960" height="65" rx="14" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.25)" stroke-width="1.5"/>
+                        <text x="240" y="628" fill="#10b981" font-size="10" font-weight="700">OUTPUTS</text>
+
+                        <rect x="340" y="615" width="150" height="40" rx="8" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
+                        <text x="415" y="633" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">unified_report.py</text>
+                        <text x="415" y="647" text-anchor="middle" fill="#34d399" font-size="8">KPI + checks + export</text>
+
+                        <rect x="510" y="615" width="130" height="40" rx="8" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
+                        <text x="575" y="633" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">Excel par module</text>
+                        <text x="575" y="647" text-anchor="middle" fill="#34d399" font-size="8">openpyxl colore</text>
+
+                        <rect x="660" y="615" width="130" height="40" rx="8" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
+                        <text x="725" y="633" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">Recap post-batch</text>
+                        <text x="725" y="647" text-anchor="middle" fill="#34d399" font-size="8">metriques + duree</text>
+
+                        <rect x="810" y="615" width="150" height="40" rx="8" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
+                        <text x="885" y="633" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">Liens cliquables</text>
+                        <text x="885" y="647" text-anchor="middle" fill="#34d399" font-size="8">log_result_link()</text>
+
+                        <rect x="980" y="615" width="180" height="40" rx="8" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
+                        <text x="1070" y="633" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">MAJ SQL directe PG</text>
+                        <text x="1070" y="647" text-anchor="middle" fill="#34d399" font-size="8">rollback atomique + triggers</text>
+
+                        <!-- Arrow: Modules -> Outputs -->
+                        <path d="M 1005 447 L 1005 605" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrow-out)" opacity="0.5"/>
+
+                        <!-- ===== SERVICES TRANSVERSAUX (bottom strip) ===== -->
+                        <rect x="20" y="695" width="1160" height="105" rx="14" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                        <text x="50" y="718" fill="#94a3b8" font-size="10" font-weight="700" letter-spacing="1">SERVICES TRANSVERSAUX</text>
+
+                        <rect x="40" y="730" width="135" height="50" rx="8" fill="rgba(239,68,68,0.1)" stroke="#ef4444" stroke-width="1"/>
+                        <text x="107" y="750" text-anchor="middle" fill="#fca5a5" font-size="9" font-weight="600">security_rules.py</text>
+                        <text x="107" y="768" text-anchor="middle" fill="#ef4444" font-size="7">NFC 11201-A1 | ZVN/ZVF</text>
+
+                        <rect x="190" y="730" width="135" height="50" rx="8" fill="rgba(245,158,11,0.1)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="257" y="750" text-anchor="middle" fill="#fcd34d" font-size="9" font-weight="600">cable_analyzer.py</text>
+                        <text x="257" y="768" text-anchor="middle" fill="#f59e0b" font-size="7">CDI | posemode | attaches</text>
+
+                        <rect x="340" y="730" width="125" height="50" rx="8" fill="rgba(6,182,212,0.1)" stroke="#06b6d4" stroke-width="1"/>
+                        <text x="402" y="750" text-anchor="middle" fill="#67e8f9" font-size="9" font-weight="600">gracethd_reader</text>
+                        <text x="402" y="768" text-anchor="middle" fill="#06b6d4" font-size="7">SHP+CSV | Axione</text>
+
+                        <rect x="480" y="730" width="125" height="50" rx="8" fill="rgba(168,85,247,0.1)" stroke="#a855f7" stroke-width="1"/>
+                        <text x="542" y="750" text-anchor="middle" fill="#c084fc" font-size="9" font-weight="600">db_connection.py</text>
+                        <text x="542" y="768" text-anchor="middle" fill="#a855f7" font-size="7">fddcpiax() | psycopg2</text>
+
+                        <rect x="620" y="730" width="140" height="50" rx="8" fill="rgba(16,185,129,0.1)" stroke="#10b981" stroke-width="1"/>
+                        <text x="690" y="750" text-anchor="middle" fill="#6ee7b7" font-size="9" font-weight="600">comac_db_reader</text>
+                        <text x="690" y="768" text-anchor="middle" fill="#10b981" font-size="7">PG only | cache thread-safe</text>
+
+                        <rect x="775" y="730" width="110" height="50" rx="8" fill="rgba(100,116,139,0.15)" stroke="#94a3b8" stroke-width="1"/>
+                        <text x="830" y="750" text-anchor="middle" fill="#e2e8f0" font-size="9" font-weight="600">qgis_utils.py</text>
+                        <text x="830" y="768" text-anchor="middle" fill="#94a3b8" font-size="7">layers | spatial | CRS</text>
+
+                        <rect x="900" y="730" width="110" height="50" rx="8" fill="rgba(100,116,139,0.15)" stroke="#94a3b8" stroke-width="1"/>
+                        <text x="955" y="750" text-anchor="middle" fill="#e2e8f0" font-size="9" font-weight="600">core_utils.py</text>
+                        <text x="955" y="768" text-anchor="middle" fill="#94a3b8" font-size="7">safe_float | parse_bool</text>
+
+                        <rect x="1025" y="730" width="140" height="50" rx="8" fill="rgba(245,158,11,0.1)" stroke="#f59e0b" stroke-width="1"/>
+                        <text x="1095" y="750" text-anchor="middle" fill="#fcd34d" font-size="9" font-weight="600">pcm_parser.py</text>
+                        <text x="1095" y="768" text-anchor="middle" fill="#f59e0b" font-size="7">XML .pcm | ISO-8859-1</text>
 
                         <!-- Version badge -->
                         <g>
-                            <rect x="1030" y="620" width="120" height="35" rx="17" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1"/>
-                            <text x="1090" y="642" text-anchor="middle" fill="#34d399" font-size="11" font-weight="600">v3.0</text>
+                            <rect x="40" y="615" width="120" height="40" rx="17" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.5"/>
+                            <text x="100" y="632" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700">v3.1</text>
+                            <text x="100" y="648" text-anchor="middle" fill="#6ee7b7" font-size="8">Mars 2026</text>
                         </g>
                     </svg>
 
                     <div class="legend" style="border-top-color: rgba(255,255,255,0.1);">
-                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);"></div><span style="color: #94a3b8;">Inputs (Excel, QGIS, DB)</span></div>
-                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #3b82f6, #1d4ed8);"></div><span style="color: #94a3b8;">Core Orchestrateur</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);"></div><span style="color: #94a3b8;">Inputs (Excel, QGIS, PG, GraceTHD)</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #3b82f6, #1d4ed8);"></div><span style="color: #94a3b8;">Core + Orchestration</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #a78bfa, #7c3aed);"></div><span style="color: #94a3b8;">Workflows (6)</span></div>
-                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #34d399, #10b981);"></div><span style="color: #94a3b8;">Modules Métier (6)</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #34d399, #10b981);"></div><span style="color: #94a3b8;">Modules + Outputs</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #f59e0b, #d97706);"></div><span style="color: #94a3b8;">Caches inter-modules</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #22d3ee, #06b6d4);"></div><span style="color: #94a3b8;">GraceTHD Axione</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #fb7185, #e11d48);"></div><span style="color: #94a3b8;">Mode Projet BDD</span></div>
                     </div>
                 </div>
             </div>
@@ -2768,7 +2893,7 @@
             <!-- Data Flow Diagram - Style Pipeline Moderne -->
             <div id="diagram-dataflow" class="diagram-panel">
                 <div class="diagram-container" style="background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);">
-                    <h3 class="diagram-title">Pipeline de traitement - Flux de données (Architecture Workflows)</h3>
+                    <h3 class="diagram-title">Pipeline de traitement v3.1 - Dual-path NGE/Axione, Caches inter-modules, Preflight</h3>
                     <svg class="architecture-svg" viewBox="0 0 1100 600" xmlns="http://www.w3.org/2000/svg">
                         <defs>
                             <linearGradient id="pipe-grad" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -2957,6 +3082,16 @@
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(90deg, #60a5fa, #3b82f6);"></div><span>Logique métier</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(90deg, #34d399, #10b981);"></div><span>Résultat QGIS</span></div>
                     </div>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(59,130,246,0.08); border-radius: 8px; border: 1px solid rgba(59,130,246,0.15);">
+                        <p style="margin: 0 0 0.5rem; font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">Ameliorations v3.1 (non visibles sur ce schema generique) :</p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.85rem; color: var(--text-secondary);">
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(6,182,212,0.1); border: 1px solid #06b6d4; border-radius: 6px; color: #0891b2;">Dual-path NGE/Axione (fddcpiax auto-detect)</span>
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(245,158,11,0.1); border: 1px solid #f59e0b; border-radius: 6px; color: #d97706;">Caches: fddcpi2 + SRO + appuis_wkb + CRS</span>
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 6px; color: #dc2626;">Preflight global avant batch</span>
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(16,185,129,0.1); border: 1px solid #10b981; border-radius: 6px; color: #059669;">unified_report.py multi-modules</span>
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(168,85,247,0.1); border: 1px solid #a855f7; border-radius: 6px; color: #7c3aed;">Mode Projet: db_layer_loader async</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -3136,8 +3271,8 @@
 
                         <g class="node">
                             <circle cx="650" cy="120" r="25" fill="rgba(6,182,212,0.2)" stroke="#06b6d4" stroke-width="1"/>
-                            <text x="650" y="117" text-anchor="middle" fill="#67e8f9" font-size="8" font-weight="600">comac</text>
-                            <text x="650" y="128" text-anchor="middle" fill="#a5f3fc" font-size="7">_loader</text>
+                            <text x="650" y="117" text-anchor="middle" fill="#67e8f9" font-size="8" font-weight="600">gracethd</text>
+                            <text x="650" y="128" text-anchor="middle" fill="#a5f3fc" font-size="7">_reader</text>
                         </g>
                         <path d="M 650 145 L 580 250" stroke="rgba(6,182,212,0.4)" stroke-width="1" stroke-dasharray="3 3"/>
 
@@ -3159,7 +3294,7 @@
                         <g class="node">
                             <circle cx="850" cy="300" r="28" fill="rgba(168,85,247,0.2)" stroke="#a855f7" stroke-width="1.5"/>
                             <text x="850" y="295" text-anchor="middle" fill="#c084fc" font-size="8" font-weight="600">db_conn</text>
-                            <text x="850" y="307" text-anchor="middle" fill="#e9d5ff" font-size="7">fddcpi2()</text>
+                            <text x="850" y="307" text-anchor="middle" fill="#e9d5ff" font-size="7">fddcpiax()</text>
                         </g>
                         <path d="M 828 285 L 545 510" stroke="rgba(168,85,247,0.4)" stroke-width="1" stroke-dasharray="3 3"/>
 
@@ -3171,16 +3306,40 @@
                         </g>
                         <path d="M 172 315 L 460 510" stroke="rgba(236,72,153,0.4)" stroke-width="1" stroke-dasharray="3 3"/>
 
+                        <!-- NEW v3.1: unified_report (output collector) -->
+                        <g class="node">
+                            <circle cx="50" cy="520" r="28" fill="rgba(16,185,129,0.25)" stroke="#10b981" stroke-width="1.5"/>
+                            <text x="50" y="517" text-anchor="middle" fill="#6ee7b7" font-size="8" font-weight="600">unified</text>
+                            <text x="50" y="529" text-anchor="middle" fill="#a7f3d0" font-size="7">_report</text>
+                        </g>
+                        <path d="M 72 505 L 460 510" stroke="rgba(16,185,129,0.4)" stroke-width="1" stroke-dasharray="3 3"/>
+                        <path d="M 62 498 L 180 458" stroke="rgba(16,185,129,0.3)" stroke-width="1" stroke-dasharray="3 3"/>
+                        <path d="M 78 520 L 790 450" stroke="rgba(16,185,129,0.2)" stroke-width="1" stroke-dasharray="3 3"/>
+
+                        <!-- NEW v3.1: db_layer_loader (Mode Projet BDD) -->
+                        <g class="node">
+                            <circle cx="950" cy="520" r="28" fill="rgba(251,113,133,0.25)" stroke="#fb7185" stroke-width="1.5"/>
+                            <text x="950" y="517" text-anchor="middle" fill="#fda4af" font-size="8" font-weight="600">db_layer</text>
+                            <text x="950" y="529" text-anchor="middle" fill="#fecdd3" font-size="7">_loader</text>
+                        </g>
+                        <path d="M 928 505 L 540 510" stroke="rgba(251,113,133,0.4)" stroke-width="1" stroke-dasharray="3 3"/>
+
+                        <!-- NEW v3.1: Cache ring annotation -->
+                        <ellipse cx="500" cy="300" rx="190" ry="190" fill="none" stroke="rgba(245,158,11,0.2)" stroke-width="2" stroke-dasharray="6 4"/>
+                        <text x="695" y="155" fill="#f59e0b" font-size="7" font-weight="600">CACHES</text>
+                        <rect x="660" y="160" width="75" height="16" rx="4" fill="rgba(245,158,11,0.15)" stroke="#f59e0b" stroke-width="0.5"/>
+                        <text x="697" y="172" text-anchor="middle" fill="#fbbf24" font-size="6">fddcpi2 | SRO</text>
+
                         <!-- Stats panel -->
                         <g>
                             <rect x="40" y="30" width="150" height="90" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                            <text x="115" y="50" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="600">ARCHITECTURE v3.0</text>
+                            <text x="115" y="50" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="600">ARCHITECTURE v3.1</text>
                             <text x="60" y="70" fill="#64748b" font-size="8">Workflows:</text>
                             <text x="160" y="70" text-anchor="end" fill="#60a5fa" font-size="10" font-weight="600">6</text>
                             <text x="60" y="86" fill="#64748b" font-size="8">Fichiers Python:</text>
-                            <text x="160" y="86" text-anchor="end" fill="#60a5fa" font-size="10" font-weight="600">24</text>
+                            <text x="160" y="86" text-anchor="end" fill="#60a5fa" font-size="10" font-weight="600">26</text>
                             <text x="60" y="102" fill="#64748b" font-size="8">Lignes total:</text>
-                            <text x="160" y="102" text-anchor="end" fill="#60a5fa" font-size="10" font-weight="600">9500</text>
+                            <text x="160" y="102" text-anchor="end" fill="#60a5fa" font-size="10" font-weight="600">10500</text>
                         </g>
                     </svg>
 
@@ -3190,6 +3349,9 @@
                         <div class="legend-item"><div class="legend-color" style="background: rgba(59,130,246,0.4); border: 2px solid #3b82f6;"></div><span style="color: #94a3b8;">COMAC</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: rgba(236,72,153,0.4); border: 2px solid #ec4899;"></div><span style="color: #94a3b8;">C6 vs BD</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: rgba(139,92,246,0.4); border: 2px solid #8b5cf6;"></div><span style="color: #94a3b8;">Police C6</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: rgba(16,185,129,0.4); border: 2px solid #10b981;"></div><span style="color: #94a3b8;">unified_report <small>(v3.1)</small></span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: rgba(251,113,133,0.4); border: 2px solid #fb7185;"></div><span style="color: #94a3b8;">db_layer_loader <small>(v3.1)</small></span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: rgba(245,158,11,0.3); border: 2px dashed #f59e0b;"></div><span style="color: #94a3b8;">Caches inter-modules <small>(v3.1)</small></span></div>
                     </div>
                 </div>
             </div>
@@ -3563,12 +3725,12 @@
                         <path d="M 755 335 L 550 400" stroke="#10b981" stroke-width="1.5" fill="none" marker-end="url(#arrow-dag)" class="dag-edge"/>
                         <path d="M 925 335 L 820 400" stroke="#10b981" stroke-width="1.5" fill="none" marker-end="url(#arrow-dag)" class="dag-edge"/>
                         
-                        <!-- Arrow View to excel_helpers -->
+                        <!-- Arrow View to unified_report -->
                         <path d="M 160 250 L 160 360" stroke="#10b981" stroke-width="1.5" fill="none" marker-end="url(#arrow-dag)" class="dag-edge"/>
                         
                         <g class="dag-node">
                             <rect x="80" y="360" width="160" height="40" rx="6" fill="#c4b5fd" stroke="#a78bfa" stroke-width="1"/>
-                            <text x="160" y="385" text-anchor="middle" fill="#581c87" font-size="10" font-weight="500">excel_helpers.py</text>
+                            <text x="160" y="385" text-anchor="middle" fill="#581c87" font-size="10" font-weight="500">unified_report.py</text>
                         </g>
                         
                         <!-- Level 3: Modules Metier -->
@@ -3648,7 +3810,7 @@
                         <g class="dag-node">
                             <rect x="30" y="510" width="130" height="45" rx="8" fill="#a855f7" stroke="#8b5cf6" stroke-width="1.5"/>
                             <text x="95" y="530" text-anchor="middle" fill="white" font-size="9" font-weight="600">db_connection.py</text>
-                            <text x="95" y="545" text-anchor="middle" fill="#e9d5ff" font-size="8">fddcpi2() PG</text>
+                            <text x="95" y="545" text-anchor="middle" fill="#e9d5ff" font-size="8">fddcpiax() PG</text>
                         </g>
                         
                         <g class="dag-node">
@@ -3680,11 +3842,11 @@
                         <path d="M 595 560 L 700 600" stroke="#f97316" stroke-width="1.5" fill="none" marker-end="url(#arrow-dag)" class="dag-edge"/>
                         <path d="M 925 560 L 595 600" stroke="#f97316" stroke-width="1" fill="none" marker-end="url(#arrow-dag)" stroke-dasharray="4 2"/>
                         
-                        <!-- Level 5: comac_loader -->
+                        <!-- Level 5: gracethd_reader -->
                         <g class="dag-node">
                             <rect x="620" y="590" width="150" height="50" rx="8" fill="#06b6d4" stroke="#0891b2" stroke-width="1.5"/>
-                            <text x="695" y="610" text-anchor="middle" fill="white" font-size="10" font-weight="600">comac_loader.py</text>
-                            <text x="695" y="628" text-anchor="middle" fill="#a5f3fc" font-size="8">Fusion PCM+Excel</text>
+                            <text x="695" y="610" text-anchor="middle" fill="white" font-size="10" font-weight="600">gracethd_reader.py</text>
+                            <text x="695" y="628" text-anchor="middle" fill="#a5f3fc" font-size="8">GraceTHD Axione</text>
                         </g>
                         
                         <!-- Level 5: Data -->
@@ -3695,10 +3857,28 @@
                         </g>
                         
                         <path d="M 765 560 L 860 590" stroke="#64748b" stroke-width="1" fill="none" marker-end="url(#arrow-dag)" stroke-dasharray="4 2"/>
+
+                        <!-- NEW v3.1: db_layer_loader.py -->
+                        <g class="dag-node">
+                            <rect x="440" y="590" width="160" height="50" rx="8" fill="#fb7185" stroke="#e11d48" stroke-width="1.5"/>
+                            <text x="520" y="610" text-anchor="middle" fill="white" font-size="10" font-weight="600">db_layer_loader.py</text>
+                            <text x="520" y="628" text-anchor="middle" fill="#ffe4e6" font-size="8">Mode Projet BDD (v3.1)</text>
+                        </g>
+                        <!-- Arrow dialog_v2 -> db_layer_loader -->
+                        <path d="M 160 250 L 480 590" stroke="#fb7185" stroke-width="1" fill="none" marker-end="url(#arrow-dag)" stroke-dasharray="4 2"/>
+
+                        <!-- NEW v3.1: dataclasses_results.py -->
+                        <g class="dag-node">
+                            <rect x="260" y="590" width="160" height="50" rx="8" fill="#fbbf24" stroke="#f59e0b" stroke-width="1.5"/>
+                            <text x="340" y="610" text-anchor="middle" fill="#78350f" font-size="10" font-weight="600">dataclasses_results.py</text>
+                            <text x="340" y="628" text-anchor="middle" fill="#92400e" font-size="8">Structures KPI (v3.1)</text>
+                        </g>
+                        <!-- Arrow unified_report -> dataclasses_results -->
+                        <path d="M 160 400 L 300 590" stroke="#fbbf24" stroke-width="1" fill="none" marker-end="url(#arrow-dag)" stroke-dasharray="4 2"/>
                         
                         <!-- Legend -->
-                        <rect x="30" y="590" width="200" height="110" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
-                        <text x="130" y="610" text-anchor="middle" fill="#334155" font-size="10" font-weight="600">LEGENDE</text>
+                        <rect x="30" y="590" width="210" height="120" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+                        <text x="135" y="610" text-anchor="middle" fill="#334155" font-size="10" font-weight="600">LEGENDE</text>
                         <circle cx="50" cy="628" r="6" fill="#8b5cf6"/>
                         <text x="65" y="632" fill="#64748b" font-size="9">UI / Controller</text>
                         <circle cx="50" cy="648" r="6" fill="#3b82f6"/>
@@ -3707,6 +3887,10 @@
                         <text x="65" y="672" fill="#64748b" font-size="9">Modules metier</text>
                         <circle cx="50" cy="688" r="6" fill="#ef4444"/>
                         <text x="65" y="692" fill="#64748b" font-size="9">Regles securite</text>
+                        <circle cx="140" cy="628" r="6" fill="#fb7185"/>
+                        <text x="155" y="632" fill="#64748b" font-size="9">v3.1</text>
+                        <circle cx="140" cy="648" r="6" fill="#06b6d4"/>
+                        <text x="155" y="652" fill="#64748b" font-size="9">GraceTHD</text>
                     </svg>
                     
                     <div class="legend" style="margin-top: 1rem;">
@@ -3716,6 +3900,8 @@
                         <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div><span>Regles securite</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: #f97316;"></div><span>Lecteurs donnees</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: #64748b;"></div><span>Donnees (PostgreSQL)</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: #fb7185;"></div><span>db_layer_loader (v3.1)</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: #06b6d4;"></div><span>GraceTHD Axione (v3.1)</span></div>
                     </div>
                 </div>
             </div>
@@ -4022,8 +4208,8 @@
                     <rect x="410" y="8" width="280" height="384" rx="18" fill="rgba(12,8,30,0.75)" stroke="rgba(251,191,36,0.25)" stroke-width="1.5"/>
                     <rect x="410" y="8" width="280" height="4" rx="18" fill="url(#gfl)"/>
 
-                    <text x="550" y="38" text-anchor="middle" fill="#fbbf24" font-size="14" font-weight="800" letter-spacing="-0.5">fddcpi2(zasro)</text>
-                    <text x="550" y="52" text-anchor="middle" fill="#64748b" font-size="7.5">rip_avg_nge | plpgsql | Serveur AUVERGNE</text>
+                    <text x="550" y="38" text-anchor="middle" fill="#fbbf24" font-size="14" font-weight="800" letter-spacing="-0.5">fddcpi2(zasro) / fddcpiax(zasro)</text>
+                    <text x="550" y="52" text-anchor="middle" fill="#64748b" font-size="7.5">rip_avg_nge | plpgsql | AUVERGNE | v3.1: dual-path NGE (0.20m) / Axione (0.70m)</text>
 
                     <!-- Step 1 -->
                     <rect x="425" y="64" width="250" height="42" rx="10" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.2)" stroke-width="1"/>
@@ -4155,7 +4341,7 @@
 
                     <!-- ===== BOTTOM: Result Table ===== -->
                     <rect x="15" y="405" width="1075" height="145" rx="14" fill="rgba(16,185,129,0.04)" stroke="rgba(16,185,129,0.15)" stroke-width="1"/>
-                    <text x="550" y="425" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="700">Table résultat fddcpi2()</text>
+                    <text x="550" y="425" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="700">Table résultat fddcpiax()</text>
                     <line x1="30" y1="432" x2="1075" y2="432" stroke="rgba(51,65,85,0.5)" stroke-width="0.8"/>
 
                     <!-- Header row -->
@@ -4253,15 +4439,10 @@
 
                     <text x="570" y="598" fill="#94a3b8" font-size="8">1. <tspan fill="#fca5a5" font-weight="600">infra(SRO)</tspan> → collecte poteaux, chambres, attaches de la zone</text>
                     <text x="570" y="614" fill="#94a3b8" font-size="8">2. <tspan fill="#c084fc" font-weight="600">fdrca(SRO)</tspan> → recalage et alignement des câbles sur l'infrastructure</text>
-                    <text x="570" y="630" fill="#94a3b8" font-size="8">3. <tspan fill="#93c5fd" font-weight="600">ST_Snap</tspan>(cable, infra, 0.2m) → accrochage géométrique</text>
+                    <text x="570" y="630" fill="#94a3b8" font-size="8">3. <tspan fill="#93c5fd" font-weight="600">ST_Snap</tspan>(cable, infra, 0.70m) → accrochage géométrique</text>
                     <text x="570" y="646" fill="#94a3b8" font-size="8">4. <tspan fill="#6ee7b7" font-weight="600">ST_Split + ST_Dump</tspan> → découpage et extraction des segments</text>
                     <text x="570" y="662" fill="#94a3b8" font-size="8">5. <tspan fill="#fde68a" font-weight="600">Endpoints</tspan> → détermination du posemode (0/1/2/4)</text>
-                    <text x="570" y="680" fill="#475569" font-size="7">Source: rip_avg_nge.fddcpi2(text) | Serveur: AUVERGNE (10.241.228.107) | Dépendances: infra(), fdrca()</text>
-                </svg>
-                </div>
-
-                <!-- Bottom HTML legend strip -->
-                <div style="padding: 0.8rem 2rem 1.2rem; border-top: 1px solid rgba(139,92,246,0.1); display: flex; gap: 24px; flex-wrap: wrap; justify-content: center;">
+                    <text x="570" y="680" fill="#475569" font-size="7">Source: fddcpi2(NGE) / fddcpiax(Axione) | Serveur: AUVERGNE (10.241.228.107) | Dépendances: infra(), fdrca()</text>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 10px; height: 10px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 6px rgba(251,191,36,0.4);"></div><span style="color: #94a3b8; font-size: 0.75rem;">Poteau (pot_)</span></div>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 10px; height: 10px; border-radius: 2px; background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4);"></div><span style="color: #94a3b8; font-size: 0.75rem;">Chambre (chb_)</span></div>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid #10b981;"></div><span style="color: #94a3b8; font-size: 0.75rem;">Attache (atr_)</span></div>
@@ -5423,6 +5604,42 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Comment fonctionne le Mode Projet (BDD) ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Le <strong>Mode Projet</strong> permet de charger les couches QGIS directement depuis PostgreSQL, filtrees par SRO :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>SRO automatique :</strong> derive du nom de dossier (ex: <code>63041-B1I-PMZ-00003</code> donne SRO <code>63041/B1I/PMZ/00003</code>)</li>
+                            <li><strong>Chargement async :</strong> les couches sont chargees en thread background (pas de freeze UI)</li>
+                            <li><strong>3 couches :</strong> <code>infra_pt_pot</code>, <code>etude_cap_ft</code>, <code>etude_comac</code> filtrees par SRO</li>
+                            <li><strong>Cleanup auto :</strong> les couches temporaires sont supprimees apres le batch (sauf si "Charger dans le projet" coche)</li>
+                        </ul>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #e0f2fe; border-radius: 6px; border-left: 3px solid #3b82f6;">
+                            <strong>Prerequis :</strong> La connexion PostgreSQL au serveur AUVERGNE doit etre configuree dans QGIS. Le nom du dossier projet doit suivre le format SRO (segments separes par des tirets).
+                        </p>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <h4>Quelle est la difference entre NGE et Axione (GraceTHD) ?</h4>
+                        <span class="accordion-icon">+</span>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Le plugin detecte automatiquement le type de bureau d'etudes (BE) via la table <code>comac.sro_nge_axione</code> :</p>
+                        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
+                            <li><strong>NGE :</strong> Pipeline classique via <code>fddcpi2</code> PostgreSQL. Cables deja recales sur l'infrastructure. Match par endpoints.</li>
+                            <li><strong>Axione :</strong> Pipeline <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Cables decales par rapport aux poteaux. Utilise aussi GraceTHD local (fichiers SHP+CSV) si present.</li>
+                        </ul>
+                        <p style="margin-top: 0.75rem; padding: 0.75rem; background: #f0fdf4; border-radius: 6px; border-left: 3px solid #10b981;">
+                            <strong>Important :</strong> Les modifications GraceTHD/Axione n'impactent jamais le code NGE. Les chemins sont proteges par des conditions <code>if be_type == 'axione'</code>.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
                         <h4>Comment signaler une anomalie ou suggérer une amélioration ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
@@ -5452,30 +5669,30 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
         <!-- Nouveautés v2.3.0 Section -->
         <section id="nouveautes" style="background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%); padding: 3rem 2rem; border-radius: var(--radius); margin-top: 3rem;">
             <div class="section-header">
-                <h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 8px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> Nouveautés v2.3.0</h2>
-                <p>Refactoring majeur : architecture workflows, PostgreSQL natif, Police C6 haute performance</p>
+                <h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 8px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> Nouveautes v3.1</h2>
+                <p>GraceTHD Axione, Mode Projet BDD, 4 sprints d'optimisation, ameliorations Police C6, COMAC et UX</p>
             </div>
 
             <div class="cards-grid" style="max-width: 1000px; margin: 0 auto;">
-                <article class="card" style="border: 2px solid #a855f7;">
-                    <div class="card-icon purple">
+                <article class="card" style="border: 2px solid #10b981;">
+                    <div class="card-icon green">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     </div>
-                    <h3>Architecture Workflows</h3>
-                    <p><strong>God Object decouple :</strong> PoleAerien.py passe de ~2400 à 1740 lignes. 6 workflows dédiés orchestrent chaque module métier avec signaux standardisés.</p>
-                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(168, 85, 247, 0.1); border-radius: 8px; border-left: 4px solid #a855f7;">
-                        <p style="margin: 0; font-size: 0.9rem; color: #5b21b6;"><strong>Signaux Qt :</strong> progress_changed, message_received, analysis_finished, error_occurred</p>
+                    <h3>GraceTHD Axione</h3>
+                    <p><strong>Pipeline alternatif complet</strong> pour SRO Axione via fichiers locaux SHP+CSV. Detection auto NGE vs Axione via <code>comac.sro_nge_axione</code>. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Match mode ligne pour cables BPE-to-BPE.</p>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border-left: 4px solid #10b981;">
+                        <p style="margin: 0; font-size: 0.9rem; color: #065f46;"><strong>Fichiers :</strong> gracethd_reader.py, fddcpiax (SQL), db_connection.py (routage auto NGE/Axione)</p>
                     </div>
                 </article>
 
-                <article class="card" style="border: 2px solid #10b981;">
-                    <div class="card-icon green">
+                <article class="card" style="border: 2px solid #3b82f6;">
+                    <div class="card-icon blue">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
-                    <h3>Police C6 Haute Performance</h3>
-                    <p><strong>Architecture fddcpi2 (-78% temps, -62% mémoire).</strong> SRO → PostgreSQL fddcpi2() → CableSegment → cable_analyzer → intersection appuis → comparaison C6 Excel.</p>
-                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border-left: 4px solid #10b981;">
-                        <p style="margin: 0; font-size: 0.9rem; color: #065f46;"><strong>Nouveau :</strong> db_connection.py (fddcpi2), cable_analyzer.py (402 L), fix injection SQL, guards division zéro</p>
+                    <h3>Mode Projet (BDD)</h3>
+                    <p><strong>Couches PostgreSQL par SRO</strong> derive du nom de dossier. Chargement async en background thread (_LoadProjectLayersTask). DbLayerLoader pour infra_pt_pot, etude_cap_ft, etude_comac filtres par SRO.</p>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;">
+                        <p style="margin: 0; font-size: 0.9rem; color: #1e40af;"><strong>UX :</strong> Toggle radio, SRO display monospace, option "Charger dans le projet", cleanup auto apres batch</p>
                     </div>
                 </article>
 
@@ -5483,19 +5700,55 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                     <div class="card-icon orange">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                     </div>
-                    <h3>MAJ BD + PostgreSQL</h3>
-                    <p><strong>3 chemins → 1 unique :</strong> SQL background direct via MajSqlBackgroundTask. Migration COMAC vers PostgreSQL (schéma comac). 6 bugs corrigés.</p>
+                    <h3>4 Sprints Optimisation</h3>
+                    <p><strong>-30% a -40% temps batch.</strong> Caches inter-modules (fddcpi2, SRO, appuis_wkb, CRS). Extractions single-pass. Centralisation credentials PG. Connexions PG de ~10 a ~3.</p>
                     <ul style="margin-top: 1rem; padding-left: 1.5rem; color: var(--text-secondary); font-size: 0.9rem;">
-                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> -791 lignes dead code supprimées</li>
-                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Rollback atomique + triggers auto</li>
-                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> core_utils.py centralise (safe_float, build_export_path...)</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Sprint 1 : Fusion extractions, connexion PG unique, detect_etude_field centralise</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Sprint 2 : Cache SRO+appuis_wkb, comparer_source_cables() generique (-140 lignes)</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Sprint 3 : CRS validation cache, centralisation credentials PG</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Sprint 4 : Dead code cleanup (-414 lignes), factorisation Excel et MAJ</li>
+                    </ul>
+                </article>
+
+                <article class="card" style="border: 2px solid #a855f7;">
+                    <div class="card-icon purple">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    </div>
+                    <h3>Police C6 avancee</h3>
+                    <p><strong>Bold-only C6 :</strong> seuls les cables en gras (nouveaux) sont compares. <strong>Attaches-aware :</strong> verification cables et BPE de chaque cote des attaches. Compteur [i/N] par etude. Bilan post-boucle.</p>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(168, 85, 247, 0.1); border-radius: 8px; border-left: 4px solid #a855f7;">
+                        <p style="margin: 0; font-size: 0.9rem; color: #5b21b6;"><strong>Fix :</strong> Liaison vs cable confusion (re.match L+digit), fddcpiax routage auto NGE/Axione</p>
+                    </div>
+                </article>
+
+                <article class="card" style="border: 2px solid #ec4899;">
+                    <div class="card-icon" style="background: #fce7f3; color: #db2777;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    </div>
+                    <h3>COMAC enrichi</h3>
+                    <p><strong>Boitiers fibre optique :</strong> col AR (idx 43), extraction oui+non, verification BPE pour oui uniquement. <strong>group_by_gid :</strong> comptage cables physiques (pas segments). Normalisation appuis unifiee.</p>
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(236, 72, 153, 0.1); border-radius: 8px; border-left: 4px solid #ec4899;">
+                        <p style="margin: 0; font-size: 0.9rem; color: #9d174d;"><strong>Hors-perimetre :</strong> log et Excel indiquent clairement filtrage SRO + message diagnostic</p>
+                    </div>
+                </article>
+
+                <article class="card" style="border: 2px solid #6366f1;">
+                    <div class="card-icon" style="background: #e0e7ff; color: #4f46e5;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                    </div>
+                    <h3>UX et Robustesse</h3>
+                    <p><strong>Disambiguation inline</strong> pour multi-candidats. <strong>Diagnostic</strong> 6 sections. <strong>Preflight</strong> global avant batch. Persistance etat QgsSettings. Liens cliquables. Standalone C6 folder detection.</p>
+                    <ul style="margin-top: 1rem; padding-left: 1.5rem; color: var(--text-secondary); font-size: 0.9rem;">
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Patterns detection elargis (ETUDE COMAC, KPFT, etc.)</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Rapport unifie multi-modules (unified_report.py)</li>
+                        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Recap post-batch avec metriques par module</li>
                     </ul>
                 </article>
             </div>
 
-            <!-- Schéma détaillé du workflow Police C6 v2.3.0 -->
+            <!-- Schéma détaillé du workflow Police C6 v3.1 -->
             <div class="diagram-container" style="margin-top: 3rem;">
-                <h3 class="diagram-title">Workflow Police C6 - v2.3.0 avec auto-détection + filtres optimisés</h3>
+                <h3 class="diagram-title">Workflow Police C6 - v3.1 : bold-only, attaches-aware, dual-path NGE/Axione, compteur [i/N]</h3>
                 <svg class="architecture-svg" viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg">
                     <defs>
                         <marker id="arrow-workflow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5611,7 +5864,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
 
             <div style="text-align: center; margin-top: 2rem;">
                 <div style="display: inline-block; padding: 1rem 2rem; background: white; border-radius: var(--radius); box-shadow: var(--shadow);">
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> <strong>Architecture v2.3.0</strong> : 34 fichiers Python • ~11 900 lignes • 6 workflows • PostgreSQL natif • -791 lignes dead code</p>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> <strong>Architecture v3.1</strong> : 26 fichiers Python • ~10 500 lignes • 6 workflows • PostgreSQL natif • GraceTHD Axione • Mode Projet BDD • 4 sprints optimisation</p>
                 </div>
             </div>
         </section>

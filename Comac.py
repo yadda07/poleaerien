@@ -160,23 +160,28 @@ class Comac:
 
 
 
-    def extraire_donnees_comac(self, table_poteau, table_etude_comac, colonne_comac):
+    def extraire_donnees_comac(self, table_poteau, table_etude_comac, colonne_comac,
+                               be_type='nge'):
 
         """Extraction complete COMAC en une seule passe.
 
         
+        Args:
+            be_type: 'nge' (POT-BT uniquement) ou 'axione' (POT-FT + POT-BT)
 
         Returns:
 
             tuple: (doublons, hors_etude, dico_qgis, dico_poteaux_prives)
 
         """
+        # Axione: COMAC inclut FT + BT ; NGE: COMAC = BT uniquement
+        pot_filter = 'POT-%' if be_type == 'axione' else 'POT-BT'
 
         return extraire_poteaux_etude(
 
             table_poteau, table_etude_comac, colonne_comac,
 
-            'POT-BT', 'COMAC'
+            pot_filter, 'COMAC'
 
         )
 
@@ -260,6 +265,8 @@ class Comac:
 
         dicoBoitierParAppui = {}  # {appui_norm → True} pour appuis avec boîtier=oui
 
+        dicoCoordsPoteaux = {}  # {nompot → (x, y)} coordonnees Lambert 93 depuis Excel
+
         fichiersComacExistants = []
 
         fichiersComacEnDoublons = []
@@ -274,7 +281,8 @@ class Comac:
 
         # Fichiers à exclure
 
-        PATTERNS_EXCLUS = ['ANALYSE_', 'RAPPORT', 'SYNTHESE', 'RESUME', 'C6', 'C7', 'FICHEAPPUI']
+        PATTERNS_EXCLUS = ['ANALYSE_', 'RAPPORT', 'SYNTHESE', 'RESUME', 'C6', 'C7', 'FICHEAPPUI',
+                           '_DISTANCES', '_CONTROLES', '_LONGUEURS']
 
         
 
@@ -294,9 +302,15 @@ class Comac:
 
                     
 
-                    # Exclure fichiers non-COMAC
+                    # Exclure fichiers non-COMAC (par nom fichier OU nom dossier parent)
+
+                    parent_folder = os.path.basename(subdir).upper()
 
                     if any(excl in name_upper for excl in PATTERNS_EXCLUS):
+
+                        continue
+
+                    if any(excl in parent_folder for excl in PATTERNS_EXCLUS):
 
                         continue
 
@@ -309,8 +323,6 @@ class Comac:
                     
 
                     # Fallback: accepter tous les Excel dans dossiers d'études (NGE-*, PA-*)
-
-                    parent_folder = os.path.basename(subdir).upper()
 
                     is_in_etude_folder = any(pat in parent_folder for pat in ['NGE-', 'PA-', 'B1L-', 'B1I-'])
 
@@ -375,13 +387,32 @@ class Comac:
                                 continue
 
                             
+                            nompot_raw = str(numPotBt).strip()
 
-                            nompot = str(numPotBt).replace("BT ", "BT-")
+                            # Filtrer les portees/distances (pas des numeros de poteaux)
+                            # Ex: "Supports FT_X à E000Y/03158", "E000X_03158 à E000Y_03158"
+                            if ' à ' in nompot_raw or ' a ' in nompot_raw.lower():
+                                continue
+                            if nompot_raw.lower().startswith('support'):
+                                continue
+
+                            nompot = nompot_raw.replace("BT ", "BT-")
 
                             listePoteauBt.append(nompot)
 
-                            
+                            # Extraction coordonnees XY (col K=10, L=11) Lambert 93
+                            coord_x_raw = row[10] if len(row) > 11 and row[10] else None
+                            coord_y_raw = row[11] if len(row) > 11 and row[11] else None
+                            if coord_x_raw and coord_y_raw:
+                                try:
+                                    cx = float(str(coord_x_raw).replace(',', '.').replace(' ', ''))
+                                    cy = float(str(coord_y_raw).replace(',', '.').replace(' ', ''))
+                                    if cx > 100000 and cy > 6000000:
+                                        dicoCoordsPoteaux[nompot] = (cx, cy)
+                                except (ValueError, TypeError):
+                                    pass
 
+                            
                             # Extraction données sécurité avec validation NULL explicite
 
                             hauteur_hors_sol_raw = row[EXCEL_COL_HAUTEUR_HORS_SOL] if len(row) > EXCEL_COL_HAUTEUR_HORS_SOL and row[EXCEL_COL_HAUTEUR_HORS_SOL] else None
@@ -556,19 +587,27 @@ class Comac:
 
         
 
+        total_poteaux = sum(len(v) for v in dicoPoteauBt_SousTraitant.values())
         QgsMessageLog.logMessage(
-
             f"[COMAC] Lecture terminée: {fichiers_valides}/{fichiers_trouves} fichiers valides, "
-
-            f"{sum(len(v) for v in dicoPoteauBt_SousTraitant.values())} poteaux total",
-
+            f"{total_poteaux} poteaux total, "
+            f"{len(dicoCablesParAppui)} appuis avec cables, {len(dicoBoitierParAppui)} appuis avec boitier, "
+            f"{len(dicoCoordsPoteaux)} poteaux avec coordonnees XY",
             "PoleAerien", Qgis.Info
-
         )
+        # Sample des noms de poteaux pour diagnostic normalisation
+        all_pot_names = []
+        for pots in dicoPoteauBt_SousTraitant.values():
+            all_pot_names.extend(pots[:3])
+            if len(all_pot_names) >= 10:
+                break
+        if all_pot_names:
+            QgsMessageLog.logMessage(
+                f"[COMAC] Noms poteaux Excel (sample): {all_pot_names[:10]}",
+                "PoleAerien", Qgis.Info
+            )
 
-
-
-        return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui, dicoBoitierParAppui
+        return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui, dicoBoitierParAppui, dicoCoordsPoteaux
 
 
 
@@ -646,19 +685,38 @@ class Comac:
 
 
 
-    def traitementResultatFinaux(self, dicoEtudeComacPoteauQgis, dicoPoteauBt_SousTraitant):
+    def traitementResultatFinaux(self, dicoEtudeComacPoteauQgis, dicoPoteauBt_SousTraitant,
+                                 all_inf_nums=None):
 
         """Traite les résultats finaux des deux dictionnaires.
 
         
+        Args:
+            all_inf_nums: Set de tous les inf_num normalises de infra_pt_pot.
+                Permet de distinguer ABSENT (poteau inexistant) vs HORS_PERIMETRE
+                (poteau existe mais hors zones etude_comac).
 
         Returns:
 
-            tuple: (introuvables_excel, introuvables_qgis, existants)
+            tuple: (introuvables_excel, introuvables_qgis, existants, hors_perimetre)
 
         """
+        from qgis.core import QgsMessageLog, Qgis
+
+        total_qgis = sum(len(v) for v in dicoEtudeComacPoteauQgis.values())
+        total_excel = sum(len(v) for v in dicoPoteauBt_SousTraitant.values())
+        QgsMessageLog.logMessage(
+            f"[COMAC] traitementResultatFinaux: {total_qgis} poteaux QGIS ({len(dicoEtudeComacPoteauQgis)} etudes), "
+            f"{total_excel} poteaux Excel ({len(dicoPoteauBt_SousTraitant)} fichiers), "
+            f"{len(all_inf_nums) if all_inf_nums else 0} inf_num dans couche complete",
+            "PoleAerien", Qgis.Info
+        )
+
+        if all_inf_nums is None:
+            all_inf_nums = set()
 
         dicoPotBt_Excel_Introuvable = {}
+        dicoPotBt_HorsPerimetre = {}
 
         dicoPotBtExistants = {}
 
@@ -685,6 +743,7 @@ class Comac:
         for excel, listePoteau in dicoPoteauBt_SousTraitant.items():
 
             PotBtintrouvableSt = []
+            PotBtHorsPerimetreSt = []
 
             
 
@@ -729,8 +788,11 @@ class Comac:
                         del index_qgis[cle_excel]
 
                 else:
-
-                    PotBtintrouvableSt.append(poteauSt)
+                    # Poteau non trouve dans les zones etude: verifier s'il existe dans la couche
+                    if cle_excel and cle_excel in all_inf_nums:
+                        PotBtHorsPerimetreSt.append(poteauSt)
+                    else:
+                        PotBtintrouvableSt.append(poteauSt)
 
 
 
@@ -738,9 +800,41 @@ class Comac:
 
                 dicoPotBt_Excel_Introuvable[excel] = PotBtintrouvableSt
 
+            if PotBtHorsPerimetreSt:
+
+                dicoPotBt_HorsPerimetre[excel] = PotBtHorsPerimetreSt
 
 
-        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants
+        # Resume comparaison
+        nb_match = len(dicoPotBtExistants)
+        nb_absent = sum(len(v) for v in dicoPotBt_Excel_Introuvable.values())
+        nb_hors_p = sum(len(v) for v in dicoPotBt_HorsPerimetre.values())
+        nb_restant_qgis = sum(len(v) for v in dicoEtudeComacPoteauQgis.values())
+        QgsMessageLog.logMessage(
+            f"[COMAC] Comparaison: {nb_match} correspondances, "
+            f"{nb_hors_p} hors perimetre etude (existent dans couche SRO), "
+            f"{nb_absent} absents (inexistants dans couche SRO), "
+            f"{nb_restant_qgis} restants QGIS non trouves dans Excel",
+            "PoleAerien", Qgis.Info
+        )
+        if dicoPotBt_HorsPerimetre:
+            sample_hp = []
+            for fichier, pots in list(dicoPotBt_HorsPerimetre.items())[:2]:
+                sample_hp.append(f"{fichier}: {pots[:5]}")
+            QgsMessageLog.logMessage(
+                f"[COMAC] Hors perimetre etude (present dans couche SRO, hors zones etude_comac): {sample_hp}",
+                "PoleAerien", Qgis.Info
+            )
+        if dicoPotBt_Excel_Introuvable:
+            sample_abs = []
+            for fichier, pots in list(dicoPotBt_Excel_Introuvable.items())[:2]:
+                sample_abs.append(f"{fichier}: {pots[:5]}")
+            QgsMessageLog.logMessage(
+                f"[COMAC] Absents couche SRO (inexistants dans infra_pt_pot filtre SRO): {sample_abs}",
+                "PoleAerien", Qgis.Warning
+            )
+
+        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre
 
 
 
@@ -750,11 +844,13 @@ class Comac:
 
         dico_cables_comac: dict,
 
-        cables_par_appui: dict
+        cables_par_appui: dict,
+
+        ref_label: str = 'BDD'
 
     ) -> list:
 
-        """Compare cables COMAC vs BDD. Delegue a cable_analyzer.comparer_source_cables()."""
+        """Compare cables COMAC vs BDD/GraceTHD. Delegue a cable_analyzer.comparer_source_cables()."""
 
         from .cable_analyzer import comparer_source_cables
 
@@ -764,7 +860,9 @@ class Comac:
 
             source_label="COMAC",
 
-            get_capacites_fn=get_capacites_possibles
+            get_capacites_fn=get_capacites_possibles,
+
+            ref_label=ref_label
 
         )
 
@@ -797,6 +895,8 @@ class Comac:
         dicoEtudeComacPotQgisIntrouvable = resultatsFinaux[1]
 
         dicoPotBtExistants = resultatsFinaux[2]
+
+        dicoPotBt_HorsPerimetre = resultatsFinaux[3] if len(resultatsFinaux) > 3 else {}
 
 
 
@@ -882,8 +982,24 @@ class Comac:
 
                 feuille.cell(row=my_ligne, column=4, value=fichierExcels).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=red_color)
 
-                feuille.cell(row=my_ligne, column=5, value="infra inexistant dans QGIS").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=red_color)
+                feuille.cell(row=my_ligne, column=5, value="ABSENT - inexistant dans couche SRO").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=red_color)
 
+
+        ####################### HORS PERIMETRE ETUDE ####################################
+
+        blue_color = openpyxl.styles.colors.Color(rgb='6baed6')
+
+        for fichierExcels, listesDesAppuis in dicoPotBt_HorsPerimetre.items():
+
+            for inf_num_excel in listesDesAppuis:
+
+                my_ligne += 1
+
+                feuille.cell(row=my_ligne, column=3, value=inf_num_excel).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=blue_color)
+
+                feuille.cell(row=my_ligne, column=4, value=fichierExcels).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=blue_color)
+
+                feuille.cell(row=my_ligne, column=5, value="HORS PERIMETRE - existe dans la zone SRO mais hors zone etude COMAC").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=blue_color)
 
 
         ####################### QGIS INTROUVABLE #######################################

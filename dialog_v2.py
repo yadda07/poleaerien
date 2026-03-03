@@ -8,16 +8,17 @@ Single project folder -> auto-detect -> select modules -> execute all.
 """
 
 import os
+import re
 
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QLineEdit, QCheckBox, QFrame,
     QTextBrowser, QProgressBar, QFileDialog,
     QWidget, QScrollArea, QSplitter,
-    QRadioButton, QButtonGroup,
+    QRadioButton, QButtonGroup, QDialogButtonBox,
 )
-from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
-from qgis.PyQt.QtGui import QTextCursor, QFont
+from qgis.PyQt.QtCore import Qt, QSize, QEvent, pyqtSignal, QStringListModel
+from qgis.PyQt.QtGui import QTextCursor, QFont, QPalette, QColor
 from qgis.core import QgsApplication, QgsProject, QgsMapLayerProxyModel
 from qgis.gui import QgsMapLayerComboBox, QgsCollapsibleGroupBox
 
@@ -38,149 +39,267 @@ def _plugin_icon(name):
     """Load SVG icon from plugin images folder (fallback)."""
     path = os.path.join(PLUGIN_DIR, 'images', name)
     if os.path.exists(path):
+        from qgis.PyQt.QtGui import QIcon
         return QIcon(path)
+    from qgis.PyQt.QtGui import QIcon
     return QIcon()
 
 
 # ---------------------------------------------------------------------------
-#  Stylesheet — professional, compact, native-feeling
+#  Theme-aware color resolver
 # ---------------------------------------------------------------------------
 
-_GLOBAL_SS = """
-QDialog#PoleAerienBatch {
-    background-color: palette(window);
-}
+class _ThemeColors:
+    """Resolves semantic colors from QPalette so the UI follows the
+    active QGIS theme (light, dark, or custom).
 
-/* --- Groupboxes: native look with subtle refinement --- */
-QGroupBox {
-    font-weight: 600;
-    border: 1px solid palette(mid);
-    border-radius: 3px;
-    margin-top: 1.2em;
-    padding-top: 0.6em;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 8px;
-    padding: 0 4px;
-}
+    _widget_palette_ref: when set to a widget (e.g. the log QTextBrowser),
+    pal() uses that widget's synthesized palette instead of the application
+    palette. Qt synthesizes widget palettes from QSS stylesheets, so this
+    correctly reflects QGIS dark themes even when the app-level palette is
+    unchanged.
+    """
 
-/* --- Buttons --- */
-QPushButton#btnStart {
-    background-color: #2e7d32;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    padding: 7px 22px;
-    font-weight: bold;
-    font-size: 10pt;
-}
-QPushButton#btnStart:hover {
-    background-color: #1b5e20;
-}
-QPushButton#btnStart:pressed {
-    background-color: #174f1a;
-}
-QPushButton#btnStart:disabled {
-    background-color: palette(mid);
-    color: palette(midlight);
-}
+    _widget_palette_ref = None
 
-QPushButton#btnCancel {
-    background-color: #c62828;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    padding: 7px 22px;
-    font-weight: bold;
-    font-size: 10pt;
-}
-QPushButton#btnCancel:hover {
-    background-color: #b71c1c;
-}
+    @staticmethod
+    def pal():
+        ref = _ThemeColors._widget_palette_ref
+        if ref is not None:
+            try:
+                return ref.palette()
+            except RuntimeError:
+                _ThemeColors._widget_palette_ref = None
+        return QgsApplication.instance().palette()
 
-QPushButton#btnSecondary {
-    border: 1px solid palette(mid);
-    border-radius: 3px;
-    padding: 4px 12px;
-    background: palette(button);
-}
-QPushButton#btnSecondary:hover {
-    background: palette(midlight);
-    border-color: palette(dark);
-}
+    @classmethod
+    def _is_dark(cls):
+        p = cls.pal()
+        # QPalette.Base is the text-widget background — Qt synthesizes it from
+        # QSS stylesheets, so it reflects QGIS dark themes reliably.
+        base = p.color(QPalette.Base)
+        if base.isValid() and base.lightnessF() < 0.5:
+            return True
+        # Fallback: main window background
+        return p.color(QPalette.Window).lightnessF() < 0.5
 
-QPushButton#btnBrowse {
-    border: 1px solid palette(mid);
-    border-radius: 2px;
-    padding: 3px;
-    background: palette(button);
-    min-width: 28px;
-    max-width: 28px;
-}
-QPushButton#btnBrowse:hover {
-    background: palette(midlight);
-    border-color: palette(highlight);
-}
+    # --- Semantic colors (adapt to light/dark) ---
 
-/* --- Path inputs --- */
-QLineEdit#pathEdit {
-    border: 1px solid palette(mid);
-    border-radius: 2px;
-    padding: 4px 6px;
-}
-QLineEdit#pathEdit:focus {
-    border-color: palette(highlight);
-}
-QLineEdit#pathEdit:read-only {
-    background: palette(window);
-    color: palette(mid);
-}
+    @classmethod
+    def ok(cls):
+        """Success / positive — green tones."""
+        return QColor(76, 175, 80) if cls._is_dark() else QColor(46, 125, 50)
 
-/* --- Progress bar --- */
-QProgressBar#mainProgress {
-    border: 1px solid palette(mid);
-    border-radius: 2px;
-    text-align: center;
-    height: 16px;
-    font-size: 8pt;
-}
-QProgressBar#mainProgress::chunk {
-    background-color: #2e7d32;
-    border-radius: 1px;
-}
+    @classmethod
+    def ok_hover(cls):
+        return QColor(56, 142, 60) if cls._is_dark() else QColor(27, 94, 32)
 
-/* --- Log area --- */
-QTextBrowser#logBrowser {
-    border: 1px solid palette(mid);
-    border-radius: 2px;
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 8.5pt;
-}
+    @classmethod
+    def ok_pressed(cls):
+        return QColor(46, 125, 50) if cls._is_dark() else QColor(23, 79, 26)
 
-/* --- Detection tree --- */
-QTreeWidget#detectionTree {
-    border: 1px solid palette(mid);
-    border-radius: 2px;
-    alternate-background-color: palette(alternateBase);
-    font-size: 9pt;
-}
-QTreeWidget#detectionTree::item {
-    padding: 3px 0;
-}
-QTreeWidget#detectionTree::item:hover {
-    background: palette(midlight);
-}
+    @classmethod
+    def error(cls):
+        """Error / destructive — red tones."""
+        return QColor(239, 83, 80) if cls._is_dark() else QColor(198, 40, 40)
 
-/* --- Module checkboxes --- */
-QCheckBox#moduleCheck {
-    spacing: 6px;
-    font-size: 9pt;
-}
-QCheckBox#moduleCheck:disabled {
-    color: palette(mid);
-}
-"""
+    @classmethod
+    def error_hover(cls):
+        return QColor(229, 57, 53) if cls._is_dark() else QColor(183, 28, 28)
+
+    @classmethod
+    def info(cls):
+        """Information / accent — blue tones."""
+        return QColor(100, 181, 246) if cls._is_dark() else QColor(21, 101, 192)
+
+    @classmethod
+    def warn(cls):
+        """Warning — orange tones."""
+        return QColor(255, 167, 38) if cls._is_dark() else QColor(230, 81, 0)
+
+    @classmethod
+    def dim(cls):
+        """Dimmed / secondary text."""
+        p = cls.pal()
+        c = p.color(QPalette.WindowText)
+        c.setAlphaF(0.55)
+        return c
+
+    @classmethod
+    def tag_bg(cls):
+        """Background for the project tag pill."""
+        p = cls.pal()
+        if cls._is_dark():
+            return p.color(QPalette.Midlight)
+        return p.color(QPalette.Mid)
+
+    @classmethod
+    def tag_fg(cls):
+        """Foreground for the project tag pill."""
+        p = cls.pal()
+        if cls._is_dark():
+            return p.color(QPalette.WindowText)
+        return p.color(QPalette.BrightText)
+
+    @classmethod
+    def highlight(cls):
+        """The native highlight color from the palette."""
+        return cls.pal().color(QPalette.Highlight)
+
+    @classmethod
+    def progress_chunk(cls):
+        """Progress bar fill — uses the highlight or ok color."""
+        return cls.highlight()
+
+
+def _c(color):
+    """Convert QColor to CSS hex string."""
+    return color.name()
+
+
+# ---------------------------------------------------------------------------
+#  Targeted styles — only for action buttons; everything else is native Qt
+# ---------------------------------------------------------------------------
+
+def _btn_start_style():
+    """Stylesheet for the green Start button only."""
+    ok = _c(_ThemeColors.ok())
+    ok_h = _c(_ThemeColors.ok_hover())
+    ok_p = _c(_ThemeColors.ok_pressed())
+    mid = _c(_ThemeColors.pal().color(QPalette.Mid))
+    midl = _c(_ThemeColors.pal().color(QPalette.Midlight))
+    return (
+        f"QPushButton {{ background-color: {ok}; color: white; border: none;"
+        f" border-radius: 3px; padding: 7px 22px; font-weight: bold; font-size: 10pt; }}"
+        f" QPushButton:hover {{ background-color: {ok_h}; }}"
+        f" QPushButton:pressed {{ background-color: {ok_p}; }}"
+        f" QPushButton:disabled {{ background-color: {mid}; color: {midl}; }}"
+    )
+
+
+def _btn_cancel_style():
+    """Stylesheet for the red Cancel button only."""
+    err = _c(_ThemeColors.error())
+    err_h = _c(_ThemeColors.error_hover())
+    return (
+        f"QPushButton {{ background-color: {err}; color: white; border: none;"
+        f" border-radius: 3px; padding: 7px 22px; font-weight: bold; font-size: 10pt; }}"
+        f" QPushButton:hover {{ background-color: {err_h}; }}"
+    )
+
+
+def _make_font(pt=None, bold=False, family=None):
+    """Create a QFont with optional overrides."""
+    f = QFont()
+    if pt:
+        f.setPointSizeF(pt)
+    if bold:
+        f.setBold(True)
+    if family:
+        f.setFamily(family)
+    return f
+
+
+def _set_foreground(widget, color):
+    """Set a widget's foreground color via QPalette (theme-safe)."""
+    pal = widget.palette()
+    pal.setColor(QPalette.WindowText, color)
+    widget.setPalette(pal)
+
+
+# ---------------------------------------------------------------------------
+#  SRO manual input dialog
+# ---------------------------------------------------------------------------
+
+_SRO_REGEX = re.compile(
+    r'^\d{5}/[A-Z0-9]{2,3}/[A-Z]{2,3}/\d{5}$',
+    re.IGNORECASE
+)
+
+
+class SroInputDialog(QDialog):
+    """Compact native-looking dialog for manual SRO entry with DB autocomplete."""
+
+    def __init__(self, current_sro='', project_name='', sro_list=None,
+                 parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('SRO')
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowContextHelpButtonHint
+        )
+        self.setFixedWidth(340)
+
+        self._result_sro = ''
+
+        lay = QFormLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(6)
+
+        # Hint
+        hint = QLabel('ex: 63041/B1I/PMZ/00003')
+        hint.setFont(_make_font(pt=8))
+        _set_foreground(hint, _ThemeColors.dim())
+
+        # Input
+        self._edit = QLineEdit(current_sro)
+        self._edit.setPlaceholderText('XXXXX/YYY/ZZZ/NNNNN')
+        self._edit.setMaxLength(25)
+        self._edit.setFont(QFont('Consolas', 9))
+        self._edit.textChanged.connect(self._on_text_changed)
+
+        # Autocomplete from DB if available
+        if sro_list:
+            from qgis.PyQt.QtWidgets import QCompleter
+            completer = QCompleter(sro_list, self)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            completer.setMaxVisibleItems(12)
+            self._edit.setCompleter(completer)
+
+        # Validation
+        self._validation = QLabel()
+        self._validation.setFont(_make_font(pt=8))
+
+        lay.addRow('SRO :', self._edit)
+        lay.addRow('', hint)
+        lay.addRow('', self._validation)
+
+        # Standard button box (native OK/Cancel)
+        self._btn_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        self._btn_box.accepted.connect(self._accept)
+        self._btn_box.rejected.connect(self.reject)
+        lay.addRow(self._btn_box)
+
+        self._on_text_changed(self._edit.text())
+
+    def _on_text_changed(self, text):
+        text = text.strip().upper()
+        if not text:
+            self._validation.setText('')
+            self._btn_box.button(self._btn_box.Ok).setEnabled(False)
+            return
+        normalized = text.replace('-', '/').replace('_', '/')
+        if _SRO_REGEX.match(normalized):
+            self._validation.setText('[OK]')
+            _set_foreground(self._validation, _ThemeColors.ok())
+            self._btn_box.button(self._btn_box.Ok).setEnabled(True)
+        else:
+            self._validation.setText('Format: XXXXX/YYY/ZZZ/NNNNN')
+            _set_foreground(self._validation, _ThemeColors.error())
+            self._btn_box.button(self._btn_box.Ok).setEnabled(False)
+
+    def _accept(self):
+        raw = self._edit.text().strip().upper()
+        normalized = raw.replace('-', '/').replace('_', '/')
+        if _SRO_REGEX.match(normalized):
+            parts = normalized.split('/')
+            self._result_sro = f'{parts[0]}/{parts[1]}/{parts[2]}/{parts[3]}'
+            self.accept()
+
+    def get_sro(self) -> str:
+        return self._result_sro
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +321,6 @@ class _ModuleRow(QWidget):
         lay.setSpacing(6)
 
         self.checkbox = QCheckBox(label)
-        self.checkbox.setObjectName("moduleCheck")
         self.checkbox.setEnabled(False)
         if tooltip:
             self.checkbox.setToolTip(tooltip)
@@ -215,7 +333,8 @@ class _ModuleRow(QWidget):
         lay.addWidget(self.status_icon)
 
         self.path_label = QLabel()
-        self.path_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        self.path_label.setFont(_make_font(pt=8))
+        _set_foreground(self.path_label, _ThemeColors.dim())
         self.path_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.path_label.setMinimumWidth(80)
         self.path_label.setMaximumWidth(260)
@@ -239,13 +358,14 @@ class _ModuleRow(QWidget):
 
     def _update_status_icon(self, found, diagnostic=''):
         self.status_icon.clear()
+        self.status_icon.setFont(_make_font(pt=8, bold=True))
         if found:
             self.status_icon.setText("[OK]")
-            self.status_icon.setStyleSheet("color: #2e7d32; font-size: 8pt; font-weight: bold;")
+            _set_foreground(self.status_icon, _ThemeColors.ok())
             self.status_icon.setToolTip("Detecte")
         else:
             self.status_icon.setText("[--]")
-            self.status_icon.setStyleSheet("color: #c62828; font-size: 8pt; font-weight: bold;")
+            _set_foreground(self.status_icon, _ThemeColors.error())
             tip = "Non detecte"
             if diagnostic:
                 tip += "\n" + diagnostic
@@ -289,7 +409,6 @@ class PoleAerienDialogV2(QDialog):
         self.setWindowIcon(_qgs_icon('mActionStart.svg'))
         self.setMinimumSize(700, 750)
         self.resize(740, 850)
-        self.setStyleSheet(_GLOBAL_SS)
 
         root = QVBoxLayout(self)
         root.setSpacing(6)
@@ -343,23 +462,21 @@ class PoleAerienDialogV2(QDialog):
         lay.addWidget(title)
 
         self._subtitle = QLabel("  -  Selectionnez un dossier projet")
-        self._subtitle.setStyleSheet("color: palette(mid); font-size: 9pt;")
+        self._subtitle.setFont(_make_font(pt=9))
+        _set_foreground(self._subtitle, _ThemeColors.dim())
         lay.addWidget(self._subtitle)
 
         lay.addStretch()
 
         self._project_tag = QLabel()
         self._project_tag.setVisible(False)
-        self._project_tag.setStyleSheet("""
-            QLabel {
-                background: #37474f;
-                color: #eceff1;
-                padding: 2px 10px;
-                border-radius: 2px;
-                font-weight: bold;
-                font-size: 9pt;
-            }
-        """)
+        self._project_tag.setFont(_make_font(pt=9, bold=True))
+        self._project_tag.setAutoFillBackground(True)
+        tag_pal = self._project_tag.palette()
+        tag_pal.setColor(QPalette.Window, _ThemeColors.tag_bg())
+        tag_pal.setColor(QPalette.WindowText, _ThemeColors.tag_fg())
+        self._project_tag.setPalette(tag_pal)
+        self._project_tag.setContentsMargins(10, 2, 10, 2)
         lay.addWidget(self._project_tag)
 
         sep = QFrame()
@@ -385,16 +502,14 @@ class PoleAerienDialogV2(QDialog):
 
         lbl = QLabel("Projet :")
         lbl.setFixedWidth(52)
-        lbl.setStyleSheet("font-weight: 600; font-size: 9pt;")
+        lbl.setFont(_make_font(pt=9, bold=True))
         row1.addWidget(lbl)
 
         self.projectPathEdit = QLineEdit()
-        self.projectPathEdit.setObjectName("pathEdit")
         self.projectPathEdit.setPlaceholderText("Chemin du dossier projet...")
         row1.addWidget(self.projectPathEdit)
 
         self.browseProjectBtn = QPushButton()
-        self.browseProjectBtn.setObjectName("btnBrowse")
         self.browseProjectBtn.setIcon(_qgs_icon('mActionFileOpen.svg'))
         self.browseProjectBtn.setIconSize(QSize(16, 16))
         self.browseProjectBtn.setToolTip("Parcourir...")
@@ -402,7 +517,6 @@ class PoleAerienDialogV2(QDialog):
         row1.addWidget(self.browseProjectBtn)
 
         self.refreshBtn = QPushButton()
-        self.refreshBtn.setObjectName("btnBrowse")
         self.refreshBtn.setIcon(_qgs_icon('mActionRefresh.svg'))
         self.refreshBtn.setIconSize(QSize(16, 16))
         self.refreshBtn.setToolTip("Re-detecter les dossiers (synchroniser)")
@@ -417,16 +531,14 @@ class PoleAerienDialogV2(QDialog):
 
         lbl2 = QLabel("Export :")
         lbl2.setFixedWidth(52)
-        lbl2.setStyleSheet("font-weight: 600; font-size: 9pt;")
+        lbl2.setFont(_make_font(pt=9, bold=True))
         row2.addWidget(lbl2)
 
         self.exportPathEdit = QLineEdit()
-        self.exportPathEdit.setObjectName("pathEdit")
         self.exportPathEdit.setPlaceholderText("Dossier d'export (défaut = projet)")
         row2.addWidget(self.exportPathEdit)
 
         self.browseExportBtn = QPushButton()
-        self.browseExportBtn.setObjectName("btnBrowse")
         self.browseExportBtn.setIcon(_qgs_icon('mActionFileSaveAs.svg'))
         self.browseExportBtn.setIconSize(QSize(16, 16))
         self.browseExportBtn.setToolTip("Changer le dossier d'export")
@@ -438,7 +550,9 @@ class PoleAerienDialogV2(QDialog):
         # Detection summary label
         self._det_summary = QLabel()
         self._det_summary.setWordWrap(True)
-        self._det_summary.setStyleSheet("color: palette(mid); font-size: 8pt; padding: 2px 0;")
+        self._det_summary.setFont(_make_font(pt=8))
+        _set_foreground(self._det_summary, _ThemeColors.dim())
+        self._det_summary.setContentsMargins(0, 2, 0, 2)
         self._det_summary.setVisible(False)
         lay.addWidget(self._det_summary)
 
@@ -483,20 +597,26 @@ class PoleAerienDialogV2(QDialog):
 
         sro_lbl = QLabel("SRO :")
         sro_lbl.setFixedWidth(52)
-        sro_lbl.setStyleSheet("font-weight: 600; font-size: 9pt;")
+        sro_lbl.setFont(_make_font(pt=9, bold=True))
         sro_lay.addWidget(sro_lbl)
 
         self._sro_value = QLabel("-")
-        self._sro_value.setStyleSheet(
-            "font-family: 'Consolas', monospace; font-size: 9pt; "
-            "color: #1565c0; font-weight: bold;"
-        )
+        self._sro_value.setFont(_make_font(pt=9, bold=True, family='Consolas'))
+        _set_foreground(self._sro_value, _ThemeColors.info())
         sro_lay.addWidget(self._sro_value)
         sro_lay.addStretch()
 
         self._sro_status = QLabel()
-        self._sro_status.setStyleSheet("font-size: 8pt;")
+        self._sro_status.setFont(_make_font(pt=8))
         sro_lay.addWidget(self._sro_status)
+
+        self._sro_edit_btn = QPushButton()
+        self._sro_edit_btn.setIcon(_qgs_icon('mActionEditTable.svg'))
+        self._sro_edit_btn.setIconSize(QSize(14, 14))
+        self._sro_edit_btn.setToolTip('Saisir le SRO manuellement')
+        self._sro_edit_btn.setCursor(Qt.PointingHandCursor)
+        self._sro_edit_btn.clicked.connect(self._on_sro_edit)
+        sro_lay.addWidget(self._sro_edit_btn)
 
         self._sro_row.setVisible(False)
         lay.addWidget(self._sro_row)
@@ -552,14 +672,12 @@ class PoleAerienDialogV2(QDialog):
         act_row.setSpacing(6)
 
         self.selectAllBtn = QPushButton("Tout cocher")
-        self.selectAllBtn.setObjectName("btnSecondary")
         self.selectAllBtn.setIcon(_qgs_icon('mActionSelectAll.svg'))
         self.selectAllBtn.setIconSize(QSize(14, 14))
         self.selectAllBtn.setCursor(Qt.PointingHandCursor)
         act_row.addWidget(self.selectAllBtn)
 
         self.deselectAllBtn = QPushButton("Tout décocher")
-        self.deselectAllBtn.setObjectName("btnSecondary")
         self.deselectAllBtn.setIcon(_qgs_icon('mActionDeselectAll.svg'))
         self.deselectAllBtn.setIconSize(QSize(14, 14))
         self.deselectAllBtn.setCursor(Qt.PointingHandCursor)
@@ -568,7 +686,8 @@ class PoleAerienDialogV2(QDialog):
         act_row.addStretch()
 
         self._mod_count = QLabel("0/6")
-        self._mod_count.setStyleSheet("color: palette(mid); font-size: 8.5pt;")
+        self._mod_count.setFont(_make_font(pt=8.5))
+        _set_foreground(self._mod_count, _ThemeColors.dim())
         act_row.addWidget(self._mod_count)
 
         lay.addLayout(act_row)
@@ -614,7 +733,6 @@ class PoleAerienDialogV2(QDialog):
     # ---- Progress ----
     def _build_progress(self, parent):
         self.progressBar = QProgressBar()
-        self.progressBar.setObjectName("mainProgress")
         self.progressBar.setRange(0, 100)
         self.progressBar.setValue(0)
         self.progressBar.setTextVisible(True)
@@ -635,19 +753,17 @@ class PoleAerienDialogV2(QDialog):
         hdr.setSpacing(6)
 
         lbl = QLabel("Journal")
-        lbl.setStyleSheet("font-weight: 600; font-size: 9pt;")
+        lbl.setFont(_make_font(pt=9, bold=True))
         hdr.addWidget(lbl)
         hdr.addStretch()
 
         self.clearLogBtn = QPushButton("Effacer")
-        self.clearLogBtn.setObjectName("btnSecondary")
         self.clearLogBtn.setIcon(_qgs_icon('mActionDeleteSelected.svg'))
         self.clearLogBtn.setIconSize(QSize(12, 12))
         self.clearLogBtn.setCursor(Qt.PointingHandCursor)
         hdr.addWidget(self.clearLogBtn)
 
         self.exportLogBtn = QPushButton("Exporter")
-        self.exportLogBtn.setObjectName("btnSecondary")
         self.exportLogBtn.setIcon(_qgs_icon('mActionFileSaveAs.svg'))
         self.exportLogBtn.setIconSize(QSize(12, 12))
         self.exportLogBtn.setCursor(Qt.PointingHandCursor)
@@ -656,10 +772,15 @@ class PoleAerienDialogV2(QDialog):
         lay.addLayout(hdr)
 
         self.textBrowser = QTextBrowser()
-        self.textBrowser.setObjectName("logBrowser")
+        self.textBrowser.setFont(_make_font(pt=8.5, family='Consolas'))
         self.textBrowser.setOpenExternalLinks(False)
         self.textBrowser.setOpenLinks(False)
         lay.addWidget(self.textBrowser, 1)
+
+        # Point _ThemeColors at this widget so dark-mode detection uses its
+        # synthesized palette (Qt derives it from the applied QSS stylesheet)
+        # rather than the application palette which QGIS never makes dark.
+        _ThemeColors._widget_palette_ref = self.textBrowser
 
         self._build_progress(lay)
 
@@ -671,14 +792,12 @@ class PoleAerienDialogV2(QDialog):
         lay.setSpacing(8)
 
         self.helpButton = QPushButton("Aide")
-        self.helpButton.setObjectName("btnSecondary")
         self.helpButton.setIcon(_qgs_icon('mActionHelpContents.svg'))
         self.helpButton.setIconSize(QSize(16, 16))
         self.helpButton.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.helpButton)
 
         self.diagButton = QPushButton("Diagnostic")
-        self.diagButton.setObjectName("btnSecondary")
         self.diagButton.setIcon(_qgs_icon('mActionPropertiesWidget.svg'))
         self.diagButton.setIconSize(QSize(16, 16))
         self.diagButton.setCursor(Qt.PointingHandCursor)
@@ -691,7 +810,7 @@ class PoleAerienDialogV2(QDialog):
         lay.addStretch()
 
         self.cancelBtn = QPushButton("  Annuler")
-        self.cancelBtn.setObjectName("btnCancel")
+        self.cancelBtn.setStyleSheet(_btn_cancel_style())
         self.cancelBtn.setIcon(_qgs_icon('mTaskCancel.svg'))
         self.cancelBtn.setIconSize(QSize(16, 16))
         self.cancelBtn.setCursor(Qt.PointingHandCursor)
@@ -699,7 +818,7 @@ class PoleAerienDialogV2(QDialog):
         lay.addWidget(self.cancelBtn)
 
         self.startBtn = QPushButton("  Démarrer l'analyse")
-        self.startBtn.setObjectName("btnStart")
+        self.startBtn.setStyleSheet(_btn_start_style())
         self.startBtn.setIcon(_qgs_icon('mActionStart.svg'))
         self.startBtn.setIconSize(QSize(16, 16))
         self.startBtn.setCursor(Qt.PointingHandCursor)
@@ -764,6 +883,37 @@ class PoleAerienDialogV2(QDialog):
             self._run_detection(path)
             self._log_info("Detection resynchronisee.")
 
+    def _on_sro_edit(self):
+        """Open the SRO manual input dialog with DB autocomplete."""
+        # Load SRO list from DB (cached)
+        if not hasattr(self, '_sro_cache'):
+            self._sro_cache = []
+        if not self._sro_cache:
+            try:
+                from .db_connection import get_shared_connection
+                db = get_shared_connection()
+                if db.connect():
+                    self._sro_cache = db.fetch_sro_list()
+            except Exception:
+                pass
+
+        dlg = SroInputDialog(
+            current_sro=self._detection.sro,
+            project_name=self._detection.project_name,
+            sro_list=self._sro_cache,
+            parent=self
+        )
+        if dlg.exec_() == QDialog.Accepted:
+            sro = dlg.get_sro()
+            if sro:
+                self._detection.sro = sro
+                self._sro_value.setText(sro)
+                self._sro_status.setText("[OK] SRO saisi manuellement")
+                _set_foreground(self._sro_status, _ThemeColors.info())
+                self._radio_project.setEnabled(True)
+                self._log_ok(f"  SRO saisi manuellement : {sro}")
+                self._validate_start()
+
     def _on_mode_changed(self, button):
         is_project = (button == self._radio_project)
         self._project_mode = is_project
@@ -773,11 +923,13 @@ class PoleAerienDialogV2(QDialog):
         self._sro_row.setVisible(is_project)
         self._chk_load_layers.setVisible(is_project)
 
-        # Enable project mode radio only if SRO is available
+        # Prompt SRO input if project mode selected but no SRO
         if is_project and not self._detection.sro:
             self._sro_value.setText("-")
-            self._sro_status.setText("[--] SRO non derivable du nom de projet")
-            self._sro_status.setStyleSheet("color: #c62828; font-size: 8pt;")
+            self._sro_status.setText(
+                "[--] SRO requis - cliquez le bouton pour saisir"
+            )
+            _set_foreground(self._sro_status, _ThemeColors.warn())
 
         self._validate_start()
 
@@ -800,17 +952,15 @@ class PoleAerienDialogV2(QDialog):
         if d.sro:
             self._sro_value.setText(d.sro)
             self._sro_status.setText("[OK] SRO detecte")
-            self._sro_status.setStyleSheet("color: #2e7d32; font-size: 8pt;")
+            _set_foreground(self._sro_status, _ThemeColors.ok())
             self._radio_project.setEnabled(True)
         else:
             self._sro_value.setText("-")
-            self._sro_status.setText("[--] Format nom projet non reconnu")
-            self._sro_status.setStyleSheet("color: #c62828; font-size: 8pt;")
-            # Disable project mode if no SRO
-            if self._project_mode:
-                self._radio_qgis.setChecked(True)
-                self._on_mode_changed(self._radio_qgis)
-            self._radio_project.setEnabled(False)
+            self._sro_status.setText(
+                "[--] SRO non reconnu - cliquez le bouton pour saisir"
+            )
+            _set_foreground(self._sro_status, _ThemeColors.warn())
+            self._radio_project.setEnabled(True)
 
         # Export default
         if not self.exportPathEdit.text():
@@ -830,7 +980,8 @@ class PoleAerienDialogV2(QDialog):
             'comac':     (d.has_comac, d.comac_dir,   'COMAC'),
             'c6bd':      (d.has_c6,    d.c6_dir,      'C6 (via CAP FT)'),
             'police_c6': (d.has_c6,    d.c6_dir,      'C6 (via CAP FT)'),
-            'c6c3a':     (d.has_c6 and (d.has_c7 or d.has_c3a), d.c6_dir, 'C6 (via CAP FT)'),
+            'c6c3a':     ((d.has_c6 or d.has_c6_annexe) and (d.has_c7 or d.has_c3a),
+                          d.c6_annexe_file or d.c6_dir, 'C6 annexe'),
         }
         for key, row in self._module_rows.items():
             found, mp, res_label = module_map.get(key, (False, '', ''))
@@ -860,6 +1011,11 @@ class PoleAerienDialogV2(QDialog):
                 "Conseil : verifiez le nommage des dossiers/fichiers "
                 "ou utilisez le bouton Rafraichir apres renommage."
             )
+
+        # Show deduplication warnings
+        for label, hint in d.diagnostics:
+            if label == 'Doublon potentiel':
+                self._log_warn(f"  {label} : {hint}")
 
     def _reset_detection(self):
         self._detection = DetectionResult()
@@ -1046,13 +1202,12 @@ class PoleAerienDialogV2(QDialog):
         pg_ok = False
         if self._project_mode:
             try:
-                from .db_connection import DatabaseConnection
-                db = DatabaseConnection()
+                from .db_connection import get_shared_connection
+                db = get_shared_connection()
                 conn_name = db.find_auvergne_connection()
                 if conn_name and db.connect():
                     self._log_ok(f"  PostgreSQL : OK ({conn_name})")
                     pg_ok = True
-                    db.disconnect()
                 elif conn_name:
                     self._log_warn(f"  PostgreSQL : connexion '{conn_name}' trouvee mais echec")
                 else:
@@ -1091,9 +1246,7 @@ class PoleAerienDialogV2(QDialog):
 
             if len(crs_set) > 1:
                 self._log_warn(
-                    f"  CRS : ATTENTION, CRS heterogenes ({', '.join(crs_set)})")
-            elif len(crs_set) == 1:
-                self._log_ok(f"  CRS : coherent ({crs_set.pop()})")
+                    f"  CRS : heterogenes ({', '.join(crs_set)}) — detail dans Qualite donnees")
 
         # Export
         export_dir = self.exportPathEdit.text() or d.export_dir
@@ -1111,7 +1264,88 @@ class PoleAerienDialogV2(QDialog):
         else:
             self._log_dim("  Export : racine projet (par defaut)")
 
-        # ── 3. Modules ──
+        # ── 3. Qualite donnees ──
+        self._log_info("")
+        self._log_info("<b>--- Qualite donnees ---</b>")
+
+        from .preflight_checks import run_data_quality_checks, format_check_log
+        from .qgis_utils import detect_etude_field as _detect_etude_field
+
+        if not self._project_mode:
+            _lyr_pot_dq = self.comboInfraPtPot.currentLayer()
+            _lyr_cap_dq = self.comboEtudeCapFt.currentLayer()
+            _lyr_com_dq = self.comboEtudeComac.currentLayer()
+        else:
+            _lyr_pot_dq = None
+            _lyr_cap_dq = None
+            _lyr_com_dq = None
+            self._log_dim(
+                "  Mode Projet: verifications couches (PF-01..PF-05) "
+                "executees automatiquement au lancement du batch"
+            )
+
+        _be_type_dq = 'axione' if d.has_gracethd else 'nge'
+        if not d.has_gracethd and d.sro:
+            self._log_dim(
+                "  Type BE : infere 'NGE' (dossier GraceTHD absent). "
+                "Pour un SRO Axione, livrer le dossier GraceTHD pour activer PF-09/10."
+            )
+        _mods_dq = self.selected_modules() or [
+            'maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a'
+        ]
+
+        def _auto_field_diag(lyr):
+            result = _detect_etude_field(lyr, context="Diagnostic")
+            if result:
+                return result
+            if lyr and lyr.isValid():
+                for _fld in lyr.fields():
+                    if _fld.typeName().lower() in ('string', 'text', 'varchar'):
+                        return _fld.name()
+            return None
+
+        self._log_dim("  Analyse en cours...")
+        try:
+            _dq_checks = run_data_quality_checks(
+                _lyr_pot_dq, _lyr_cap_dq, _lyr_com_dq,
+                _mods_dq,
+                auto_field_fn=_auto_field_diag,
+                be_type=_be_type_dq,
+                gracethd_dir=d.gracethd_dir if d.has_gracethd else '',
+                comac_dir=d.comac_dir if d.has_comac else '',
+                capft_dir=d.capft_dir if d.has_capft else '',
+            )
+            if not _dq_checks:
+                self._log_dim("  (aucun check applicable - selectionner des modules et/ou des couches QGIS)")
+            else:
+                _n_block = 0
+                _n_warn = 0
+                for _chk in _dq_checks:
+                    _msg, _lvl = format_check_log(_chk)
+                    if _lvl == 'error':
+                        self._log_err(_msg)
+                        _n_block += 1
+                    elif _lvl == 'warning':
+                        self._log_warn(_msg)
+                        _n_warn += 1
+                    else:
+                        self._log_ok(_msg)
+                if _n_block:
+                    self._log_err(
+                        f"  => {_n_block} probleme(s) BLOQUANT(S) detecte(s) - "
+                        f"corriger avant de lancer."
+                    )
+                elif _n_warn:
+                    self._log_warn(
+                        f"  => {_n_warn} avertissement(s) - "
+                        f"verifier avant de lancer."
+                    )
+                else:
+                    self._log_ok("  => Qualite donnees : OK")
+        except Exception as _dq_exc:
+            self._log_warn(f"  Qualite donnees: erreur inattendue ({_dq_exc})")
+
+        # ── 4. Modules ──
         self._log_info("")
         self._log_info("<b>--- Modules ---</b>")
 
@@ -1249,27 +1483,27 @@ class PoleAerienDialogV2(QDialog):
         self.textBrowser.setTextCursor(c)
 
     def _log_info(self, msg):
-        self._log_html(f'<span style="color:#1565c0">{msg}</span>')
+        self._log_html(f'<span style="color:{_c(_ThemeColors.info())}">{msg}</span>')
 
     def _log_ok(self, msg):
-        self._log_html(f'<span style="color:#2e7d32">{msg}</span>')
+        self._log_html(f'<span style="color:{_c(_ThemeColors.ok())}">{msg}</span>')
 
     def _log_warn(self, msg):
-        self._log_html(f'<span style="color:#e65100">{msg}</span>')
+        self._log_html(f'<span style="color:{_c(_ThemeColors.warn())}">{msg}</span>')
 
     def _log_err(self, msg):
-        self._log_html(f'<span style="color:#c62828"><b>{msg}</b></span>')
+        self._log_html(f'<span style="color:{_c(_ThemeColors.error())}"><b>{msg}</b></span>')
 
     def _log_dim(self, msg):
-        self._log_html(f'<span style="color:gray">{msg}</span>')
+        self._log_html(f'<span style="color:{_c(_ThemeColors.dim())}">{msg}</span>')
 
     def log_result_link(self, filepath):
         """Log a clickable link to open a result file."""
         fname = os.path.basename(filepath)
         url = filepath.replace('\\', '/')
         self._log_html(
-            f'<span style="color:#2e7d32">Rapport : '
-            f'<a href="file:///{url}" style="color:#1565c0; '
+            f'<span style="color:{_c(_ThemeColors.ok())}">Rapport : '
+            f'<a href="file:///{url}" style="color:{_c(_ThemeColors.info())}; '
             f'text-decoration:underline;">{fname}</a></span>'
         )
 
@@ -1322,7 +1556,7 @@ class PoleAerienDialogV2(QDialog):
 
     @property
     def sro(self):
-        """SRO derived from project name, or empty string."""
+        """SRO derived from project name or manually entered."""
         return self._detection.sro
 
     def get_export_dir(self):
@@ -1363,7 +1597,15 @@ class PoleAerienDialogV2(QDialog):
         if best_com[0]:
             self.comboEtudeComac.setLayer(best_com[0])
 
+    def changeEvent(self, event):
+        """Refresh targeted button stylesheets when the QGIS theme changes."""
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange:
+            self.startBtn.setStyleSheet(_btn_start_style())
+            self.cancelBtn.setStyleSheet(_btn_cancel_style())
+
     def closeEvent(self, event):
+        _ThemeColors._widget_palette_ref = None
         if self._is_running:
             self.cancel_requested.emit()
         if self.smooth_progress:

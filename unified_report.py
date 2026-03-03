@@ -135,7 +135,15 @@ def _kpi_capft(r):
     return ok, ne + nq, f"{ok} OK | {ne} absents QGIS | {nq} absents Excel"
 
 def _kpi_comac(r):
-    base_ok, base_nok, base_msg = _kpi_capft(r)
+    res = r.get('resultats')
+    if not res:
+        return 0, 0, ''
+    ne = sum(len(v) for v in res[0].values())
+    nq = sum(len(v) for v in res[1].values())
+    ok = len(res[2])
+    hp = sum(len(v) for v in res[3].values()) if len(res) > 3 else 0
+    base_nok = ne + nq
+    base_msg = f"{ok} OK | {ne} absents SRO | {hp} hors perimetre | {nq} absents Excel"
     # Ajouter câbles + boîtiers au bilan
     verif_cables = r.get('verif_cables')
     cable_nok = 0
@@ -151,7 +159,7 @@ def _kpi_comac(r):
         parts.append(f"{cable_nok} ecarts cables")
     if boitier_nok:
         parts.append(f"{boitier_nok} err boitiers")
-    return base_ok, total_nok, ' | '.join(parts)
+    return ok, total_nok, ' | '.join(parts)
 
 def _kpi_c6bd(r):
     df = r.get('final_df')
@@ -218,8 +226,12 @@ def _checks_comac(r):
         ne = sum(len(v) for v in res[0].values())
         nq = sum(len(v) for v in res[1].values())
         ok = len(res[2])
-        checks.append(("Appuis presents dans QGIS", ok, ne,
-                        f"{ok} trouves, {ne} absents QGIS"))
+        hp = sum(len(v) for v in res[3].values()) if len(res) > 3 else 0
+        checks.append(("Correspondance appuis QGIS/Excel", ok, ne,
+                        f"{ok} trouves, {ne} absents couche SRO"))
+        if hp:
+            checks.append(("Appuis hors perimetre etude", hp, 0,
+                            f"{hp} existent dans couche SRO mais hors zones etude COMAC"))
         checks.append(("Appuis presents dans Excel", ok, nq,
                         f"{ok} trouves, {nq} absents Excel"))
     dico_secu = r.get('dico_verif_secu')
@@ -366,6 +378,32 @@ def _write_dashboard(wb, batch_results):
     ws.cell(row=2, column=2, value=datetime.now().strftime("%d/%m/%Y %H:%M")).font = _F_DATA
     ws.cell(row=3, column=1, value="Modules :").font = _F_BOLD
     ws.cell(row=3, column=2, value=str(len(batch_results))).font = _F_DATA
+
+    # QP-04: Resume executif
+    sro = ''
+    be_label = ''
+    summary_parts = []
+    for key, res in batch_results.items():
+        if not sro:
+            sro = res.get('fddcpi_sro', '') or ''
+        if not be_label:
+            be_label = res.get('be_type', '')
+    if sro:
+        summary_parts.append(f"SRO {sro}")
+    if be_label:
+        summary_parts.append(be_label.upper())
+    summary_parts.append(f"{len(batch_results)} module(s)")
+    for key, kpi_fn in _KPI.items():
+        res = batch_results.get(key)
+        if res:
+            ok, nok, msg = kpi_fn(res)
+            if ok + nok > 0:
+                name = _NAMES.get(key, key)
+                summary_parts.append(f"{name}: {ok} OK/{ok+nok}")
+    ws.merge_cells('A4:H4')
+    c4 = ws.cell(row=4, column=1, value=' — '.join(summary_parts))
+    c4.font = Font(name='Calibri', size=9, italic=True, color='555555')
+    c4.alignment = _AL_C
 
     hdrs = ["MODULE", "VERIFICATION", "STATUT", "TOTAL",
             "CONFORMES", "NON CONFORMES", "% CONFORMITE", "DETAIL"]
@@ -534,8 +572,20 @@ def write_capft(wb, result):
     resultats = result.get('resultats')
     if not resultats:
         return
-    _write_analyse_sheet(wb, "CAPFT_ANALYSE", 'capft', resultats,
+    ws_analyse = _write_analyse_sheet(wb, "CAPFT_ANALYSE", 'capft', resultats,
                          "ABSENT FICHES APPUIS")
+
+    # Ajouter section HORS PERIMETRE (poteaux existant dans zone SRO mais hors zones etude)
+    hors_perimetre = resultats[3] if len(resultats) > 3 else result.get('dico_hors_perimetre', {})
+    if hors_perimetre and ws_analyse:
+        sro_val = result.get('fddcpi_sro', '')
+        hp_label = f"HORS PERIMETRE - existe dans la zone {sro_val} mais hors zone etude CAP_FT" if sro_val else "HORS PERIMETRE - existe dans la zone SRO mais hors zone etude CAP_FT"
+        r = ws_analyse.max_row + 1
+        for fichier, appuis in hors_perimetre.items():
+            for inf_num in appuis:
+                _row(ws_analyse, r, ["", "", inf_num, fichier, hp_label],
+                     fill=_P_INFO)
+                r += 1
 
 
 # ======================================================================
@@ -549,7 +599,19 @@ def write_comac(wb, result):
         return
 
     key = 'comac'
-    _write_analyse_sheet(wb, "COMAC_ANALYSE", key, resultats, "ABSENT EXCELS")
+    ws_analyse = _write_analyse_sheet(wb, "COMAC_ANALYSE", key, resultats, "ABSENT EXCELS")
+
+    # Ajouter section HORS PERIMETRE (poteaux existant dans zone SRO mais hors zones etude)
+    hors_perimetre = resultats[3] if len(resultats) > 3 else result.get('dico_hors_perimetre', {})
+    if hors_perimetre and ws_analyse:
+        sro_val = result.get('fddcpi_sro', '')
+        hp_label = f"HORS PERIMETRE - existe dans la zone {sro_val} mais hors zone etude COMAC" if sro_val else "HORS PERIMETRE - existe dans la zone SRO mais hors zone etude COMAC"
+        r = ws_analyse.max_row + 1
+        for fichier, appuis in hors_perimetre.items():
+            for inf_num in appuis:
+                _row(ws_analyse, r, ["", "", inf_num, fichier, hp_label],
+                     fill=_P_INFO)
+                r += 1
 
     dico_verif_secu = result.get('dico_verif_secu')
     if dico_verif_secu:
@@ -824,5 +886,23 @@ def generate_unified_report(batch_results, export_dir):
                     "PoleAerien", Qgis.Warning
                 )
 
-    wb.save(filepath)
+    # QP-07: Handle file already open (PermissionError)
+    try:
+        wb.save(filepath)
+    except PermissionError:
+        # Fichier probablement ouvert dans Excel — essayer avec suffixe
+        base, ext = os.path.splitext(filepath)
+        for i in range(2, 10):
+            alt_path = f"{base}_{i}{ext}"
+            try:
+                wb.save(alt_path)
+                QgsMessageLog.logMessage(
+                    f"[REPORT] Fichier {os.path.basename(filepath)} verrouille. "
+                    f"Sauvegarde sous {os.path.basename(alt_path)}.",
+                    "PoleAerien", Qgis.Warning
+                )
+                return alt_path
+            except PermissionError:
+                continue
+        raise
     return filepath

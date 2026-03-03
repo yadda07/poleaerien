@@ -57,7 +57,7 @@ class CapFtWorkflow(QObject):
 
         # 1. Extraction des données (Main Thread) - passe unique
         try:
-            doublons, hors_etude, dico_qgis, dico_poteaux_prives = (
+            doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums = (
                 self.cap_logic.extraire_donnees_capft(
                     lyr_pot.name(), lyr_cap.name(), col_cap
                 )
@@ -81,7 +81,8 @@ class CapFtWorkflow(QObject):
             'doublons': list(doublons),
             'hors_etude': list(hors_etude),
             'dico_qgis': copy.deepcopy(dico_qgis),
-            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives)
+            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
+            'all_inf_nums': all_inf_nums,
         }
 
         # 3. Lancement Task Asynchrone

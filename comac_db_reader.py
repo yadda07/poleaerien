@@ -147,34 +147,30 @@ def _extract_fournisseur(nom: str) -> str:
 
 
 def _get_pg_connection():
-    """Obtient une connexion PostgreSQL via db_connection.DatabaseConnection.
+    """Obtient une connexion PostgreSQL via la connexion partagee.
     
-    Delegue la decouverte des credentials QGIS a DatabaseConnection
-    (source unique) puis verifie que le schema comac existe.
+    Reutilise l'instance singleton de DatabaseConnection pour eviter
+    de multiplier les connexions au serveur PostgreSQL.
+    Verifie que le schema comac existe avant de retourner la connexion.
     """
     if not _HAS_PSYCOPG2:
         return None
     
     try:
-        from .db_connection import DatabaseConnection
-        db = DatabaseConnection()
-        conn_name = db.find_auvergne_connection()
-        if not conn_name:
+        from .db_connection import get_shared_connection
+        db = get_shared_connection()
+        if not db.connect():
             return None
-        params = db.get_connection_params(conn_name)
-        conn = psycopg2.connect(
-            host=params['host'], port=params['port'],
-            database=params['database'],
-            user=params['user'], password=params['password']
-        )
+        conn = db.connection
         cur = conn.cursor()
         cur.execute(
             "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
             (PG_SCHEMA,)
         )
         if cur.fetchone():
+            cur.close()
             return conn
-        conn.close()
+        cur.close()
         return None
     except Exception as e:
         print(f"[COMAC_DB] PostgreSQL non disponible: {e}")

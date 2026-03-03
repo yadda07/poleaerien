@@ -114,11 +114,29 @@ class DatabaseConnection:
         
         return params
     
+    def is_connected(self) -> bool:
+        """Verifie si la connexion est active (ping leger)."""
+        if not self.connection:
+            return False
+        try:
+            self.connection.isolation_level
+            cur = self.connection.cursor()
+            cur.execute('SELECT 1')
+            cur.close()
+            return True
+        except Exception:
+            self.connection = None
+            return False
+
     def connect(self) -> bool:
         """
         Établit la connexion à la base de données.
+        Si deja connecte, retourne True sans ouvrir une nouvelle connexion.
         Retourne True si succès, False sinon.
         """
+        if self.is_connected():
+            return True
+
         try:
             # Trouver la connexion Auvergne
             conn_name = self.find_auvergne_connection()
@@ -157,10 +175,17 @@ class DatabaseConnection:
             )
             return False
     
+    def ensure_connected(self) -> bool:
+        """Reconnecte si la connexion a ete perdue. Alias de connect()."""
+        return self.connect()
+
     def disconnect(self):
         """Ferme la connexion."""
         if self.connection:
-            self.connection.close()
+            try:
+                self.connection.close()
+            except Exception:
+                pass
             self.connection = None
     
     def execute_fddcpi2(self, sro: str) -> List[CableSegment]:
@@ -232,6 +257,34 @@ class DatabaseConnection:
             )
             return []
     
+    def fetch_sro_list(self) -> List[str]:
+        """
+        Recupere la liste des SRO depuis rip_avg_nge.za_sro.
+        Utilisee pour l'autocompletion dans la saisie manuelle du SRO.
+
+        Returns:
+            Liste triee de codes SRO (ex: ['63041/B1I/PMZ/00003', ...])
+        """
+        if not self.connection:
+            if not self.connect():
+                return []
+
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "SELECT DISTINCT sro FROM rip_avg_nge.za_sro "
+                "WHERE sro IS NOT NULL ORDER BY sro"
+            )
+            rows = cursor.fetchall()
+            cursor.close()
+            return [row[0] for row in rows if row[0]]
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erreur requete za_sro: {e}",
+                "PoleAerien", Qgis.Warning
+            )
+            return []
+
     def get_cables_aeriens(self, sro: str) -> List[CableSegment]:
         """
         Récupère uniquement les câbles aériens (posemode=1).
@@ -287,6 +340,129 @@ class DatabaseConnection:
                 "PoleAerien", Qgis.Warning
             )
             return []
+
+
+    def query_attaches_by_sro(self, sro: str) -> List[dict]:
+        """
+        Recupere les attaches d'un SRO avec leur geometrie.
+        
+        Les attaches sont des LineString courtes reliant un appui
+        a un point de connexion (cable/BPE). Elles permettent de
+        detecter les cables et BPE connectes indirectement a un appui.
+        
+        Args:
+            sro: Code SRO
+        
+        Returns:
+            Liste de dicts {gid, geom_wkt}
+        """
+        if not self.connection:
+            if not self.connect():
+                return []
+        
+        try:
+            cursor = self.connection.cursor()
+            query = sql.SQL(
+                "SELECT gid, ST_AsText(geom) as geom_wkt "
+                "FROM rip_avg_nge.attaches WHERE sro = %s"
+            )
+            cursor.execute(query, (sro,))
+            rows = cursor.fetchall()
+            
+            results = []
+            for row in rows:
+                if row[1]:
+                    results.append({
+                        'gid': row[0],
+                        'geom_wkt': row[1]
+                    })
+            
+            cursor.close()
+            
+            QgsMessageLog.logMessage(
+                f"Attaches({sro}): {len(results)} attaches recuperees",
+                "PoleAerien", Qgis.Info
+            )
+            
+            return results
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erreur requete attaches: {e}",
+                "PoleAerien", Qgis.Warning
+            )
+            return []
+
+    def query_sro_be(self, sro: str) -> Optional[str]:
+        """
+        Determine le bureau d'etudes (NGE ou Axione) pour un SRO.
+        
+        Interroge la table comac.sro_nge_axione pour identifier
+        l'ingenierie responsable du SRO.
+        
+        Args:
+            sro: Code SRO (ex: '63041/B1I/PMZ/00003')
+        
+        Returns:
+            'nge', 'axione', ou None si non trouve
+        """
+        if not self.connection:
+            if not self.connect():
+                return None
+        
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "SELECT lower(be) FROM comac.sro_nge_axione "
+                "WHERE sro ILIKE %s LIMIT 1",
+                (f'%{sro}%',)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            
+            be = row[0] if row else None
+            
+            QgsMessageLog.logMessage(
+                f"SRO BE({sro}): {be or 'non trouve'}",
+                "PoleAerien", Qgis.Info
+            )
+            
+            return be
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erreur requete sro_nge_axione: {e}",
+                "PoleAerien", Qgis.Warning
+            )
+            return None
+
+
+# ---------------------------------------------------------------------------
+#  Shared singleton instance
+# ---------------------------------------------------------------------------
+
+_shared_instance: Optional[DatabaseConnection] = None
+
+
+def get_shared_connection() -> DatabaseConnection:
+    """Retourne l'instance partagee de DatabaseConnection (singleton).
+
+    Tous les modules doivent utiliser cette fonction au lieu de
+    DatabaseConnection() pour eviter de multiplier les connexions
+    PostgreSQL.
+    """
+    global _shared_instance
+    if _shared_instance is None:
+        _shared_instance = DatabaseConnection()
+    return _shared_instance
+
+
+def close_shared_connection() -> None:
+    """Ferme et libere l'instance partagee. Appeler au unload du plugin."""
+    global _shared_instance
+    if _shared_instance is not None:
+        _shared_instance.disconnect()
+        _shared_instance = None
 
 
 def extract_sro_from_layer(layer) -> Optional[str]:

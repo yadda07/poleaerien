@@ -37,7 +37,8 @@ class ComacWorkflow(QObject):
         self.current_task = None
 
     def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export,
-                        fddcpi_cache=None, sro_appuis_cache=None):
+                        fddcpi_cache=None, sro_appuis_cache=None,
+                        be_type='nge', gracethd_dir=''):
         """
         Lance l'analyse COMAC.
         
@@ -60,9 +61,10 @@ class ComacWorkflow(QObject):
 
         # 1. Extraction des donnees (Main Thread) - passe unique
         try:
-            doublons, hors_etude, dico_qgis, dico_poteaux_prives = (
+            doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums = (
                 self.comac_logic.extraire_donnees_comac(
-                    lyr_pot.name(), lyr_comac.name(), col_comac
+                    lyr_pot.name(), lyr_comac.name(), col_comac,
+                    be_type=be_type
                 )
             )
         except ValueError as e:
@@ -98,6 +100,8 @@ class ComacWorkflow(QObject):
             'zone_climatique': 'ZVN',
             'sro': sro,
             'fddcpi_cables_cache': fddcpi_cache,
+            'be_type': be_type,
+            'gracethd_dir': gracethd_dir,
         }
         
         # Deep copy pour éviter mutation
@@ -106,7 +110,8 @@ class ComacWorkflow(QObject):
             'hors_etude': list(hors_etude),
             'dico_qgis': copy.deepcopy(dico_qgis),
             'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
-            'appuis': appuis_wkb
+            'appuis': appuis_wkb,
+            'all_inf_nums': all_inf_nums,
         }
 
         # 3. Lancement Task Asynchrone

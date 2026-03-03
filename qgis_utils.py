@@ -384,16 +384,37 @@ def extraire_poteaux_etude(
         ValueError: Couche introuvable ou CRS incoherent
     """
     from .security_rules import est_terrain_prive
+    from qgis.core import QgsMessageLog, Qgis
     
     infra_pt_pot = get_layer_safe(table_poteau, context)
     etude = get_layer_safe(table_etude, context)
     validate_same_crs(infra_pt_pot, etude, context)
     
+    total_couche = infra_pt_pot.featureCount()
     req_pot = make_ordered_request('inf_type', f"inf_type LIKE '{pot_type_filter}'")
     req_etude = make_ordered_request(colonne_etude)
     
     # Index spatial poteaux (une seule construction)
     idx_pot, poteaux_dict = build_spatial_index(infra_pt_pot, req_pot)
+    
+    QgsMessageLog.logMessage(
+        f"[{context}] extraire_poteaux_etude: couche={table_poteau} ({total_couche} total), "
+        f"filtre=inf_type LIKE '{pot_type_filter}' -> {len(poteaux_dict)} poteaux retenus, "
+        f"etudes={table_etude}",
+        "PoleAerien", Qgis.Info
+    )
+    
+    # Diagnostic: repartition inf_type si peu de poteaux retenus
+    if len(poteaux_dict) < total_couche * 0.5:
+        type_counts = {}
+        for feat in infra_pt_pot.getFeatures():
+            t = feat['inf_type'] if feat['inf_type'] and feat['inf_type'] != NULL else '(vide)'
+            type_counts[t] = type_counts.get(t, 0) + 1
+        type_str = ', '.join(f'{t}: {n}' for t, n in sorted(type_counts.items(), key=lambda x: -x[1]))
+        QgsMessageLog.logMessage(
+            f"[{context}] Repartition inf_type: {type_str}",
+            "PoleAerien", Qgis.Info
+        )
     
     # Index champ commentaire pour detection terrain prive
     idx_commentaire = infra_pt_pot.fields().indexFromName('commentaire')
@@ -439,7 +460,33 @@ def extraire_poteaux_etude(
     # Doublons etudes
     doublons = detect_duplicates(etude, colonne_etude, req_etude)
     
-    return doublons, hors_etude, dico_etude, dico_prives
+    # Index complet: tous les inf_num normalises de la couche (in + hors etude)
+    # Permet de distinguer "absent QGIS" vs "hors perimetre etude"
+    all_inf_nums = set()
+    for fid, feat_pot in poteaux_dict.items():
+        raw_inf = feat_pot["inf_num"]
+        if raw_inf and raw_inf != NULL:
+            cle = normalize_appui_num(raw_inf, strip_e_prefix=True)
+            if cle:
+                all_inf_nums.add(cle)
+    
+    total_pot_in = sum(len(v) for v in dico_etude.values())
+    QgsMessageLog.logMessage(
+        f"[{context}] RESULTAT: {len(dico_etude)} etudes avec poteaux, "
+        f"{total_pot_in} poteaux dans etudes, {len(hors_etude)} hors etude, "
+        f"{len(all_inf_nums)} inf_num uniques dans couche, "
+        f"{len(dico_prives)} etudes avec terrains prives, {len(doublons)} doublons",
+        "PoleAerien", Qgis.Info
+    )
+    if dico_etude:
+        sample_etudes = list(dico_etude.keys())[:5]
+        sample_str = ', '.join(f'{e}({len(dico_etude[e])})' for e in sample_etudes)
+        QgsMessageLog.logMessage(
+            f"[{context}] Etudes (sample): {sample_str}{'...' if len(dico_etude) > 5 else ''}",
+            "PoleAerien", Qgis.Info
+        )
+    
+    return doublons, hors_etude, dico_etude, dico_prives, all_inf_nums
 
 
 def verifications_donnees_etude(
@@ -451,7 +498,7 @@ def verifications_donnees_etude(
     DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
     Conserve pour compatibilite.
     """
-    doublons, hors_etude, _, _ = extraire_poteaux_etude(
+    doublons, hors_etude, _, _, _ = extraire_poteaux_etude(
         table_poteau, table_etude, colonne_etude,
         pot_type_filter, context
     )
@@ -467,7 +514,7 @@ def liste_poteaux_par_etude(
     DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
     Conserve pour compatibilite.
     """
-    _, _, dico_etude, dico_prives = extraire_poteaux_etude(
+    _, _, dico_etude, dico_prives, _ = extraire_poteaux_etude(
         table_poteau, table_etude, colonne_etude,
         pot_type_filter, context
     )

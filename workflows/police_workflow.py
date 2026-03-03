@@ -258,6 +258,8 @@ class PoliceWorkflow(QObject):
             'sro': sro,
             'export_path': export_path,
             'fddcpi_cables_cache': params.get('fddcpi_cables_cache'),
+            'be_type': params.get('be_type', 'nge'),
+            'gracethd_dir': params.get('gracethd_dir', ''),
         }
         
         qgis_data = {
@@ -300,6 +302,14 @@ class PoliceWorkflow(QObject):
                 self._load_cables_layer(cables, sro)
             except Exception as e:
                 self.message_received.emit(f"[!] Erreur chargement couche câbles: {e}", "orange")
+        
+        # Charger couche anomalies Police C6 (câbles en incohérence)
+        anomaly_cables = result.get('anomaly_cables', [])
+        if anomaly_cables:
+            try:
+                self._load_anomaly_layer(anomaly_cables, sro)
+            except Exception as e:
+                self.message_received.emit(f"[!] Erreur couche anomalies: {e}", "orange")
         
         # Émettre résultat
         self.analysis_finished.emit(result)
@@ -378,6 +388,106 @@ class PoliceWorkflow(QObject):
             "green"
         )
     
+    def _load_anomaly_layer(self, anomaly_cables, sro):
+        """Charge les cables fddcpi2 en anomalie Police C6 comme couche QGIS.
+
+        Utilise un renderer rule-based natif QGIS pour distinguer les types
+        d'ecart (nombre, capacite, mixte).
+        """
+        from qgis.core import (
+            QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject,
+            QgsRuleBasedRenderer, QgsSymbol,
+        )
+        from qgis.PyQt.QtCore import QVariant
+        from qgis.PyQt.QtGui import QColor
+
+        layer = QgsVectorLayer(
+            "LineString?crs=EPSG:2154",
+            f"anomalies_c6_{sro.replace('/', '_')}",
+            "memory"
+        )
+        provider = layer.dataProvider()
+
+        provider.addAttributes([
+            QgsField("gid_dc2", QVariant.LongLong),
+            QgsField("etude", QVariant.String),
+            QgsField("num_appui", QVariant.String),
+            QgsField("type_anomalie", QVariant.String),
+            QgsField("nb_cables_c6", QVariant.Int),
+            QgsField("nb_cables_bdd", QVariant.Int),
+            QgsField("cab_capa", QVariant.Int),
+            QgsField("cb_etiquet", QVariant.String),
+            QgsField("length", QVariant.Double),
+            QgsField("message", QVariant.String),
+        ])
+        layer.updateFields()
+
+        features = []
+        for cable in anomaly_cables:
+            wkt = cable.get('geom_wkt')
+            if not wkt:
+                continue
+            geom = QgsGeometry.fromWkt(wkt)
+            if geom.isNull() or geom.isEmpty():
+                continue
+            feat = QgsFeature(layer.fields())
+            feat.setGeometry(geom)
+            feat.setAttribute("gid_dc2", cable.get('gid_dc2'))
+            feat.setAttribute("etude", cable.get('etude', ''))
+            feat.setAttribute("num_appui", cable.get('num_appui', ''))
+            feat.setAttribute("type_anomalie", cable.get('type_anomalie', ''))
+            feat.setAttribute("nb_cables_c6", cable.get('nb_cables_c6', 0))
+            feat.setAttribute("nb_cables_bdd", cable.get('nb_cables_bdd', 0))
+            feat.setAttribute("cab_capa", cable.get('cab_capa', 0))
+            feat.setAttribute("cb_etiquet", cable.get('cb_etiquet', ''))
+            feat.setAttribute("length", cable.get('length', 0))
+            feat.setAttribute("message", cable.get('message', ''))
+            features.append(feat)
+
+        if not features:
+            return
+
+        provider.addFeatures(features)
+        layer.updateExtents()
+
+        # Rule-based renderer (natif QGIS)
+        root_rule = QgsRuleBasedRenderer.Rule(None)
+
+        rules_def = [
+            ('Ecart nombre',
+             '"type_anomalie" = \'NOMBRE\'',
+             QColor(230, 159, 0), 1.0, None),
+            ('Ecart capacite',
+             '"type_anomalie" = \'CAPACITE\'',
+             QColor(204, 121, 167), 1.0, None),
+            ('Ecart nombre + capacite',
+             '"type_anomalie" = \'NOMBRE+CAPACITE\'',
+             QColor(213, 62, 79), 1.2, None),
+            ('Autre',
+             'ELSE',
+             QColor(153, 153, 153), 0.8, None),
+        ]
+
+        for label, expression, color, width, _ in rules_def:
+            symbol = QgsSymbol.defaultSymbol(layer.geometryType())
+            symbol.setColor(color)
+            symbol.symbolLayer(0).setWidth(width)
+            rule = QgsRuleBasedRenderer.Rule(symbol)
+            rule.setLabel(label)
+            rule.setFilterExpression(expression)
+            root_rule.appendChild(rule)
+
+        renderer = QgsRuleBasedRenderer(root_rule)
+        layer.setRenderer(renderer)
+
+        QgsProject.instance().addMapLayer(layer)
+        layer.triggerRepaint()
+
+        self.message_received.emit(
+            f"Couche anomalies C6: {len(features)} segments en incoherence",
+            "orange"
+        )
+
     def _run_single_analysis(self, params):
         """
         Exécute l'analyse pour une seule étude.
@@ -395,7 +505,7 @@ class PoliceWorkflow(QObject):
         filterValeur = params['filterValeur']  # Nom de l'étude
         
         # 1. Lire l'Annexe C6
-        donnees_c6, liste_brute = self.police_logic.lire_annexe_c6(fname)
+        donnees_c6, liste_brute, _ = self.police_logic.lire_annexe_c6(fname)
         
         if not donnees_c6:
             self.message_received.emit(f"  [!] Aucune donnée dans C6: {fname}", "orange")
