@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
     QTextBrowser, QProgressBar, QFileDialog,
     QWidget, QScrollArea, QSplitter,
     QRadioButton, QButtonGroup, QDialogButtonBox,
+    QDoubleSpinBox,
 )
 from qgis.PyQt.QtCore import Qt, QSize, QEvent, pyqtSignal, QStringListModel
 from qgis.PyQt.QtGui import QTextCursor, QFont, QPalette, QColor
@@ -633,6 +634,29 @@ class PoleAerienDialogV2(QDialog):
         self._chk_load_layers.setVisible(False)
         lay.addWidget(self._chk_load_layers)
 
+        # Spatial tolerance (visible only in project mode)
+        self._spatial_row = QWidget()
+        sp_lay = QHBoxLayout(self._spatial_row)
+        sp_lay.setContentsMargins(0, 2, 0, 0)
+        sp_lay.setSpacing(6)
+        sp_lbl = QLabel("Rayon de recherche spatiale (m) :")
+        sp_lbl.setFont(_make_font(pt=8))
+        sp_lay.addWidget(sp_lbl)
+        self._spin_spatial_tol = QDoubleSpinBox()
+        self._spin_spatial_tol.setRange(0.5, 10.0)
+        self._spin_spatial_tol.setSingleStep(0.5)
+        self._spin_spatial_tol.setValue(7.5)
+        self._spin_spatial_tol.setSuffix(" m")
+        self._spin_spatial_tol.setToolTip(
+            "Rayon de recherche pour le matching spatial des poteaux\n"
+            "quand la correspondance par nom echoue (COMAC/CAPFT)."
+        )
+        self._spin_spatial_tol.setFixedWidth(80)
+        sp_lay.addWidget(self._spin_spatial_tol)
+        sp_lay.addStretch()
+        self._spatial_row.setVisible(False)
+        lay.addWidget(self._spatial_row)
+
         grp.setLayout(lay)
         parent.addWidget(grp)
 
@@ -922,6 +946,7 @@ class PoleAerienDialogV2(QDialog):
         self._layers_grp.setVisible(not is_project)
         self._sro_row.setVisible(is_project)
         self._chk_load_layers.setVisible(is_project)
+        self._spatial_row.setVisible(is_project)
 
         # Prompt SRO input if project mode selected but no SRO
         if is_project and not self._detection.sro:
@@ -995,6 +1020,8 @@ class PoleAerienDialogV2(QDialog):
         self._log_info(f"Projet : {d.project_name}")
         if d.sro:
             self._log_ok(f"  SRO : {d.sro}")
+        if d.has_gracethd:
+            self._log_ok(f"  BE : Axione (GraceTHD detecte)")
         has_missing = False
         for label, p, found in d.summary_lines():
             if found:
@@ -1553,6 +1580,11 @@ class PoleAerienDialogV2(QDialog):
     def load_layers_in_qgis(self):
         """True when user wants DB layers added to the QGIS project."""
         return self._project_mode and self._chk_load_layers.isChecked()
+
+    @property
+    def spatial_tolerance(self):
+        """Spatial matching tolerance in meters (from spinbox)."""
+        return self._spin_spatial_tol.value()
 
     @property
     def sro(self):

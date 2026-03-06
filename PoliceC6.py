@@ -52,8 +52,11 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
 import os
 import re
+import warnings
 import openpyxl
 import pandas as pd
+
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
 class PoliceC6Cancelled(Exception):

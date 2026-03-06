@@ -13,11 +13,15 @@ Fonctionnalités:
 
 from qgis.core import Qgis, QgsProject, QgsFeatureRequest, QgsExpression, NULL, QgsMessageLog, QgsSpatialIndex
 import os
+import warnings
 import numpy as np
 import pandas as pd
 from openpyxl.styles import PatternFill
+
 from .core_utils import normalize_appui_num, is_plugin_output_file
 from .qgis_utils import detect_etude_field as _detect_etude_field
+
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
 class C6_vs_Bd:
@@ -40,6 +44,7 @@ class C6_vs_Bd:
         - *_C7*.xlsx, *Annexe C7*.xlsx (fichiers C7)
         - GESPOT_*.xlsx (exports GESPOT)
         """
+        parts = [df] if not df.empty else []
         for subdir, _, files in os.walk(repertoire):
             for name in files:
                 if not name.endswith('.xlsx') or "~$" in name or name.startswith("ANALYSE_"):
@@ -59,13 +64,7 @@ class C6_vs_Bd:
                         for candidate in ["Export 1", "Export1", "Saisies terrain"]:
                             if candidate in sheet_names:
                                 target_sheet = candidate
-                                if candidate == "Saisies terrain":
-                                    header_row = 24
                                 break
-                        
-                        # Si aucune feuille connue, prendre la première
-                        if target_sheet is None and sheet_names:
-                            target_sheet = sheet_names[0]
                         
                         if target_sheet is None:
                             continue  # Fichier vide, ignorer silencieusement
@@ -114,7 +113,7 @@ class C6_vs_Bd:
                     resultat = resultat.copy()
                     resultat.insert(2, "Excel", name, True)
                     resultat.insert(3, "Études", name.replace(".xlsx", ""), True)
-                    df = pd.concat([df, resultat], ignore_index=True)
+                    parts.append(resultat)
 
                 except Exception as err:
                     # Log uniquement les erreurs inattendues (pas les fichiers non-C6)
@@ -125,7 +124,9 @@ class C6_vs_Bd:
                         )
                     continue
 
-        return df
+        if not parts:
+            return df
+        return pd.concat(parts, ignore_index=True)
 
     def extraire_poteaux_in_out(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
         """

@@ -686,7 +686,8 @@ class Comac:
 
 
     def traitementResultatFinaux(self, dicoEtudeComacPoteauQgis, dicoPoteauBt_SousTraitant,
-                                 all_inf_nums=None):
+                                 all_inf_nums=None, coords_qgis=None, coords_excel=None,
+                                 spatial_tolerance=7.5):
 
         """Traite les résultats finaux des deux dictionnaires.
 
@@ -695,10 +696,13 @@ class Comac:
             all_inf_nums: Set de tous les inf_num normalises de infra_pt_pot.
                 Permet de distinguer ABSENT (poteau inexistant) vs HORS_PERIMETRE
                 (poteau existe mais hors zones etude_comac).
+            coords_qgis: {inf_num: (x, y)} coordonnees QGIS (Lambert 93).
+                Utilise pour le fallback spatial quand le matching par nom echoue.
+            coords_excel: {pot_name: (x, y)} coordonnees Excel COMAC (Lambert 93).
 
         Returns:
 
-            tuple: (introuvables_excel, introuvables_qgis, existants, hors_perimetre)
+            tuple: (introuvables_excel, introuvables_qgis, existants, hors_perimetre, spatial_matches)
 
         """
         from qgis.core import QgsMessageLog, Qgis
@@ -805,15 +809,87 @@ class Comac:
                 dicoPotBt_HorsPerimetre[excel] = PotBtHorsPerimetreSt
 
 
+        # --- Spatial fallback: match unmatched poles by proximity (1.5m) ---
+        dicoPotBt_SpatialMatch = {}
+
+        if coords_qgis and coords_excel:
+            from .core_utils import match_poles_spatial
+
+            # Collect unmatched QGIS poles with coordinates
+            unmatched_qgis_coords = {}
+            for etude, pots in dicoEtudeComacPoteauQgis.items():
+                for inf_num in pots:
+                    coord = coords_qgis.get(inf_num)
+                    if coord:
+                        unmatched_qgis_coords[inf_num] = coord
+
+            # Collect unmatched Excel poles with coordinates
+            unmatched_excel_coords = {}
+            for fichier, pots in dicoPotBt_Excel_Introuvable.items():
+                for pot_name in pots:
+                    coord = coords_excel.get(pot_name)
+                    if coord:
+                        unmatched_excel_coords[pot_name] = coord
+
+            spatial_matches = match_poles_spatial(
+                unmatched_qgis_coords, unmatched_excel_coords,
+                tolerance=spatial_tolerance
+            )
+
+            if spatial_matches:
+                # Index: excel_name -> (qgis_inf_num, distance)
+                excel_matched = {}
+                qgis_matched = {}
+                for qgis_name, excel_name, dist in spatial_matches:
+                    excel_matched[excel_name] = (qgis_name, dist)
+                    qgis_matched[qgis_name] = (excel_name, dist)
+
+                # Remove spatial-matched poles from introuvable lists
+                for fichier in list(dicoPotBt_Excel_Introuvable.keys()):
+                    remaining = []
+                    for pot_name in dicoPotBt_Excel_Introuvable[fichier]:
+                        if pot_name in excel_matched:
+                            qgis_name, dist = excel_matched[pot_name]
+                            comptabilite += 1
+                            dicoPotBt_SpatialMatch[comptabilite] = {
+                                'inf_num_qgis': qgis_name,
+                                'inf_num_excel': pot_name,
+                                'fichier': fichier,
+                                'distance_m': dist,
+                            }
+                        else:
+                            remaining.append(pot_name)
+                    if remaining:
+                        dicoPotBt_Excel_Introuvable[fichier] = remaining
+                    else:
+                        del dicoPotBt_Excel_Introuvable[fichier]
+
+                # Remove spatial-matched QGIS poles from introuvable dict
+                for etude in list(dicoEtudeComacPoteauQgis.keys()):
+                    remaining = [p for p in dicoEtudeComacPoteauQgis[etude]
+                                 if p not in qgis_matched]
+                    if remaining:
+                        dicoEtudeComacPoteauQgis[etude] = remaining
+                    else:
+                        del dicoEtudeComacPoteauQgis[etude]
+
+                QgsMessageLog.logMessage(
+                    f"[COMAC] Fallback spatial: {len(spatial_matches)} correspondances "
+                    f"dans un rayon de {spatial_tolerance}m",
+                    "PoleAerien", Qgis.Info
+                )
+
         # Resume comparaison
         nb_match = len(dicoPotBtExistants)
+        nb_spatial = len(dicoPotBt_SpatialMatch)
         nb_absent = sum(len(v) for v in dicoPotBt_Excel_Introuvable.values())
         nb_hors_p = sum(len(v) for v in dicoPotBt_HorsPerimetre.values())
         nb_restant_qgis = sum(len(v) for v in dicoEtudeComacPoteauQgis.values())
         QgsMessageLog.logMessage(
-            f"[COMAC] Comparaison: {nb_match} correspondances, "
-            f"{nb_hors_p} hors perimetre etude (existent dans couche SRO), "
-            f"{nb_absent} absents (inexistants dans couche SRO), "
+            f"[COMAC] Comparaison: {nb_match} correspondances par nom, "
+            f"{nb_spatial} correspondances spatiales (<{spatial_tolerance}m), "
+            f"{nb_hors_p} hors perimetre etude, "
+            f"{nb_absent} absents couche SRO, "
             f"{nb_restant_qgis} restants QGIS non trouves dans Excel",
             "PoleAerien", Qgis.Info
         )
@@ -834,7 +910,7 @@ class Comac:
                 "PoleAerien", Qgis.Warning
             )
 
-        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre
+        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre, dicoPotBt_SpatialMatch
 
 
 
@@ -897,6 +973,7 @@ class Comac:
         dicoPotBtExistants = resultatsFinaux[2]
 
         dicoPotBt_HorsPerimetre = resultatsFinaux[3] if len(resultatsFinaux) > 3 else {}
+        dicoPotBt_SpatialMatch = resultatsFinaux[4] if len(resultatsFinaux) > 4 else {}
 
 
 
@@ -1021,6 +1098,17 @@ class Comac:
                 feuille.cell(row=my_ligne, column=5, value="infra inexistant dans les Excels").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=orange_color)
 
 
+        ####################### CORRESPONDANCES SPATIALES (<1.5m) ######################
+
+        if dicoPotBt_SpatialMatch:
+            green_spatial = openpyxl.styles.colors.Color(rgb='a8d5ba')
+            for _, match_info in dicoPotBt_SpatialMatch.items():
+                my_ligne += 1
+                dist = match_info['distance_m']
+                feuille.cell(row=my_ligne, column=1, value=match_info['inf_num_qgis']).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=green_spatial)
+                feuille.cell(row=my_ligne, column=3, value=match_info['inf_num_excel']).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=green_spatial)
+                feuille.cell(row=my_ligne, column=4, value=match_info['fichier']).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=green_spatial)
+                feuille.cell(row=my_ligne, column=5, value=f"correspondance spatiale ({dist}m)").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=green_spatial)
 
         my_colonne = 1
 

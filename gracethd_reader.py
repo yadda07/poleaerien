@@ -28,7 +28,9 @@ from qgis.core import (
     QgsVectorLayer,
     QgsFeature,
     QgsGeometry,
+    QgsField,
 )
+from qgis.PyQt.QtCore import QVariant
 
 from .db_connection import CableSegment
 
@@ -288,8 +290,7 @@ class GraceTHDReader:
         QgsMessageLog.logMessage(
             f"GraceTHD cables: {len(segments)} segments {typelog_filter} charges "
             f"({len(cables_csv)} filtres, {missing_geom} sans geom) | "
-            f"Capacites: [{capas_str}] | "
-            f"cab_type={'CDI' if typelog_filter == 'DI' else '?'}, posemode=1 (aerien par defaut)",
+            f"Capacites: [{capas_str}]",
             _LOG_TAG, Qgis.Info
         )
 
@@ -425,6 +426,158 @@ class GraceTHDReader:
         )
 
         return poteaux
+
+    # ------------------------------------------------------------------
+    #  Poteaux as QgsVectorLayer (compatible infra_pt_pot)
+    # ------------------------------------------------------------------
+
+    # Mapping pt_prop values to inf_type (POT-FT / POT-BT)
+    # Known Orange/Enedis codes -- will be refined after user validation
+    _PROP_FT = {'FT', 'ORANGE', 'ORA', 'ORF'}
+    _PROP_BT = {'ENEDIS', 'ERDF', 'EDF', 'ENE', 'END'}
+
+    def load_poteaux_as_layer(self, layer_name: str = 'gracethd_poteaux') -> Optional[QgsVectorLayer]:
+        """Create a QgsVectorLayer from GraceTHD poteaux, compatible with infra_pt_pot.
+
+        Fields created:
+        - inf_num: from t_noeud.nd_codeext (e.g. 'E000117/03158')
+        - inf_type: POT-FT / POT-BT / POT-IND (from pt_prop/pt_prop_do mapping)
+        - commentaire: from pt_comment (empty if absent)
+        - geometry: Point from t_noeud.geom
+
+        Returns:
+            QgsVectorLayer (memory) or None on failure.
+        """
+        import warnings
+        ptech_csv = _load_csv(self._path('t_ptech.csv'))
+        noeuds = self._ensure_noeuds()
+
+        if not ptech_csv or not noeuds:
+            return None
+
+        # Build ptech index by pt_nd_code for CSV field access
+        ptech_by_nd = {}
+        for row in ptech_csv:
+            if row.get('pt_typephy', '').upper() != 'A':
+                continue
+            nd_code = row.get('pt_nd_code', '').strip()
+            if nd_code:
+                ptech_by_nd[nd_code] = row
+
+        # Create memory layer with infra_pt_pot-compatible schema
+        lyr = QgsVectorLayer(
+            "Point?crs=EPSG:2154", layer_name, "memory"
+        )
+        pr = lyr.dataProvider()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            pr.addAttributes([
+                QgsField("inf_num", QVariant.String),
+                QgsField("inf_type", QVariant.String),
+                QgsField("commentaire", QVariant.String),
+                QgsField("etat", QVariant.String),
+            ])
+        lyr.updateFields()
+
+        features = []
+        no_geom = 0
+        no_codeext = 0
+        prop_values = {}  # {pt_prop_value: count} for diagnostic
+
+        for nd_code, ptech_row in ptech_by_nd.items():
+            noeud_feat = noeuds.get(nd_code)
+            if not noeud_feat or not noeud_feat.hasGeometry():
+                no_geom += 1
+                continue
+
+            # inf_num from nd_codeext (primary) or pt_etiquet (fallback)
+            nd_codeext = ''
+            try:
+                nd_codeext = str(noeud_feat['nd_codeext']).strip() if noeud_feat['nd_codeext'] else ''
+            except (KeyError, IndexError):
+                pass
+
+            if not nd_codeext:
+                nd_codeext = ptech_row.get('pt_etiquet', '').strip()
+
+            if not nd_codeext:
+                no_codeext += 1
+                continue
+
+            # inf_type from pt_prop / pt_prop_do
+            pt_prop = ptech_row.get('pt_prop', '').strip().upper()
+            pt_prop_do = ptech_row.get('pt_prop_do', '').strip().upper()
+            prop_key = pt_prop or pt_prop_do or '(vide)'
+            prop_values[prop_key] = prop_values.get(prop_key, 0) + 1
+
+            inf_type = self._map_prop_to_inf_type(pt_prop, pt_prop_do)
+
+            # commentaire from pt_comment
+            commentaire = ptech_row.get('pt_comment', '').strip()
+
+            etat = ptech_row.get('pt_etat', '').strip()
+
+            feat = QgsFeature(lyr.fields())
+            feat.setGeometry(QgsGeometry(noeud_feat.geometry()))
+            feat.setAttribute('inf_num', nd_codeext)
+            feat.setAttribute('inf_type', inf_type)
+            feat.setAttribute('commentaire', commentaire)
+            feat.setAttribute('etat', etat)
+            features.append(feat)
+
+        if features:
+            pr.addFeatures(features)
+
+        # --- Diagnostic logging ---
+        QgsMessageLog.logMessage(
+            f"GraceTHD poteaux->layer: {len(features)} poteaux charges, "
+            f"{no_geom} sans geometrie, {no_codeext} sans nd_codeext/pt_etiquet",
+            _LOG_TAG, Qgis.Info
+        )
+
+        # Log inf_type distribution
+        type_counts = {}
+        for feat in features:
+            t = feat['inf_type']
+            type_counts[t] = type_counts.get(t, 0) + 1
+        type_str = ', '.join(f'{t}: {n}' for t, n in sorted(type_counts.items(), key=lambda x: -x[1]))
+        QgsMessageLog.logMessage(
+            f"GraceTHD poteaux inf_type: {type_str}",
+            _LOG_TAG, Qgis.Info
+        )
+
+        # Log pt_prop values for user validation
+        prop_str = ', '.join(f'{v}: {n}' for v, n in sorted(prop_values.items(), key=lambda x: -x[1]))
+        QgsMessageLog.logMessage(
+            f"GraceTHD poteaux pt_prop valeurs: {prop_str}",
+            _LOG_TAG, Qgis.Info
+        )
+
+        # Log sample inf_num for user validation
+        sample = [feat['inf_num'] for feat in features[:5]]
+        QgsMessageLog.logMessage(
+            f"GraceTHD poteaux inf_num (sample): {sample}",
+            _LOG_TAG, Qgis.Info
+        )
+
+        return lyr
+
+    @staticmethod
+    def _map_prop_to_inf_type(pt_prop: str, pt_prop_do: str) -> str:
+        """Map pt_prop / pt_prop_do to inf_type (POT-FT / POT-BT / POT-IND).
+
+        Falls back to POT-FT if owner cannot be determined (most common case
+        for Axione livrables where poteaux are new fiber installs).
+        """
+        for val in (pt_prop, pt_prop_do):
+            if not val:
+                continue
+            if val in GraceTHDReader._PROP_FT:
+                return 'POT-FT'
+            if val in GraceTHDReader._PROP_BT:
+                return 'POT-BT'
+        # Default: POT-FT (fibre = FT pour les etudes Axione)
+        return 'POT-FT'
 
     # ------------------------------------------------------------------
     #  Cheminements (bonus - pour deduire posemode)

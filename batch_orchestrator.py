@@ -189,7 +189,7 @@ class BatchOrchestrator(QObject):
     # ------------------------------------------------------------------
     # QP-06: Noms des couches temporaires creees par le plugin
     _TEMP_LAYER_PREFIXES = (
-        'fddcpi2_', 'Poteaux BT absents', 'Poteaux FT absents',
+        'fddcpi2_', 'gracethd_cables_', 'Poteaux BT absents', 'Poteaux FT absents',
         'anomalies_c6_', 'cables_anomalie',
     )
 
@@ -205,13 +205,12 @@ class BatchOrchestrator(QObject):
         # QP-06: Nettoyage couches temporaires du batch precedent
         self._cleanup_temp_layers()
 
-        # Detect BE type (NGE vs Axione) if SRO is available
+        # Detect BE type (NGE vs Axione)
         det = self._detection()
         sro = self._dlg.sro if self._dlg.is_project_mode else ''
         if not sro and det.sro:
             sro = det.sro
-        if sro:
-            self._detect_be_type(sro, det)
+        self._detect_be_type(sro, det)
 
         # --- Preflight checks (all-at-once before any module runs) ---
         issues = self._preflight_checks(module_keys, det)
@@ -252,8 +251,15 @@ class BatchOrchestrator(QObject):
         self._runner.start(module_keys)
 
     def _detect_be_type(self, sro, det):
-        """Detect bureau d'etudes (NGE/Axione) and log detailed monitoring."""
+        """Detect bureau d'etudes (NGE/Axione).
+
+        Source de verite : toujours la table comac.sro_nge_axione en BDD.
+        GraceTHD local = indice pour gracethd_dir, pas pour be_type.
+        """
         try:
+            if not sro:
+                return
+
             from .db_connection import get_shared_connection
             db = get_shared_connection()
             if not db.connect():
@@ -268,46 +274,39 @@ class BatchOrchestrator(QObject):
             if be == 'nge':
                 self._dlg.log_message(
                     f"SRO {sro} — Bureau d'etudes: NGE "
-                    "(source cables: PostgreSQL / fddcpi2)",
+                    "(source cables: PostgreSQL / fddcpiax)",
                     'info'
                 )
                 return
 
-            # --- Axione: affichage detaille ---
+            # --- Axione: verifier presence GraceTHD ---
             self._dlg.log_message(
                 "═══════════════════════════════════════════",
                 'info'
             )
+
             self._dlg.log_message(
                 f"SRO {sro} — Bureau d'etudes: AXIONE",
                 'info'
             )
-            self._dlg.log_message(
-                "  Methode: GraceTHD (fichiers locaux SHP + CSV)",
-                'info'
-            )
 
-            if not det.has_gracethd:
+            if det.has_gracethd:
+                self._gracethd_dir = det.gracethd_dir
                 self._dlg.log_message(
-                    "═══════════════════════════════════════════",
+                    "  Methode: GraceTHD (fichiers locaux SHP + CSV)",
                     'info'
                 )
+                self._log_gracethd_inventory(det.gracethd_dir)
+            else:
                 self._dlg.log_message(
                     "ATTENTION: Repertoire GraceTHD introuvable dans le projet.",
                     'warning'
                 )
                 self._dlg.log_message(
-                    "  Placez un dossier GRACE_APD_* ou GraceTHD/ contenant "
-                    "les fichiers t_noeud.shp, t_cableline.shp, t_cable.csv, "
-                    "t_ptech.csv, t_ebp.csv a la racine du projet.",
+                    "  Placez un dossier contenant t_noeud.shp + t_cableline.shp "
+                    "(+ t_cable.csv, t_ptech.csv, t_ebp.csv) dans le projet.",
                     'warning'
                 )
-                return
-
-            self._gracethd_dir = det.gracethd_dir
-
-            # Inventaire detaille du repertoire GraceTHD
-            self._log_gracethd_inventory(det.gracethd_dir)
 
             self._dlg.log_message(
                 "═══════════════════════════════════════════",
@@ -470,8 +469,8 @@ class BatchOrchestrator(QObject):
         if self._be_type == 'axione' and cable_modules and not self._gracethd_dir:
             issues.append(
                 f"SRO Axione: repertoire GraceTHD requis pour {', '.join(sorted(cable_modules))}. "
-                "Placez un dossier GRACE_APD_* ou GraceTHD contenant t_noeud.shp + t_cableline.shp "
-                "dans le repertoire projet."
+                "Placez un dossier contenant t_noeud.shp + t_cableline.shp "
+                "(+ t_cable.csv, t_ptech.csv, t_ebp.csv) dans le projet."
             )
 
         c6_browse_modules = set(module_keys) & {'c6bd', 'police_c6'}
@@ -664,16 +663,23 @@ class BatchOrchestrator(QObject):
                 parts.append(f"{ft_count} FT, {bt_count} BT a mettre a jour")
 
         elif key == 'capft':
-            resultats = result.get('resultats', {})
-            if resultats:
-                total = sum(len(v) for v in resultats.values()) if isinstance(resultats, dict) else 0
-                parts.append(f"{len(resultats)} etudes, {total} poteaux analyses")
+            resultats = result.get('resultats')
+            dico_qgis = result.get('dico_qgis', {})
+            dico_excel = result.get('dico_excel', {})
+            nb_etudes = len(dico_qgis)
+            nb_ok = len(resultats[2]) if resultats and len(resultats) > 2 else 0
+            nb_fiches = sum(len(v) for v in dico_excel.values()) if dico_excel else 0
+            parts.append(f"{nb_etudes} etudes, {nb_ok} correspondances, {nb_fiches} fiches Excel")
 
         elif key == 'comac':
-            resultats = result.get('resultats', {})
+            resultats = result.get('resultats')
             verif = result.get('verif_cables', [])
-            if resultats:
-                parts.append(f"{len(resultats)} etudes")
+            spatial = result.get('dico_spatial_match', {})
+            dico_qgis = result.get('dico_qgis', {})
+            nb_etudes = len(dico_qgis)
+            nb_name = len(resultats[2]) if resultats and len(resultats) > 2 else 0
+            nb_spatial = len(spatial)
+            parts.append(f"{nb_etudes} etudes, {nb_name + nb_spatial} correspondances ({nb_name} nom, {nb_spatial} spatial)")
             if verif:
                 nb_ecart = sum(1 for v in verif if v.get('statut') == 'ECART')
                 nb_absent = sum(1 for v in verif if v.get('statut') == 'ABSENT_BDD')
@@ -713,6 +719,7 @@ class BatchOrchestrator(QObject):
         with dedicated QML styles from the styles/ directory.
         """
         try:
+            import warnings
             from qgis.core import (
                 QgsVectorLayer, QgsFeature, QgsGeometry,
                 QgsPointXY, QgsField, QgsProject
@@ -754,11 +761,13 @@ class BatchOrchestrator(QObject):
                     "Point?crs=EPSG:2154", src_data['layer_name'], "memory"
                 )
                 pr = lyr.dataProvider()
-                pr.addAttributes([
-                    QgsField("nom", QVariant.String),
-                    QgsField("source", QVariant.String),
-                    QgsField("fichier", QVariant.String),
-                ])
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=DeprecationWarning)
+                    pr.addAttributes([
+                        QgsField("nom", QVariant.String),
+                        QgsField("source", QVariant.String),
+                        QgsField("fichier", QVariant.String),
+                    ])
                 lyr.updateFields()
 
                 features = []
@@ -781,8 +790,10 @@ class BatchOrchestrator(QObject):
                     lyr.triggerRepaint()
 
                 self._dlg.log_message(
-                    f"Couche '{src_data['layer_name']}': {len(features)} poteaux absents positionnes",
-                    'success'
+                    f"Couche '{src_data['layer_name']}' ajoutee au projet "
+                    f"({len(features)} poteaux Excel positionnes sur la carte "
+                    f"pour verification visuelle).",
+                    'info'
                 )
 
         except Exception as e:
@@ -859,13 +870,40 @@ class BatchOrchestrator(QObject):
         # other name-based lookups work inside workflows.
         # Cleanup after batch removes them if user didn't ask to keep.
 
-        # infra_pt_pot (mandatory - guaranteed valid by task.run())
-        self._pm_lyr_pot = task.lyr_pot
-        QgsProject.instance().addMapLayer(self._pm_lyr_pot)
-        self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
-        self._dlg.log_message(
-            f"  infra_pt_pot: {task.counts.get('pot', '?')} poteaux", 'success'
-        )
+        # infra_pt_pot: GraceTHD poteaux for Axione, BDD for NGE
+        if self._be_type == 'axione' and self._gracethd_dir:
+            from .gracethd_reader import GraceTHDReader
+            reader = GraceTHDReader(self._gracethd_dir)
+            sro = self._dlg.sro
+            gracethd_lyr = reader.load_poteaux_as_layer(
+                layer_name=f"gracethd_poteaux [{sro}]"
+            )
+            if gracethd_lyr and gracethd_lyr.isValid() and gracethd_lyr.featureCount() > 0:
+                self._pm_lyr_pot = gracethd_lyr
+                QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+                self._dlg.log_message(
+                    f"  poteaux GraceTHD: {gracethd_lyr.featureCount()} poteaux "
+                    f"(source: t_ptech + t_noeud.nd_codeext)", 'success'
+                )
+            else:
+                self._dlg.log_message(
+                    "  poteaux GraceTHD: echec chargement, fallback BDD",
+                    'warning'
+                )
+                self._pm_lyr_pot = task.lyr_pot
+                QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+                self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
+                self._dlg.log_message(
+                    f"  infra_pt_pot (BDD): {task.counts.get('pot', '?')} poteaux",
+                    'success'
+                )
+        else:
+            self._pm_lyr_pot = task.lyr_pot
+            QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+            self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
+            self._dlg.log_message(
+                f"  infra_pt_pot: {task.counts.get('pot', '?')} poteaux", 'success'
+            )
 
         # etude_cap_ft (optional)
         if task.lyr_cap:
@@ -1152,13 +1190,17 @@ class BatchOrchestrator(QObject):
         # Pass cached data if available (e.g. Police C6 ran first)
         fddcpi = self._fddcpi_cache.get('cables') if self._fddcpi_cache else None
         sro_appuis = self._sro_appuis_cache if self._sro_appuis_cache else None
+        sro = self._dlg.sro if self._dlg.is_project_mode else None
+        spatial_tol = getattr(self._dlg, 'spatial_tolerance', 7.5)
         self._comac_wf.start_analysis(
             lyr_pot, lyr_comac, col_comac,
             det.comac_dir, export_dir,
             fddcpi_cache=fddcpi,
             sro_appuis_cache=sro_appuis,
             be_type=self._be_type,
-            gracethd_dir=self._gracethd_dir
+            gracethd_dir=self._gracethd_dir,
+            sro=sro,
+            spatial_tolerance=spatial_tol
         )
 
     def _on_comac_analysis(self, result):

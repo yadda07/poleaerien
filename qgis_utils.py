@@ -445,9 +445,9 @@ def extraire_poteaux_etude(
                         liste_priv.append(raw_inf)
         
         if liste_pot:
-            dico_etude[nom_etude] = liste_pot
+            dico_etude.setdefault(nom_etude, []).extend(liste_pot)
         if liste_priv:
-            dico_prives[nom_etude] = liste_priv
+            dico_prives.setdefault(nom_etude, []).extend(liste_priv)
     
     # Poteaux hors etude = poteaux valides non trouves dans aucune etude
     hors_etude = []
@@ -463,18 +463,24 @@ def extraire_poteaux_etude(
     # Index complet: tous les inf_num normalises de la couche (in + hors etude)
     # Permet de distinguer "absent QGIS" vs "hors perimetre etude"
     all_inf_nums = set()
+    # Coordonnees poteaux: {inf_num: (x, y)} - thread-safe (plain floats)
+    coords_qgis = {}
     for fid, feat_pot in poteaux_dict.items():
         raw_inf = feat_pot["inf_num"]
         if raw_inf and raw_inf != NULL:
             cle = normalize_appui_num(raw_inf, strip_e_prefix=True)
             if cle:
                 all_inf_nums.add(cle)
+            if feat_pot.hasGeometry():
+                pt = feat_pot.geometry().asPoint()
+                coords_qgis[raw_inf] = (pt.x(), pt.y())
     
     total_pot_in = sum(len(v) for v in dico_etude.values())
     QgsMessageLog.logMessage(
         f"[{context}] RESULTAT: {len(dico_etude)} etudes avec poteaux, "
         f"{total_pot_in} poteaux dans etudes, {len(hors_etude)} hors etude, "
         f"{len(all_inf_nums)} inf_num uniques dans couche, "
+        f"{len(coords_qgis)} poteaux avec coordonnees, "
         f"{len(dico_prives)} etudes avec terrains prives, {len(doublons)} doublons",
         "PoleAerien", Qgis.Info
     )
@@ -486,7 +492,7 @@ def extraire_poteaux_etude(
             "PoleAerien", Qgis.Info
         )
     
-    return doublons, hors_etude, dico_etude, dico_prives, all_inf_nums
+    return doublons, hors_etude, dico_etude, dico_prives, all_inf_nums, coords_qgis
 
 
 def verifications_donnees_etude(
@@ -498,7 +504,7 @@ def verifications_donnees_etude(
     DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
     Conserve pour compatibilite.
     """
-    doublons, hors_etude, _, _, _ = extraire_poteaux_etude(
+    doublons, hors_etude, _, _, _, _ = extraire_poteaux_etude(
         table_poteau, table_etude, colonne_etude,
         pot_type_filter, context
     )
@@ -514,7 +520,7 @@ def liste_poteaux_par_etude(
     DEPRECATED: Utiliser extraire_poteaux_etude() pour eviter double extraction.
     Conserve pour compatibilite.
     """
-    _, _, dico_etude, dico_prives, _ = extraire_poteaux_etude(
+    _, _, dico_etude, dico_prives, _, _ = extraire_poteaux_etude(
         table_poteau, table_etude, colonne_etude,
         pot_type_filter, context
     )

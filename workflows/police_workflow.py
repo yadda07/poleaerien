@@ -192,11 +192,24 @@ class PoliceWorkflow(QObject):
             etudes = self.get_etudes_from_layer(table_etude, colonne_etude)
         
         if not etudes:
-            # Fallback: scanner les fichiers C6 directement
+            # Fallback: scanner les dossiers d'etude + fichiers C6
             self.message_received.emit("Scan des fichiers C6...", "grey")
+            etudes_set = set()
+            # 1. Chercher les dossiers d'etude (FTTH-*-ETUDE-*, NGE-*, etc.)
+            import re as _re
+            _etude_dir_re = _re.compile(
+                r'(FTTH.*ETUDE|NGE-\d)', _re.IGNORECASE
+            )
+            for dirpath, dirnames, filenames in os.walk(repertoire_c6):
+                for d in dirnames:
+                    if _etude_dir_re.search(d):
+                        etudes_set.add(d)
+            # 2. Aussi chercher les fichiers *C6*.xlsx (pattern classique NGE)
             c6_files = glob.glob(os.path.join(repertoire_c6, "**", "*C6*.xlsx"), recursive=True)
             c6_files = [f for f in c6_files if not is_plugin_output_file(os.path.basename(f))]
-            etudes = [os.path.splitext(os.path.basename(f))[0] for f in c6_files]
+            for f in c6_files:
+                etudes_set.add(os.path.splitext(os.path.basename(f))[0])
+            etudes = sorted(etudes_set)
         
         if not etudes:
             self.error_occurred.emit("Aucune étude trouvée")
@@ -294,12 +307,13 @@ class PoliceWorkflow(QObject):
             self.error_occurred.emit(result['error'])
             return
         
-        # Charger les câbles fddcpi2 comme couche temporaire QGIS
+        # Charger les cables comme couche temporaire QGIS
         cables = result.get('cables', [])
         sro = result.get('sro', '')
+        be_type = result.get('be_type', 'nge')
         if cables:
             try:
-                self._load_cables_layer(cables, sro)
+                self._load_cables_layer(cables, sro, be_type)
             except Exception as e:
                 self.message_received.emit(f"[!] Erreur chargement couche câbles: {e}", "orange")
         
@@ -318,32 +332,40 @@ class PoliceWorkflow(QObject):
         stats = result.get('stats', [])
         self.message_received.emit(f"Analyse terminée: {len(stats)} études traitées", "green")
     
-    def _load_cables_layer(self, cables, sro):
-        """Charge les câbles fddcpi2 comme couche temporaire dans QGIS."""
+    def _load_cables_layer(self, cables, sro, be_type='nge'):
+        """Charge les cables (fddcpi2 ou GraceTHD) comme couche temporaire dans QGIS."""
+        import warnings
         from qgis.core import (
             QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject
         )
         from qgis.PyQt.QtCore import QVariant
         
-        # Créer couche mémoire LineString en Lambert 93
+        # Nom de couche selon la source
+        sro_safe = sro.replace('/', '_')
+        prefix = 'gracethd_cables' if be_type == 'axione' else 'fddcpi2'
+        layer_name = f"{prefix}_{sro_safe}"
+        
+        # Creer couche memoire LineString en Lambert 93
         layer = QgsVectorLayer(
             "LineString?crs=EPSG:2154",
-            f"fddcpi2_{sro.replace('/', '_')}",
+            layer_name,
             "memory"
         )
         
         provider = layer.dataProvider()
         
         # Ajouter les champs
-        provider.addAttributes([
-            QgsField("gid_dc2", QVariant.LongLong),
-            QgsField("gid_dc", QVariant.LongLong),
-            QgsField("cab_capa", QVariant.Int),
-            QgsField("cab_type", QVariant.String),
-            QgsField("cb_etiquet", QVariant.String),
-            QgsField("posemode", QVariant.Int),
-            QgsField("length", QVariant.Double),
-        ])
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            provider.addAttributes([
+                QgsField("gid_dc2", QVariant.LongLong),
+                QgsField("gid_dc", QVariant.LongLong),
+                QgsField("cab_capa", QVariant.Int),
+                QgsField("cab_type", QVariant.String),
+                QgsField("cb_etiquet", QVariant.String),
+                QgsField("posemode", QVariant.Int),
+                QgsField("length", QVariant.Double),
+            ])
         layer.updateFields()
         
         # Ajouter les features
@@ -394,6 +416,7 @@ class PoliceWorkflow(QObject):
         Utilise un renderer rule-based natif QGIS pour distinguer les types
         d'ecart (nombre, capacite, mixte).
         """
+        import warnings
         from qgis.core import (
             QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject,
             QgsRuleBasedRenderer, QgsSymbol,
@@ -408,18 +431,20 @@ class PoliceWorkflow(QObject):
         )
         provider = layer.dataProvider()
 
-        provider.addAttributes([
-            QgsField("gid_dc2", QVariant.LongLong),
-            QgsField("etude", QVariant.String),
-            QgsField("num_appui", QVariant.String),
-            QgsField("type_anomalie", QVariant.String),
-            QgsField("nb_cables_c6", QVariant.Int),
-            QgsField("nb_cables_bdd", QVariant.Int),
-            QgsField("cab_capa", QVariant.Int),
-            QgsField("cb_etiquet", QVariant.String),
-            QgsField("length", QVariant.Double),
-            QgsField("message", QVariant.String),
-        ])
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            provider.addAttributes([
+                QgsField("gid_dc2", QVariant.LongLong),
+                QgsField("etude", QVariant.String),
+                QgsField("num_appui", QVariant.String),
+                QgsField("type_anomalie", QVariant.String),
+                QgsField("nb_cables_c6", QVariant.Int),
+                QgsField("nb_cables_bdd", QVariant.Int),
+                QgsField("cab_capa", QVariant.Int),
+                QgsField("cb_etiquet", QVariant.String),
+                QgsField("length", QVariant.Double),
+                QgsField("message", QVariant.String),
+            ])
         layer.updateFields()
 
         features = []

@@ -140,10 +140,12 @@ def _kpi_comac(r):
         return 0, 0, ''
     ne = sum(len(v) for v in res[0].values())
     nq = sum(len(v) for v in res[1].values())
-    ok = len(res[2])
+    ok_name = len(res[2])
+    ok_spatial = len(res[4]) if len(res) > 4 else 0
+    ok = ok_name + ok_spatial
     hp = sum(len(v) for v in res[3].values()) if len(res) > 3 else 0
     base_nok = ne + nq
-    base_msg = f"{ok} OK | {ne} absents SRO | {hp} hors perimetre | {nq} absents Excel"
+    base_msg = f"{ok} OK ({ok_name} nom, {ok_spatial} spatial) | {ne} absents SRO | {hp} hors perimetre | {nq} absents Excel"
     # Ajouter câbles + boîtiers au bilan
     verif_cables = r.get('verif_cables')
     cable_nok = 0
@@ -225,15 +227,18 @@ def _checks_comac(r):
     if res:
         ne = sum(len(v) for v in res[0].values())
         nq = sum(len(v) for v in res[1].values())
-        ok = len(res[2])
+        ok_name = len(res[2])
+        ok_spatial = len(res[4]) if len(res) > 4 else 0
+        ok = ok_name + ok_spatial
         hp = sum(len(v) for v in res[3].values()) if len(res) > 3 else 0
+        detail_match = f"{ok} trouves ({ok_name} nom, {ok_spatial} spatial)" if ok_spatial else f"{ok} trouves"
         checks.append(("Correspondance appuis QGIS/Excel", ok, ne,
-                        f"{ok} trouves, {ne} absents couche SRO"))
+                        f"{detail_match}, {ne} absents couche SRO"))
         if hp:
             checks.append(("Appuis hors perimetre etude", hp, 0,
                             f"{hp} existent dans couche SRO mais hors zones etude COMAC"))
         checks.append(("Appuis presents dans Excel", ok, nq,
-                        f"{ok} trouves, {nq} absents Excel"))
+                        f"{detail_match}, {nq} absents Excel"))
     dico_secu = r.get('dico_verif_secu')
     if dico_secu:
         ok_p, nok_p, ok_h, nok_h = 0, 0, 0, 0
@@ -612,6 +617,19 @@ def write_comac(wb, result):
                 _row(ws_analyse, r, ["", "", inf_num, fichier, hp_label],
                      fill=_P_INFO)
                 r += 1
+
+    # Ajouter section CORRESPONDANCES SPATIALES (<1.5m)
+    spatial_match = resultats[4] if len(resultats) > 4 else result.get('dico_spatial_match', {})
+    if spatial_match and ws_analyse:
+        r = ws_analyse.max_row + 1
+        for _, m in spatial_match.items():
+            dist = m.get('distance_m', 0)
+            _row(ws_analyse, r, [
+                m.get('inf_num_qgis', ''), '',
+                m.get('inf_num_excel', ''), m.get('fichier', ''),
+                f"correspondance spatiale ({dist}m)"
+            ], fill=_P_OK)
+            r += 1
 
     dico_verif_secu = result.get('dico_verif_secu')
     if dico_verif_secu:

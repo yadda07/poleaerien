@@ -4,3 +4,4 @@
 __pycache__/
 *.pyc
 *_old.py
+GRACE_APD_DTR_*/

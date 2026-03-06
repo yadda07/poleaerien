@@ -38,7 +38,8 @@ class ComacWorkflow(QObject):
 
     def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export,
                         fddcpi_cache=None, sro_appuis_cache=None,
-                        be_type='nge', gracethd_dir=''):
+                        be_type='nge', gracethd_dir='', sro=None,
+                        spatial_tolerance=7.5):
         """
         Lance l'analyse COMAC.
         
@@ -61,7 +62,7 @@ class ComacWorkflow(QObject):
 
         # 1. Extraction des donnees (Main Thread) - passe unique
         try:
-            doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums = (
+            doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums, coords_qgis = (
                 self.comac_logic.extraire_donnees_comac(
                     lyr_pot.name(), lyr_comac.name(), col_comac,
                     be_type=be_type
@@ -78,10 +79,11 @@ class ComacWorkflow(QObject):
         # 2. Extraction SRO + appuis WKB pour verif cables (Main Thread)
         # Utiliser le cache batch si disponible (evite double extraction)
         if sro_appuis_cache:
-            sro = sro_appuis_cache.get('sro')
+            sro = sro_appuis_cache.get('sro') or sro
             appuis_wkb = sro_appuis_cache.get('appuis_wkb', [])
         else:
-            sro = extract_sro_from_layer(lyr_pot)
+            if not sro:
+                sro = extract_sro_from_layer(lyr_pot)
             appuis_wkb = []
             if sro:
                 appuis_wkb = extraire_appuis_wkb(lyr_pot)
@@ -102,6 +104,7 @@ class ComacWorkflow(QObject):
             'fddcpi_cables_cache': fddcpi_cache,
             'be_type': be_type,
             'gracethd_dir': gracethd_dir,
+            'spatial_tolerance': spatial_tolerance,
         }
         
         # Deep copy pour éviter mutation
@@ -112,6 +115,7 @@ class ComacWorkflow(QObject):
             'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
             'appuis': appuis_wkb,
             'all_inf_nums': all_inf_nums,
+            'coords_qgis': coords_qgis,
         }
 
         # 3. Lancement Task Asynchrone

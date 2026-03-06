@@ -630,7 +630,17 @@ class CapFtTask(AsyncTaskBase):
 
         dico_excel = cap.LectureFichiersExcelsCap_ft(self.params['chemin_cap_ft'])
 
-        
+        total_fiches = sum(len(v) for v in dico_excel.values())
+        if not dico_excel:
+            self.emit_message(
+                f"ATTENTION: aucun fichier FicheAppui_*.xlsx trouve dans {self.params['chemin_cap_ft']}",
+                "orange"
+            )
+        else:
+            self.emit_message(
+                f"{len(dico_excel)} dossiers, {total_fiches} fiches appuis detectees",
+                "blue"
+            )
 
         if self.isCanceled():
 
@@ -640,7 +650,11 @@ class CapFtTask(AsyncTaskBase):
 
         self.emit_progress(60)
 
-        self.emit_message("Comparaison donnees...", "grey")
+        total_qgis_pot = sum(len(v) for v in dico_qgis.values())
+        self.emit_message(
+            f"Comparaison: {total_qgis_pot} poteaux QGIS ({len(dico_qgis)} etudes) vs {total_fiches} fiches Excel...",
+            "grey"
+        )
 
         
 
@@ -649,7 +663,17 @@ class CapFtTask(AsyncTaskBase):
 
         resultats = cap.traitementResultatFinauxCapFt(dico_qgis, dico_excel, all_inf_nums)
 
-        
+        # Log matching results in UI
+        nb_ok = len(resultats[2]) if len(resultats) > 2 else 0
+        nb_absent_qgis = sum(len(v) for v in resultats[0].values())
+        nb_absent_fiches = sum(len(v) for v in resultats[1].values())
+        nb_hp = sum(len(v) for v in resultats[3].values()) if len(resultats) > 3 else 0
+        self.emit_message(
+            f"Resultat: {nb_ok} correspondances, {nb_absent_qgis} absents QGIS, "
+            f"{nb_absent_fiches} absents fiches appuis"
+            + (f", {nb_hp} hors perimetre" if nb_hp else ""),
+            "green" if (nb_absent_qgis == 0 and nb_absent_fiches == 0) else "orange"
+        )
 
         if self.isCanceled():
 
@@ -853,10 +877,27 @@ class ComacTask(AsyncTaskBase):
 
         # Traitement pur - thread-safe
         all_inf_nums = self.qgis_data.get('all_inf_nums', set())
+        coords_qgis = self.qgis_data.get('coords_qgis', {})
 
-        resultats = com.traitementResultatFinaux(dico_qgis, dico_excel, all_inf_nums)
+        spatial_tol = self.params.get('spatial_tolerance', 7.5)
+        resultats = com.traitementResultatFinaux(
+            dico_qgis, dico_excel, all_inf_nums,
+            coords_qgis=coords_qgis, coords_excel=dico_coords,
+            spatial_tolerance=spatial_tol
+        )
 
-        
+        # Log matching results in UI
+        nb_name = len(resultats[2]) if len(resultats) > 2 else 0
+        nb_spatial = len(resultats[4]) if len(resultats) > 4 else 0
+        nb_absent_sro = sum(len(v) for v in resultats[0].values())
+        nb_absent_excel = sum(len(v) for v in resultats[1].values())
+        nb_hp = sum(len(v) for v in resultats[3].values()) if len(resultats) > 3 else 0
+        self.emit_message(
+            f"Resultat: {nb_name + nb_spatial} correspondances ({nb_name} nom, {nb_spatial} spatial), "
+            f"{nb_absent_sro} absents couche SRO, {nb_absent_excel} absents Excel"
+            + (f", {nb_hp} hors perimetre" if nb_hp else ""),
+            "green" if nb_absent_sro == 0 else "orange"
+        )
 
         if self.isCanceled():
 
@@ -921,6 +962,16 @@ class ComacTask(AsyncTaskBase):
                     })
 
                 
+
+                # === Mapping noms Excel -> QGIS (pour cables et boitiers) ===
+                from .core_utils import normalize_appui_num
+                name_map = {}  # {excel_norm -> qgis_inf_num}
+                if resultats and len(resultats) > 2:
+                    for _, vals in resultats[2].items():
+                        name_map[normalize_appui_num(vals[2])] = vals[0]
+                if resultats and len(resultats) > 4:
+                    for _, m in resultats[4].items():
+                        name_map[normalize_appui_num(m['inf_num_excel'])] = m['inf_num_qgis']
 
                 # === Routage NGE / Axione ===
                 be_type = self.params.get('be_type', 'nge')
@@ -1018,17 +1069,28 @@ class ComacTask(AsyncTaskBase):
 
                         self.emit_progress(80)
 
+                        # Appliquer le mapping aux cles cables COMAC
+                        # normalize_appui_num: meme normalisation que extraire_appuis_wkb (slash, zeros)
+                        dico_cables_translated = {}
+                        nb_translated = 0
+                        for key_comac, refs in dico_cables_comac.items():
+                            mapped = name_map.get(key_comac)
+                            if mapped:
+                                dico_cables_translated[normalize_appui_num(mapped)] = refs
+                                nb_translated += 1
+                            else:
+                                dico_cables_translated[key_comac] = refs
+
                         # Log cles COMAC pour diagnostic
-                        comac_keys = sorted(dico_cables_comac.keys())
+                        comac_keys = sorted(dico_cables_translated.keys())
                         self.emit_message(
-                            f"Vérif câbles: comparaison {len(dico_cables_comac)} appuis COMAC: {comac_keys[:15]}{'...' if len(comac_keys) > 15 else ''}",
+                            f"Vérif câbles: comparaison {len(dico_cables_translated)} appuis COMAC"
+                            f" ({nb_translated} traduits via matching poles): {comac_keys[:15]}{'...' if len(comac_keys) > 15 else ''}",
                             "grey"
                         )
 
-                        
-
                         # Comparer COMAC vs cables
-                        verif_cables = com.comparer_comac_cables(dico_cables_comac, cables_par_appui, ref_label=src_label)
+                        verif_cables = com.comparer_comac_cables(dico_cables_translated, cables_par_appui, ref_label=src_label)
 
                         
 
@@ -1067,28 +1129,32 @@ class ComacTask(AsyncTaskBase):
                 # === Toujours injecter valeur boîtier brute dans verif_cables ===
 
                 if dico_boitier_comac:
-
+                    # Reverse lookup: qgis_name -> excel_name (pour retrouver boitier apres traduction cables)
+                    reverse_map = {v: k for k, v in name_map.items()}
                     for entry in verif_cables:
-
                         num = entry['num_appui']
-
-                        entry['boitier_comac'] = dico_boitier_comac.get(num, '')
+                        excel_key = reverse_map.get(num, num)
+                        entry['boitier_comac'] = dico_boitier_comac.get(excel_key, '')
 
                 
 
                 # === Vérification boîtiers vs BPE (uniquement boîtier=oui) ===
+                # Traduire cles boitier BT -> GraceTHD
+                # normalize_appui_num: meme normalisation que extraire_appuis_wkb
+                boitier_oui_translated = {}
+                if dico_boitier_comac:
+                    for k, v in dico_boitier_comac.items():
+                        if str(v).lower() == 'oui':
+                            raw_key = name_map.get(k, k)
+                            boitier_oui_translated[normalize_appui_num(raw_key)] = v
 
-                boitier_oui = {k: v for k, v in dico_boitier_comac.items()
-
-                               if str(v).lower() == 'oui'} if dico_boitier_comac else {}
-
-                if boitier_oui:
+                if boitier_oui_translated:
 
                     self.emit_progress(85)
 
                     self.emit_message(
 
-                        f"Vérif boîtiers: {len(boitier_oui)} appuis avec boîtier=oui...",
+                        f"Vérif boîtiers: {len(boitier_oui_translated)} appuis avec boîtier=oui...",
 
                         "grey"
 
@@ -1141,7 +1207,7 @@ class ComacTask(AsyncTaskBase):
 
                     
 
-                    boitier_source = {appui: 'oui' for appui in boitier_oui}
+                    boitier_source = {appui: 'oui' for appui in boitier_oui_translated}
 
                     verif_boitiers_result = verifier_boitiers(
 
@@ -1207,7 +1273,7 @@ class ComacTask(AsyncTaskBase):
 
                                 'message': '',
 
-                                'boitier_comac': dico_boitier_comac.get(num_appui, ''),
+                                'boitier_comac': dico_boitier_comac.get(reverse_map.get(num_appui, num_appui), ''),
 
                                 'bpe_noe_type': bv.get('bpe_noe_type', ''),
 
@@ -1260,6 +1326,8 @@ class ComacTask(AsyncTaskBase):
             'dico_qgis_introuvable': resultats[1],
 
             'dico_hors_perimetre': resultats[3] if len(resultats) > 3 else {},
+
+            'dico_spatial_match': resultats[4] if len(resultats) > 4 else {},
 
             'fichier_export': self.params['fichier_export'],
 
@@ -2259,6 +2327,8 @@ class PoliceC6Task(AsyncTaskBase):
             'fddcpi_sro': sro,
 
             'appuis_wkb': self.qgis_data.get('appuis', []),
+
+            'be_type': be_type,
 
         }
 

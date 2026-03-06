@@ -240,3 +240,49 @@ def find_default_layer_index(layer_list, pattern):
         if valeur and regexp.search(valeur):
             return i
     return 0
+
+
+# =============================================================================
+# SPATIAL MATCHING (fallback when name matching fails)
+# =============================================================================
+
+_SPATIAL_TOLERANCE_DEFAULT = 7.5
+
+
+def match_poles_spatial(coords_a, coords_b, tolerance=_SPATIAL_TOLERANCE_DEFAULT):
+    """Match poles by spatial proximity when name matching fails.
+
+    For each pole in coords_a, find the nearest pole in coords_b within
+    tolerance (meters). Greedy: once a pole in coords_b is matched, it is
+    consumed and won't match again.
+
+    Requires projected CRS (Lambert 93) -- distances are Euclidean in meters.
+
+    Args:
+        coords_a: {name: (x, y)} - first set (e.g. unmatched QGIS poles)
+        coords_b: {name: (x, y)} - second set (e.g. unmatched Excel poles)
+        tolerance: max distance in meters (default 1.5)
+
+    Returns:
+        list of (name_a, name_b, distance_m) sorted by distance ascending.
+    """
+    import math
+    matches = []
+    used_b = set()
+
+    for name_a, (xa, ya) in coords_a.items():
+        best_name = None
+        best_dist = tolerance + 1.0
+        for name_b, (xb, yb) in coords_b.items():
+            if name_b in used_b:
+                continue
+            dist = math.hypot(xa - xb, ya - yb)
+            if dist <= tolerance and dist < best_dist:
+                best_dist = dist
+                best_name = name_b
+        if best_name is not None:
+            matches.append((name_a, best_name, round(best_dist, 2)))
+            used_b.add(best_name)
+
+    matches.sort(key=lambda m: m[2])
+    return matches

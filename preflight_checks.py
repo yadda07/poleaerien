@@ -75,9 +75,9 @@ def run_data_quality_checks(
         if doublons:
             for name, count in doublons.items():
                 results.append({
-                    'id': 'PF-01', 'level': 'BLOCKER',
-                    'message': f'{label}: doublon detecte "{name}" ({count} occurrences). '
-                               f'Supprimez le polygone en double dans la BDD.'
+                    'id': 'PF-01', 'level': 'WARN',
+                    'message': f'{label}: nom d\'etude "{name}" present sur {count} polygones '
+                               f'(normal si etude multi-communes).'
                 })
         else:
             results.append({

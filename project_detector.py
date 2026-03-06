@@ -101,6 +101,9 @@ class DetectionResult:
     # GraceTHD directory (for Axione SROs)
     gracethd_dir: str = ''
 
+    # SRO extracted from t_zsro.shp (zs_refpm field) inside GraceTHD directory
+    gracethd_sro: str = ''
+
     # Diagnostics: hints for missing resources
     # List of (resource_label, hint_message) for resources NOT found
     diagnostics: List[tuple] = field(default_factory=list)
@@ -185,17 +188,17 @@ _CAPFT_DIR_PATTERNS = [
     r'^CAP[\s_-]*FT$',
     r'^CAPFT$',
     r'^CAP_FT$',
-    r'^ETUDE[\s_-]*CAP[\s_-]*FT$',
-    r'^ETUDE[\s_-]*CAPFT$',
+    r'^ETUDES?[\s_-]*CAP[\s_-]*FT$',
+    r'^ETUDES?[\s_-]*CAPFT$',
     r'^KPFT$',
-    r'^ETUDE[\s_-]*KPFT$',
+    r'^ETUDES?[\s_-]*KPFT$',
 ]
 
 _COMAC_DIR_PATTERNS = [
     r'^COMAC$',
     r'^Export[\s_-]*COMAC$',
     r'^ExportComac$',
-    r'^ETUDE[\s_-]*COMAC$',
+    r'^ETUDES?[\s_-]*COMAC$',
 ]
 
 _C6_DIR_PATTERNS = [
@@ -203,12 +206,8 @@ _C6_DIR_PATTERNS = [
     r'^Annexe[\s_-]*C6$',
 ]
 
-_GRACETHD_DIR_PATTERNS = [
-    r'^GRACE_APD',
-    r'^GRACE[_\s-]*THD$',
-    r'^GraceTHD$',
-    r'^GRACETHD$',
-]
+# GraceTHD signature files: any directory containing these IS a GraceTHD dir
+_GRACETHD_SIGNATURE_FILES = {'t_noeud.shp', 't_cableline.shp'}
 
 # Prefixes of plugin output files -- must be excluded from input detection
 _OUTPUT_FILE_PREFIXES = (
@@ -224,7 +223,7 @@ _EXPECTED_NAMES = {
     'C7': 'Fichier Excel contenant "C7" ou dossier "C7" / "Annexe C7" avec un .xlsx dedans',
     'C6 annexe': 'Fichier Excel contenant "C6" ou dossier "C6" / "Annexe C6" avec un .xlsx dedans',
     'C3A': 'Fichier Excel contenant "C3A" ou dossier "C3A" / "Annexe C3A" avec un .xlsx dedans',
-    'GraceTHD': 'Dossier GRACE_APD_*, GraceTHD ou dossier contenant t_noeud.shp + t_cableline.shp',
+    'GraceTHD': 'Dossier contenant t_noeud.shp + t_cableline.shp (nom du dossier libre, detection par contenu)',
 }
 
 # Fichiers GraceTHD requis pour validation
@@ -232,47 +231,99 @@ _GRACETHD_REQUIRED_FILES = ['t_noeud.shp', 't_cableline.shp']
 _GRACETHD_EXPECTED_FILES = ['t_cable.csv', 't_ptech.csv', 't_ebp.csv', 't_cheminement.shp']
 
 
-def _validate_gracethd_dir(directory: str) -> bool:
-    """Check if directory contains required GraceTHD files."""
-    if not directory or not os.path.isdir(directory):
-        return False
-    for f in _GRACETHD_REQUIRED_FILES:
-        if not os.path.isfile(os.path.join(directory, f)):
-            return False
-    return True
+def _is_gracethd_content(directory: str) -> bool:
+    """Check if directory contains GraceTHD signature files (case-insensitive).
 
-
-def _find_gracethd_dir(root: str) -> Optional[str]:
-    """Find GraceTHD directory in project root.
-
-    Search order:
-    1. Sub-directory matching GRACE_APD_* / GraceTHD patterns
-    2. Sub-directory with a 'shapes' sub-folder containing GraceTHD files
-    3. Root itself if it contains GraceTHD files directly
+    A directory is GraceTHD if it contains at least t_noeud.shp AND t_cableline.shp.
     """
     try:
-        entries = os.listdir(root)
+        lower_files = {
+            f.lower() for f in os.listdir(directory)
+            if os.path.isfile(os.path.join(directory, f))
+        }
     except OSError:
+        return False
+    return _GRACETHD_SIGNATURE_FILES.issubset(lower_files)
+
+
+def _find_gracethd_dir(root: str, max_depth: int = 4) -> Optional[str]:
+    """Find GraceTHD directory by content (signature files).
+
+    A directory is GraceTHD if it contains t_noeud.shp + t_cableline.shp,
+    regardless of folder name. Scans breadth-first up to max_depth levels,
+    returns the shallowest match.
+    """
+    if not root or not os.path.isdir(root):
         return None
 
-    for entry in sorted(entries):
-        full = os.path.join(root, entry)
-        if not os.path.isdir(full):
-            continue
+    if _is_gracethd_content(root):
+        return root
 
-        if _match_dir(entry, _GRACETHD_DIR_PATTERNS):
-            if _validate_gracethd_dir(full):
-                return full
-            shapes = os.path.join(full, 'shapes')
-            if _validate_gracethd_dir(shapes):
-                return shapes
-
-    for entry in sorted(entries):
-        full = os.path.join(root, entry)
-        if os.path.isdir(full) and _validate_gracethd_dir(full):
-            return full
+    current_level = [root]
+    for _ in range(max_depth):
+        next_level = []
+        for parent in current_level:
+            try:
+                entries = sorted(os.listdir(parent))
+            except OSError:
+                continue
+            for entry in entries:
+                full = os.path.join(parent, entry)
+                if not os.path.isdir(full):
+                    continue
+                if _is_gracethd_content(full):
+                    return full
+                next_level.append(full)
+        current_level = next_level
+        if not current_level:
+            break
 
     return None
+
+
+def _extract_sro_from_gracethd(gracethd_dir: str) -> Optional[str]:
+    """Extract SRO from a GraceTHD directory.
+
+    Tries in order:
+    1. t_zsro.shp  -> champ zs_refpm
+    2. t_cheminement.shp -> champ cm_r3_code (first non-empty unique value)
+
+    Returns:
+        SRO string (e.g. '63041/B1I/PMZ/00003') or None if unavailable.
+    """
+    try:
+        from qgis.core import QgsVectorLayer
+    except Exception:
+        return None
+
+    # --- Tentative 1 : t_zsro.shp ---
+    sro = _read_shp_field(gracethd_dir, 't_zsro.shp', 'zs_refpm')
+    if sro:
+        return sro
+
+    # --- Tentative 2 : t_cheminement.shp (cm_r3_code) ---
+    return _read_shp_field(gracethd_dir, 't_cheminement.shp', 'cm_r3_code')
+
+
+def _read_shp_field(directory: str, filename: str, field_name: str) -> Optional[str]:
+    """Read the first non-empty value of a field from a shapefile."""
+    path = os.path.join(directory, filename)
+    if not os.path.isfile(path):
+        return None
+    try:
+        from qgis.core import QgsVectorLayer
+        layer = QgsVectorLayer(path, filename.replace('.shp', ''), 'ogr')
+        if not layer.isValid():
+            return None
+        for feat in layer.getFeatures():
+            val = feat[field_name]
+            if val:
+                raw = str(val).strip()
+                if raw:
+                    return raw
+        return None
+    except Exception:
+        return None
 
 
 def _list_folder_contents(root: str, max_items: int = 12) -> tuple:
@@ -636,10 +687,17 @@ def detect_project(project_root: str) -> DetectionResult:
             if c3a_f:
                 result.c3a_file = c3a_f
 
-    # GraceTHD directory (for Axione SROs)
+    # GraceTHD directory (for Axione SROs) — content-based detection
     gracethd = _find_gracethd_dir(project_root)
     if gracethd:
         result.gracethd_dir = gracethd
+        # Extract SRO from t_zsro.shp if present
+        zsro_sro = _extract_sro_from_gracethd(gracethd)
+        if zsro_sro:
+            result.gracethd_sro = zsro_sro
+            # If no SRO from folder name, use GraceTHD SRO
+            if not result.sro:
+                result.sro = zsro_sro
 
     # --- Deduplication: resolve overlapping detections ---
     _deduplicate_files(result)
