@@ -17,7 +17,7 @@ from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsVectorLayer, NULL
 from ..PoliceC6 import PoliceC6, PoliceC6Cancelled
 from ..db_connection import extract_sro_from_layer
 from ..cable_analyzer import extraire_appuis_wkb
-from ..qgis_utils import get_layer_safe, detect_etude_field as _detect_etude_field
+from ..qgis_utils import get_layer_safe, detect_etude_field as _detect_etude_field, show_feature_count
 from ..async_tasks import PoliceC6Task, run_async_task
 from ..core_utils import is_plugin_output_file
 import os
@@ -233,36 +233,39 @@ class PoliceWorkflow(QObject):
         self.message_received.emit(f"Mode auto-browse: {len(c6_files_list)} études trouvées", "blue")
         
         # 3. Extraire appuis et SRO depuis couche infra_pt_pot (MAIN THREAD)
-        # Utiliser le cache batch si disponible (evite double extraction avec COMAC)
+        # SRO: reutiliser le cache batch si disponible
+        sro = None
         sro_appuis_cache = params.get('sro_appuis_cache')
         if sro_appuis_cache:
             sro = sro_appuis_cache.get('sro')
-            appuis_data = sro_appuis_cache.get('appuis_wkb', [])
-            self.message_received.emit(f"SRO: {sro} ({len(appuis_data)} appuis depuis cache batch)", "grey")
+
+        # Project mode: layer and SRO can be injected via params
+        injected_layer = params.get('layer_appuis')
+        if injected_layer:
+            layer_appuis = [injected_layer]
         else:
-            # Project mode: layer and SRO can be injected via params
-            injected_layer = params.get('layer_appuis')
-            if injected_layer:
-                layer_appuis = [injected_layer]
-            else:
-                layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
-            
+            layer_appuis = QgsProject.instance().mapLayersByName('infra_pt_pot')
+
+        if not sro:
             sro = params.get('sro')
-            if not sro and layer_appuis:
-                sro = extract_sro_from_layer(layer_appuis[0])
-            if not sro:
-                first_file = c6_files_list[0][1]
-                sro = self._extract_sro_from_filename(first_file)
-            
-            if not sro:
-                self.error_occurred.emit("SRO non trouve dans les donnees QGIS")
-                return
-            
-            self.message_received.emit(f"SRO: {sro}", "grey")
-            appuis_data = []
-            if layer_appuis:
-                appuis_data = extraire_appuis_wkb(layer_appuis[0])
-                self.message_received.emit(f"Appuis QGIS: {len(appuis_data)}", "grey")
+        if not sro and layer_appuis:
+            sro = extract_sro_from_layer(layer_appuis[0])
+        if not sro:
+            first_file = c6_files_list[0][1]
+            sro = self._extract_sro_from_filename(first_file)
+
+        if not sro:
+            self.error_occurred.emit("SRO non trouve dans les donnees QGIS")
+            return
+
+        self.message_received.emit(f"SRO: {sro}", "grey")
+        # Appuis WKB: toujours extraire sans commune (Police C6 compare
+        # avec C6 Excel qui n'a pas de suffixe /commune).
+        # Ne pas reutiliser le cache COMAC qui est avec commune.
+        appuis_data = []
+        if layer_appuis:
+            appuis_data = extraire_appuis_wkb(layer_appuis[0])
+            self.message_received.emit(f"Appuis QGIS: {len(appuis_data)}", "grey")
         
         # === WORKER THREAD: Lancer tâche async ===
         
@@ -395,6 +398,7 @@ class PoliceWorkflow(QObject):
         
         # Ajouter au projet QGIS
         QgsProject.instance().addMapLayer(layer)
+        show_feature_count(layer)
         
         # Appliquer le style cables_dc.qml
         style_path = os.path.join(
@@ -506,6 +510,7 @@ class PoliceWorkflow(QObject):
         layer.setRenderer(renderer)
 
         QgsProject.instance().addMapLayer(layer)
+        show_feature_count(layer)
         layer.triggerRepaint()
 
         self.message_received.emit(

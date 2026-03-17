@@ -15,7 +15,7 @@ from qgis.core import QgsMessageLog, Qgis, QgsTask, QgsApplication, QgsProject
 
 from .project_detector import DetectionResult
 from .db_layer_loader import DbLayerLoader
-from .qgis_utils import detect_etude_field as _detect_etude_field, reset_crs_cache
+from .qgis_utils import detect_etude_field as _detect_etude_field, reset_crs_cache, show_feature_count
 
 
 class _LoadProjectLayersTask(QgsTask):
@@ -23,11 +23,17 @@ class _LoadProjectLayersTask(QgsTask):
 
     Network I/O (connection, metadata fetch) runs in worker thread.
     Project registration (addMapLayer) deferred to main thread callback.
+
+    For Axione (extent_wkt set): skip infra_pt_pot (GraceTHD replaces it),
+    load etude layers by spatial intersection with GraceTHD extent.
+    For NGE (extent_wkt empty): load all layers filtered by SRO.
     """
 
-    def __init__(self, sro):
-        super().__init__(f"Chargement couches BDD (SRO={sro})")
+    def __init__(self, sro, extent_wkt=''):
+        label = f"Chargement couches BDD (spatial)" if extent_wkt else f"Chargement couches BDD (SRO={sro})"
+        super().__init__(label)
         self.sro = sro
+        self.extent_wkt = extent_wkt
         self.lyr_pot = None
         self.lyr_cap = None
         self.lyr_com = None
@@ -44,20 +50,26 @@ class _LoadProjectLayersTask(QgsTask):
         if self.isCanceled():
             return False
 
-        self.lyr_pot = self.loader.load_infra_pt_pot(
-            self.sro, add_to_project=False
-        )
-        if not self.lyr_pot or not self.lyr_pot.isValid():
-            self.error_msg = "Mode Projet: couche infra_pt_pot non chargee"
-            return False
-        self.counts['pot'] = self.lyr_pot.featureCount()
+        # Axione: skip infra_pt_pot (GraceTHD poteaux loaded on main thread)
+        if not self.extent_wkt:
+            self.lyr_pot = self.loader.load_infra_pt_pot(
+                self.sro, add_to_project=False
+            )
+            if not self.lyr_pot or not self.lyr_pot.isValid():
+                self.error_msg = "Mode Projet: couche infra_pt_pot non chargee"
+                return False
+            self.counts['pot'] = self.lyr_pot.featureCount()
 
         if self.isCanceled():
             return False
 
-        self.lyr_cap = self.loader.load_etude_cap_ft(
-            self.sro, add_to_project=False
-        )
+        # etude_cap_ft: spatial for Axione, SRO for NGE
+        if self.extent_wkt:
+            self.lyr_cap = self.loader.load_etude_cap_ft_by_extent(self.extent_wkt)
+        else:
+            self.lyr_cap = self.loader.load_etude_cap_ft(
+                self.sro, add_to_project=False
+            )
         if self.lyr_cap and self.lyr_cap.isValid():
             self.counts['cap'] = self.lyr_cap.featureCount()
         else:
@@ -66,9 +78,13 @@ class _LoadProjectLayersTask(QgsTask):
         if self.isCanceled():
             return False
 
-        self.lyr_com = self.loader.load_etude_comac(
-            self.sro, add_to_project=False
-        )
+        # etude_comac: spatial for Axione, SRO for NGE
+        if self.extent_wkt:
+            self.lyr_com = self.loader.load_etude_comac_by_extent(self.extent_wkt)
+        else:
+            self.lyr_com = self.loader.load_etude_comac(
+                self.sro, add_to_project=False
+            )
         if self.lyr_com and self.lyr_com.isValid():
             self.counts['com'] = self.lyr_com.featureCount()
         else:
@@ -199,6 +215,7 @@ class BatchOrchestrator(QObject):
         self._sro_appuis_cache = {}
         self._be_type = 'nge'
         self._gracethd_dir = ''
+        self._gracethd_lyr_preloaded = None
         reset_crs_cache()
         self._dlg.textBrowser.clear()
 
@@ -248,6 +265,8 @@ class BatchOrchestrator(QObject):
             self._start_async_layer_loading()
             return
 
+        # Mode Couches QGIS: log les couches selectionnees avec leur nombre d'entites
+        self._log_selected_layers(module_keys)
         self._runner.start(module_keys)
 
     def _detect_be_type(self, sro, det):
@@ -439,7 +458,8 @@ class BatchOrchestrator(QObject):
                 )
 
         # --- Project mode: SRO ---
-        if is_pm and not self._dlg.sro:
+        # Axione+GraceTHD: SRO non requis (intersection spatiale avec emprise GraceTHD)
+        if is_pm and not self._dlg.sro and not (self._be_type == 'axione' and self._gracethd_dir):
             issues.append(
                 "Mode Projet: SRO non derivable du nom de dossier. "
                 "Format attendu: XXXXX-YYY-ZZZ-NNNNN (ex: 63041-B1I-PMZ-00003)"
@@ -682,7 +702,7 @@ class BatchOrchestrator(QObject):
             parts.append(f"{nb_etudes} etudes, {nb_name + nb_spatial} correspondances ({nb_name} nom, {nb_spatial} spatial)")
             if verif:
                 nb_ecart = sum(1 for v in verif if v.get('statut') == 'ECART')
-                nb_absent = sum(1 for v in verif if v.get('statut') == 'ABSENT_BDD')
+                nb_absent = sum(1 for v in verif if v.get('statut', '').startswith('ABSENT'))
                 if nb_ecart or nb_absent:
                     ref_lbl = "GraceTHD" if result.get('be_type') == 'axione' else "BDD"
                     parts.append(f"{nb_ecart} ecarts cables, {nb_absent} absents {ref_lbl}")
@@ -782,6 +802,7 @@ class BatchOrchestrator(QObject):
                 pr.addFeatures(features)
                 lyr.updateExtents()
                 QgsProject.instance().addMapLayer(lyr)
+                show_feature_count(lyr)
 
                 # Appliquer le style QML
                 qml_path = src_data['style']
@@ -830,6 +851,30 @@ class BatchOrchestrator(QObject):
             return self._pm_lyr_com
         return self._dlg.comboEtudeComac.currentLayer()
 
+    def _log_selected_layers(self, module_keys):
+        """Log selected QGIS layers with feature counts at batch start."""
+        mods = set(module_keys)
+        layers = [
+            ("infra_pt_pot", self._lyr_pot(),
+             mods & {'capft', 'comac', 'c6bd', 'police_c6', 'maj'}),
+            ("etude_cap_ft", self._lyr_capft(),
+             mods & {'capft', 'c6bd', 'police_c6'}),
+            ("etude_comac", self._lyr_comac(),
+             mods & {'comac'}),
+        ]
+        for label, lyr, needed in layers:
+            if not needed:
+                continue
+            if lyr and lyr.isValid():
+                self._dlg.log_message(
+                    f"  {lyr.name()}: {lyr.featureCount()} entites",
+                    'info'
+                )
+            else:
+                self._dlg.log_message(
+                    f"  {label}: non selectionnee", 'warning'
+                )
+
     # ------------------------------------------------------------------
     #  Project Mode: async DB layer loading
     # ------------------------------------------------------------------
@@ -839,19 +884,47 @@ class BatchOrchestrator(QObject):
         Layer creation (network I/O) runs in a worker thread.
         On completion, layers are registered in QgsProject on the main thread,
         then the batch starts.
+
+        For Axione with GraceTHD: load poteaux from local files first (main
+        thread), compute extent, then load etude layers by spatial intersection
+        instead of SRO filter.  infra_pt_pot is skipped (GraceTHD replaces it).
         """
         sro = self._dlg.sro
-        if not sro:
+        extent_wkt = ''
+
+        # Axione: load GraceTHD poteaux first, compute extent for spatial query
+        if self._be_type == 'axione' and self._gracethd_dir:
+            from .gracethd_reader import GraceTHDReader
+            reader = GraceTHDReader(self._gracethd_dir)
+            gracethd_lyr = reader.load_poteaux_as_layer(
+                layer_name=f"gracethd_poteaux [{sro or 'spatial'}]"
+            )
+            if gracethd_lyr and gracethd_lyr.isValid() and gracethd_lyr.featureCount() > 0:
+                self._gracethd_lyr_preloaded = gracethd_lyr
+                ext = gracethd_lyr.extent()
+                extent_wkt = ext.asWktPolygon()
+                self._dlg.log_message(
+                    f"Mode Projet Axione: {gracethd_lyr.featureCount()} poteaux GraceTHD, "
+                    f"recherche etudes par intersection spatiale...", 'info'
+                )
+            else:
+                self._dlg.log_message(
+                    "GraceTHD: echec chargement poteaux, fallback SRO", 'warning'
+                )
+                self._gracethd_lyr_preloaded = None
+
+        if not sro and not extent_wkt:
             self._dlg.log_message("Mode Projet: SRO non disponible", 'error')
             self._pending_module_keys = None
             self._dlg.reset_after_batch()
             return
 
-        self._dlg.log_message(
-            f"Mode Projet: chargement depuis BDD (SRO={sro})", 'info'
-        )
+        if not extent_wkt:
+            self._dlg.log_message(
+                f"Mode Projet: chargement depuis BDD (SRO={sro})", 'info'
+            )
 
-        self._layer_load_task = _LoadProjectLayersTask(sro)
+        self._layer_load_task = _LoadProjectLayersTask(sro, extent_wkt)
         self._layer_load_task.taskCompleted.connect(self._on_layers_loaded)
         self._layer_load_task.taskTerminated.connect(self._on_layers_load_failed)
         QgsApplication.taskManager().addTask(self._layer_load_task)
@@ -871,35 +944,43 @@ class BatchOrchestrator(QObject):
         # Cleanup after batch removes them if user didn't ask to keep.
 
         # infra_pt_pot: GraceTHD poteaux for Axione, BDD for NGE
-        if self._be_type == 'axione' and self._gracethd_dir:
-            from .gracethd_reader import GraceTHDReader
-            reader = GraceTHDReader(self._gracethd_dir)
-            sro = self._dlg.sro
-            gracethd_lyr = reader.load_poteaux_as_layer(
-                layer_name=f"gracethd_poteaux [{sro}]"
+        gracethd_preloaded = getattr(self, '_gracethd_lyr_preloaded', None)
+        if gracethd_preloaded and gracethd_preloaded.isValid():
+            self._pm_lyr_pot = gracethd_preloaded
+            self._gracethd_lyr_preloaded = None
+            QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+            show_feature_count(self._pm_lyr_pot)
+            self._dlg.log_message(
+                f"  poteaux GraceTHD: {self._pm_lyr_pot.featureCount()} poteaux "
+                f"(source: t_ptech + t_noeud.nd_codeext)", 'success'
             )
-            if gracethd_lyr and gracethd_lyr.isValid() and gracethd_lyr.featureCount() > 0:
-                self._pm_lyr_pot = gracethd_lyr
-                QgsProject.instance().addMapLayer(self._pm_lyr_pot)
-                self._dlg.log_message(
-                    f"  poteaux GraceTHD: {gracethd_lyr.featureCount()} poteaux "
-                    f"(source: t_ptech + t_noeud.nd_codeext)", 'success'
-                )
-            else:
-                self._dlg.log_message(
-                    "  poteaux GraceTHD: echec chargement, fallback BDD",
-                    'warning'
-                )
-                self._pm_lyr_pot = task.lyr_pot
-                QgsProject.instance().addMapLayer(self._pm_lyr_pot)
-                self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
-                self._dlg.log_message(
-                    f"  infra_pt_pot (BDD): {task.counts.get('pot', '?')} poteaux",
-                    'success'
-                )
+            type_counts = {}
+            for feat in self._pm_lyr_pot.getFeatures():
+                t = feat['inf_type']
+                type_counts[t] = type_counts.get(t, 0) + 1
+            type_parts = [f"{t}: {n}" for t, n in sorted(type_counts.items(), key=lambda x: -x[1])]
+            self._dlg.log_message(
+                f"  classification FT/BT: {', '.join(type_parts)}", 'info'
+            )
+            # Extract SRO from etude zones found by spatial intersection
+            self._log_spatial_sro(task)
+        elif self._be_type == 'axione' and self._gracethd_dir:
+            self._dlg.log_message(
+                "  poteaux GraceTHD: echec chargement, fallback BDD",
+                'warning'
+            )
+            self._pm_lyr_pot = task.lyr_pot
+            QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+            show_feature_count(self._pm_lyr_pot)
+            self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
+            self._dlg.log_message(
+                f"  infra_pt_pot (BDD): {task.counts.get('pot', '?')} poteaux",
+                'success'
+            )
         else:
             self._pm_lyr_pot = task.lyr_pot
             QgsProject.instance().addMapLayer(self._pm_lyr_pot)
+            show_feature_count(self._pm_lyr_pot)
             self._db_loader._loaded_layers.append(self._pm_lyr_pot.id())
             self._dlg.log_message(
                 f"  infra_pt_pot: {task.counts.get('pot', '?')} poteaux", 'success'
@@ -909,6 +990,7 @@ class BatchOrchestrator(QObject):
         if task.lyr_cap:
             self._pm_lyr_cap = task.lyr_cap
             QgsProject.instance().addMapLayer(self._pm_lyr_cap)
+            show_feature_count(self._pm_lyr_cap)
             self._db_loader._loaded_layers.append(self._pm_lyr_cap.id())
             self._dlg.log_message(
                 f"  etude_cap_ft: {task.counts.get('cap', '?')} zones",
@@ -925,6 +1007,7 @@ class BatchOrchestrator(QObject):
         if task.lyr_com:
             self._pm_lyr_com = task.lyr_com
             QgsProject.instance().addMapLayer(self._pm_lyr_com)
+            show_feature_count(self._pm_lyr_com)
             self._db_loader._loaded_layers.append(self._pm_lyr_com.id())
             self._dlg.log_message(
                 f"  etude_comac: {task.counts.get('com', '?')} zones",
@@ -956,6 +1039,47 @@ class BatchOrchestrator(QObject):
                 self._dlg.reset_after_batch()
                 return
             self._runner.start(keys)
+
+    def _log_spatial_sro(self, task):
+        """Extract SRO from etude zones found by spatial intersection.
+
+        Compares the SRO found in etude zones with the detected SRO
+        (from folder name or GraceTHD). Logs a warning if they differ.
+        """
+        detected_sro = self._dlg.sro or ''
+        found_sros = set()
+
+        for lyr in (task.lyr_cap, task.lyr_com):
+            if not lyr or not lyr.isValid():
+                continue
+            field_names = [f.name().lower() for f in lyr.fields()]
+            if 'sro' not in field_names:
+                continue
+            for feat in lyr.getFeatures():
+                val = feat['sro']
+                if val and str(val).strip():
+                    found_sros.add(str(val).strip())
+
+        if not found_sros:
+            self._dlg.log_message(
+                "  SRO etudes: aucune zone etude trouvee par intersection spatiale",
+                'warning'
+            )
+            return
+
+        sro_list = sorted(found_sros)
+        self._dlg.log_message(
+            f"  SRO etudes (intersection spatiale): {', '.join(sro_list)}",
+            'info'
+        )
+
+        if detected_sro and detected_sro not in found_sros:
+            self._dlg.log_message(
+                f"  ATTENTION: SRO detecte ({detected_sro}) different du SRO "
+                f"des zones etude ({', '.join(sro_list)}). "
+                f"Les zones etude trouvees par intersection spatiale seront utilisees.",
+                'warning'
+            )
 
     def _on_layers_load_failed(self):
         """Main thread callback: layer loading failed or was cancelled."""
@@ -1191,6 +1315,8 @@ class BatchOrchestrator(QObject):
         fddcpi = self._fddcpi_cache.get('cables') if self._fddcpi_cache else None
         sro_appuis = self._sro_appuis_cache if self._sro_appuis_cache else None
         sro = self._dlg.sro if self._dlg.is_project_mode else None
+        if not sro and det.sro:
+            sro = det.sro
         spatial_tol = getattr(self._dlg, 'spatial_tolerance', 7.5)
         self._comac_wf.start_analysis(
             lyr_pot, lyr_comac, col_comac,
@@ -1317,6 +1443,8 @@ class BatchOrchestrator(QObject):
         if self._pm_lyr_pot:
             params['layer_appuis'] = self._pm_lyr_pot
             params['sro'] = self._dlg.sro
+        elif det.sro:
+            params['sro'] = det.sro
 
         # Pass study layer info so auto-browse can get study names
         lyr_cap = self._lyr_capft()

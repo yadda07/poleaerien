@@ -116,11 +116,11 @@ EXCEL_COL_HAUTEUR_HORS_SOL = 6   # G - Hauteur hors sol (= distance câble/sol)
 EXCEL_COL_CLASSE = 7             # H - Classe
 EXCEL_COL_EFFORT = 8             # I - Effort
 EXCEL_COL_CONDUCTEUR = 12        # M - Conducteur (CU/BT)
-EXCEL_COL_LONGUEUR_FACTURER = 47 # AV - Longueur à facturer (portée)
+EXCEL_COL_LONGUEUR_FACTURER = 46 # AU - Longueur à facturer (portée)
 
 # Section FIBRE OPTIQUE (colonnes AL+)
-EXCEL_COL_BOITIER = 44           # AS - Boîtier fibre optique (oui/non)
-EXCEL_COL_FO_TYPE_LIGNE = 41     # AP - Type de ligne (L1092-xx-P)
+EXCEL_COL_BOITIER = 43           # AR - Boîtier fibre optique (oui/non)
+EXCEL_COL_FO_TYPE_LIGNE = 40     # AO - Type de ligne (L1092-xx-P)
 
 # =============================================================================
 # CONSTANTES - Colonnes BDD PostgreSQL (rip_avg_nge)

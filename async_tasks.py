@@ -913,6 +913,10 @@ class ComacTask(AsyncTaskBase):
 
         cables_all_for_cache = None
 
+        name_map = {}
+
+        appuis_data = []
+
         sro = self.params.get('sro')
 
         has_verif_work = sro and (dico_cables_comac or dico_boitier_comac)
@@ -968,10 +972,28 @@ class ComacTask(AsyncTaskBase):
                 name_map = {}  # {excel_norm -> qgis_inf_num}
                 if resultats and len(resultats) > 2:
                     for _, vals in resultats[2].items():
-                        name_map[normalize_appui_num(vals[2])] = vals[0]
+                        name_map[normalize_appui_num(vals[2], keep_commune=True)] = vals[0]
                 if resultats and len(resultats) > 4:
                     for _, m in resultats[4].items():
-                        name_map[normalize_appui_num(m['inf_num_excel'])] = m['inf_num_qgis']
+                        name_map[normalize_appui_num(m['inf_num_excel'], keep_commune=True)] = m['inf_num_qgis']
+
+                self.emit_message(
+                    f"Mapping poteaux: {len(name_map)} correspondances Excel->QGIS "
+                    f"({nb_name} nom, {nb_spatial} spatial)",
+                    "blue" if name_map else "orange"
+                )
+                # Diagnostic commune-aware: montrer cles name_map
+                if name_map:
+                    nm_sample = list(name_map.items())[:5]
+                    has_slash_k = sum(1 for k in name_map if '/' in k)
+                    has_slash_v = sum(1 for v in name_map.values() if '/' in str(v))
+                    from qgis.core import QgsMessageLog as _QML, Qgis as _Q
+                    _QML.logMessage(
+                        f"[COMAC] name_map (keep_commune): cles {has_slash_k}/{len(name_map)} avec /commune, "
+                        f"valeurs {has_slash_v}/{len(name_map)} avec /commune, "
+                        f"sample: {nm_sample}",
+                        "PoleAerien", _Q.Info
+                    )
 
                 # === Routage NGE / Axione ===
                 be_type = self.params.get('be_type', 'nge')
@@ -1020,11 +1042,7 @@ class ComacTask(AsyncTaskBase):
 
                     cables_all_for_cache = cables_all
 
-                    if be_type == 'axione' and gracethd_dir:
-                        # GraceTHD: cables deja filtres DI par le reader
-                        cables = cables_all
-                    else:
-                        cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+                    cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
 
                     
 
@@ -1054,8 +1072,10 @@ class ComacTask(AsyncTaskBase):
 
                     # Compter câbles par appui (group_by_gid=True: câbles physiques, pas segments découpés)
                     cable_match = 'line' if (be_type == 'axione' and gracethd_dir) else 'endpoint'
+                    # GraceTHD: cables places a ~1-1.5m des appuis (pas d'attache), tolerance elargie
+                    cable_tol = 2.0 if cable_match == 'line' else 0.5
 
-                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=0.5, group_by_gid=True, match_mode=cable_match)
+                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=cable_tol, group_by_gid=True, match_mode=cable_match)
 
                     # Diagnostic: combien d'appuis ont des cables matches
                     nb_with_cables = sum(1 for v in cables_par_appui.values() if v.get('count', 0) > 0)
@@ -1070,23 +1090,43 @@ class ComacTask(AsyncTaskBase):
                         self.emit_progress(80)
 
                         # Appliquer le mapping aux cles cables COMAC
-                        # normalize_appui_num: meme normalisation que extraire_appuis_wkb (slash, zeros)
+                        # normalize_appui_num(keep_commune=True): meme normalisation que extraire_appuis_wkb
                         dico_cables_translated = {}
                         nb_translated = 0
                         for key_comac, refs in dico_cables_comac.items():
                             mapped = name_map.get(key_comac)
                             if mapped:
-                                dico_cables_translated[normalize_appui_num(mapped)] = refs
+                                dico_cables_translated[normalize_appui_num(mapped, keep_commune=True)] = refs
                                 nb_translated += 1
                             else:
                                 dico_cables_translated[key_comac] = refs
 
                         # Log cles COMAC pour diagnostic
                         comac_keys = sorted(dico_cables_translated.keys())
+                        appui_keys_sample = sorted(cables_par_appui.keys())[:10]
                         self.emit_message(
                             f"Vérif câbles: comparaison {len(dico_cables_translated)} appuis COMAC"
                             f" ({nb_translated} traduits via matching poles): {comac_keys[:15]}{'...' if len(comac_keys) > 15 else ''}",
                             "grey"
+                        )
+                        # Diagnostic: comparer format cles COMAC vs appuis_wkb
+                        from qgis.core import QgsMessageLog as _QML2, Qgis as _Q2
+                        _QML2.logMessage(
+                            f"[COMAC] cables_translated keys (sample): {comac_keys[:10]}",
+                            "PoleAerien", _Q2.Info
+                        )
+                        _QML2.logMessage(
+                            f"[COMAC] cables_par_appui keys (sample): {appui_keys_sample}",
+                            "PoleAerien", _Q2.Info
+                        )
+                        # Intersection = cles qui matchent entre les deux dicts
+                        inter = set(dico_cables_translated.keys()) & set(cables_par_appui.keys())
+                        miss_comac = set(dico_cables_translated.keys()) - set(cables_par_appui.keys())
+                        _QML2.logMessage(
+                            f"[COMAC] Intersection cles: {len(inter)} matchent, "
+                            f"{len(miss_comac)} COMAC absentes appuis_wkb"
+                            + (f" (sample absentes: {sorted(miss_comac)[:5]})" if miss_comac else ""),
+                            "PoleAerien", _Q2.Info if not miss_comac else _Q2.Warning
                         )
 
                         # Comparer COMAC vs cables
@@ -1098,7 +1138,7 @@ class ComacTask(AsyncTaskBase):
 
                         nb_ecart = sum(1 for v in verif_cables if v['statut'] == 'ECART')
 
-                        nb_absent = sum(1 for v in verif_cables if v['statut'] == 'ABSENT_BDD')
+                        nb_absent = sum(1 for v in verif_cables if v['statut'].startswith('ABSENT'))
 
                         self.emit_message(
 
@@ -1111,7 +1151,7 @@ class ComacTask(AsyncTaskBase):
                         # Detail par appui en echec (comme Police C6)
                         for v in verif_cables:
                             nb_src = v.get('nb_cables_comac', '?')
-                            if v['statut'] == 'ABSENT_BDD':
+                            if v['statut'].startswith('ABSENT'):
                                 self.emit_message(
                                     f"  [ABSENT] Appui {v['num_appui']}: COMAC={nb_src} câbles, "
                                     f"{src_label}=0 | {v.get('message', 'Appui non trouvé dans les appuis QGIS')}",
@@ -1140,13 +1180,13 @@ class ComacTask(AsyncTaskBase):
 
                 # === Vérification boîtiers vs BPE (uniquement boîtier=oui) ===
                 # Traduire cles boitier BT -> GraceTHD
-                # normalize_appui_num: meme normalisation que extraire_appuis_wkb
+                # normalize_appui_num(keep_commune=True): meme normalisation que extraire_appuis_wkb
                 boitier_oui_translated = {}
                 if dico_boitier_comac:
                     for k, v in dico_boitier_comac.items():
                         if str(v).lower() == 'oui':
                             raw_key = name_map.get(k, k)
-                            boitier_oui_translated[normalize_appui_num(raw_key)] = v
+                            boitier_oui_translated[normalize_appui_num(raw_key, keep_commune=True)] = v
 
                 if boitier_oui_translated:
 
@@ -1311,9 +1351,147 @@ class ComacTask(AsyncTaskBase):
 
         
 
-        self.emit_progress(90)
+        # === Verification portees PCM vs BDD/GraceTHD ===
+        verif_portees = []
+        chemin_comac = self.params.get('chemin_comac', '')
 
-        
+        if chemin_comac and sro:
+            try:
+                from .pcm_parser import parse_repertoire_pcm, extraire_portees_par_cable
+                from .cable_analyzer import reconstituer_portees_bdd, extraire_portees_gracethd, comparer_portees
+
+                self.emit_progress(91)
+                self.emit_message("Verif portees: lecture fichiers PCM...", "grey")
+
+                etudes_pcm, erreurs_pcm = parse_repertoire_pcm(
+                    chemin_comac, self.params.get('zone_climatique', 'ZVN')
+                )
+
+                if etudes_pcm:
+                    portees_pcm = extraire_portees_par_cable(etudes_pcm)
+
+                    if portees_pcm:
+                        self.emit_message(
+                            f"  {len(portees_pcm)} troncons PCM depuis {len(etudes_pcm)} etudes",
+                            "blue"
+                        )
+
+                        # Deserialiser appuis si pas deja fait (has_verif_work=False)
+                        if not appuis_data:
+                            from qgis.core import QgsGeometry as _QgsGeomP
+                            for appui in self.qgis_data.get('appuis', []):
+                                geom = None
+                                wkb = appui.get('geom_wkb')
+                                if wkb:
+                                    geom = _QgsGeomP()
+                                    geom.fromWkb(wkb)
+                                appuis_data.append({
+                                    'num_appui': appui.get('num_appui', ''),
+                                    'feature_id': appui.get('feature_id'),
+                                    'geom': geom
+                                })
+
+                        self.emit_progress(93)
+                        self.emit_message("Verif portees: reconstruction troncons reference...", "grey")
+
+                        be_type = self.params.get('be_type', 'nge')
+                        gracethd_dir = self.params.get('gracethd_dir', '')
+
+                        troncons_ref = []
+                        if be_type == 'axione' and gracethd_dir:
+                            from .gracethd_reader import GraceTHDReader
+                            reader_p = GraceTHDReader(gracethd_dir)
+                            cables_nodes = reader_p.load_cables_with_nodes('DI')
+                            troncons_ref = extraire_portees_gracethd(
+                                cables_nodes, appuis_data, tolerance=2.0
+                            )
+                        elif cables_all_for_cache is not None:
+                            troncons_ref = reconstituer_portees_bdd(
+                                cables_all_for_cache, appuis_data, tolerance=0.5
+                            )
+                        else:
+                            from .db_connection import get_shared_connection as _get_conn_p
+                            self.emit_message("Verif portees: chargement cables fddcpi2...", "grey")
+                            db_p = _get_conn_p()
+                            if db_p.connect():
+                                cables_p = db_p.execute_fddcpi2(sro)
+                                if cables_p:
+                                    cables_all_for_cache = cables_p
+                                    troncons_ref = reconstituer_portees_bdd(
+                                        cables_p, appuis_data, tolerance=0.5
+                                    )
+
+                        if troncons_ref:
+                            self.emit_message(
+                                f"  {len(troncons_ref)} troncons reference ({troncons_ref[0].source})",
+                                "blue"
+                            )
+
+                            self.emit_progress(95)
+                            self.emit_message("Verif portees: comparaison PCM vs reference...", "grey")
+
+                            # Construire pcm_name_map:
+                            # - cles = noms SANS commune (pour matcher PCM bruts: BT0030)
+                            # - valeurs = noms SANS commune (pour matcher _translate sur ref)
+                            # _translate() appelle _norm() sans keep_commune -> strip /commune
+                            # Les deux cotes doivent etre dans le meme format
+                            from .core_utils import normalize_appui_num
+                            pcm_name_map = {}
+                            for k, v in name_map.items():
+                                k_sans = k.split('/')[0] if '/' in k else k
+                                v_sans = normalize_appui_num(v)
+                                pcm_name_map[k_sans] = v_sans
+
+                            self.emit_message(
+                                f"  Verif portees: pcm_name_map {len(pcm_name_map)} entrees"
+                                f" (sample keys: {list(pcm_name_map.keys())[:5]})"
+                                f" -> (sample vals: {list(pcm_name_map.values())[:5]})",
+                                "grey"
+                            )
+                            # Log sample troncons ref pour diagnostic
+                            if troncons_ref:
+                                sample_ref = [(t.support_depart, t.support_arrivee, t.portee_m) for t in troncons_ref[:5]]
+                                self.emit_message(
+                                    f"  Troncons ref (sample): {sample_ref}",
+                                    "grey"
+                                )
+                            # Log sample portees PCM pour diagnostic
+                            if portees_pcm:
+                                sample_pcm = [(p.support_depart, p.support_arrivee, p.portee_m, p.a_poser) for p in portees_pcm[:5]]
+                                self.emit_message(
+                                    f"  Portees PCM (sample): {sample_pcm}",
+                                    "grey"
+                                )
+
+                            verif_portees = comparer_portees(
+                                portees_pcm, troncons_ref,
+                                tolerance_pct=15.0,
+                                name_map=pcm_name_map,
+                            )
+
+                            nb_ok_p = sum(1 for v in verif_portees if v['statut'] == 'OK')
+                            nb_ecart_p = sum(1 for v in verif_portees if v['statut'] == 'ECART')
+                            nb_abs_ref = sum(1 for v in verif_portees if v['statut'] == 'ABSENT_REF')
+                            self.emit_message(
+                                f"  Verif portees: {nb_ok_p} OK, {nb_ecart_p} ecarts, "
+                                f"{nb_abs_ref} absents ref",
+                                "green" if (nb_ecart_p == 0 and nb_abs_ref == 0) else "orange"
+                            )
+                        else:
+                            self.emit_message("Verif portees: aucun troncon reference reconstruit", "grey")
+                    else:
+                        self.emit_message("Verif portees: aucun troncon FO dans les PCM", "grey")
+                elif erreurs_pcm:
+                    self.emit_message(
+                        f"Verif portees: {len(erreurs_pcm)} erreur(s) lecture PCM", "orange"
+                    )
+                else:
+                    self.emit_message("Verif portees: aucun fichier PCM trouve", "grey")
+
+            except Exception as e:
+                self.emit_message(f"Verif portees: erreur {e}", "orange")
+
+        self.emit_progress(97)
 
         self.result = {
 
@@ -1344,6 +1522,8 @@ class ComacTask(AsyncTaskBase):
             'verif_boitiers': verif_boitiers_result,
 
             'dico_boitier_comac': dico_boitier_comac,
+
+            'verif_portees': verif_portees,
 
             'hors_etude': hors_etude,
 
@@ -1877,11 +2057,10 @@ class PoliceC6Task(AsyncTaskBase):
                 self.emit_message(f"GraceTHD: chargement ({gracethd_dir})...", "grey")
                 reader = GraceTHDReader(gracethd_dir)
                 cables_all = reader.load_cables_as_segments('DI')
-                cables = cables_all  # deja filtres DI
                 bpe_list = reader.load_bpe()
 
                 self.emit_message(
-                    f"  {len(cables)} câbles DI + {len(bpe_list)} BPE depuis GraceTHD",
+                    f"  {len(cables_all)} câbles DI charges + {len(bpe_list)} BPE depuis GraceTHD",
                     "blue"
                 )
 
@@ -1913,11 +2092,8 @@ class PoliceC6Task(AsyncTaskBase):
 
                     cables_all = db.execute_fddcpi2(sro)
 
-            
-
-                # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
-
-                cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+            # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
+            cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
 
             nb_exclu = len(cables_all) - len(cables)
 
@@ -2008,8 +2184,11 @@ class PoliceC6Task(AsyncTaskBase):
         p_match = 'line' if (be_type == 'axione' and gracethd_dir) else 'endpoint'
         p_src_label = "GraceTHD" if (be_type == 'axione' and gracethd_dir) else "BDD"
 
+        # GraceTHD: cables places a ~1-1.5m des appuis (pas d'attache), tolerance elargie
+        p_tol = 2.0 if p_match == 'line' else 0.5
+
         cables_par_appui_cached = compter_cables_par_appui(
-            cables, appuis_data, tolerance=0.5,
+            cables, appuis_data, tolerance=p_tol,
             attaches_parsed=attaches_parsed,
             match_mode=p_match
         )
@@ -2122,7 +2301,7 @@ class PoliceC6Task(AsyncTaskBase):
 
                 nb_ecart = sum(1 for c in comparaison if c['statut'] == 'ECART')
 
-                nb_absent = sum(1 for c in comparaison if c['statut'] == 'ABSENT_BDD')
+                nb_absent = sum(1 for c in comparaison if c['statut'].startswith('ABSENT'))
 
                 nb_boitier_err = sum(1 for c in comparaison if c.get('boitier_statut') == 'ERREUR')
 
@@ -2146,14 +2325,14 @@ class PoliceC6Task(AsyncTaskBase):
 
                     if c['statut'] != 'OK':
 
-                        display_tag = "ABSENT" if c['statut'] == 'ABSENT_BDD' else c['statut']
+                        display_tag = "ABSENT" if c['statut'].startswith('ABSENT') else c['statut']
                         self.emit_message(
 
                             f"    [{display_tag}] Appui {c['num_appui']}: "
 
                             f"C6={c['nb_cables_c6']} câbles, {p_src_label}={c['nb_cables_bdd']} | {c['message']}",
 
-                            "red" if c['statut'] == 'ABSENT_BDD' else "orange"
+                            "red" if c['statut'].startswith('ABSENT') else "orange"
 
                         )
 
@@ -2235,7 +2414,7 @@ class PoliceC6Task(AsyncTaskBase):
             total_ok += s.get('nb_ok', 0)
             total_ecart += s.get('nb_ecart', 0)
             for c in s.get('detail', []):
-                if c['statut'] == 'ABSENT_BDD':
+                if c['statut'].startswith('ABSENT'):
                     num = c['num_appui']
                     if num.startswith('BT'):
                         all_absents_bt.add(num)
@@ -2532,7 +2711,7 @@ class PoliceC6Task(AsyncTaskBase):
 
                     fill = ok_fill
 
-                elif appui['statut'] == 'ABSENT_BDD':
+                elif appui['statut'].startswith('ABSENT'):
 
                     fill = absent_fill
 

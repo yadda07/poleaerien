@@ -184,6 +184,46 @@ class DbLayerLoader:
 
         return layer
 
+    def load_etude_cap_ft_by_extent(self, extent_wkt: str,
+                                    srid: int = 2154) -> Optional[QgsVectorLayer]:
+        """Load etude_cap_ft zones that intersect with a geometry extent.
+
+        Used for Axione: finds etude zones by spatial intersection with
+        GraceTHD poteaux extent, instead of filtering by SRO.
+
+        Args:
+            extent_wkt: WKT polygon (bounding box) in projected CRS.
+            srid: SRID of the extent geometry (default Lambert 93).
+
+        Returns:
+            Filtered QgsVectorLayer or None.
+        """
+        sql_filter = (
+            f"ST_Intersects(geom, ST_GeomFromText('{extent_wkt}', {srid}))"
+        )
+        layer_name = "etude_cap_ft [spatial]"
+        return self._create_layer('etude_cap_ft', sql_filter, layer_name)
+
+    def load_etude_comac_by_extent(self, extent_wkt: str,
+                                   srid: int = 2154) -> Optional[QgsVectorLayer]:
+        """Load etude_comac zones that intersect with a geometry extent.
+
+        Used for Axione: finds etude zones by spatial intersection with
+        GraceTHD poteaux extent, instead of filtering by SRO.
+
+        Args:
+            extent_wkt: WKT polygon (bounding box) in projected CRS.
+            srid: SRID of the extent geometry (default Lambert 93).
+
+        Returns:
+            Filtered QgsVectorLayer or None.
+        """
+        sql_filter = (
+            f"ST_Intersects(geom, ST_GeomFromText('{extent_wkt}', {srid}))"
+        )
+        layer_name = "etude_comac [spatial]"
+        return self._create_layer('etude_comac', sql_filter, layer_name)
+
     def load_all(self, sro: str,
                  add_to_project: bool = False
                  ) -> Tuple[Optional[QgsVectorLayer],

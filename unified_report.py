@@ -150,17 +150,23 @@ def _kpi_comac(r):
     verif_cables = r.get('verif_cables')
     cable_nok = 0
     if verif_cables:
-        cable_nok = sum(1 for e in verif_cables if e.get('statut') in ('ECART', 'ABSENT_BDD'))
+        cable_nok = sum(1 for e in verif_cables if e.get('statut') == 'ECART' or e.get('statut', '').startswith('ABSENT'))
     verif_boitiers = r.get('verif_boitiers')
     boitier_nok = 0
     if verif_boitiers:
         boitier_nok = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR')
-    total_nok = base_nok + cable_nok + boitier_nok
+    verif_portees = r.get('verif_portees')
+    portee_nok = 0
+    if verif_portees:
+        portee_nok = sum(1 for e in verif_portees if e.get('statut') in ('ECART', 'ABSENT_REF'))
+    total_nok = base_nok + cable_nok + boitier_nok + portee_nok
     parts = [base_msg] if base_msg else []
     if cable_nok:
         parts.append(f"{cable_nok} ecarts cables")
     if boitier_nok:
         parts.append(f"{boitier_nok} err boitiers")
+    if portee_nok:
+        parts.append(f"{portee_nok} ecarts portees")
     return ok, total_nok, ' | '.join(parts)
 
 def _kpi_c6bd(r):
@@ -213,12 +219,17 @@ def _checks_capft(r):
     ne = sum(len(v) for v in res[0].values())
     nq = sum(len(v) for v in res[1].values())
     ok = len(res[2])
-    return [
+    checks = [
         ("Appuis presents dans QGIS", ok, ne,
          f"{ok} trouves, {ne} absents QGIS"),
-        ("Appuis presents dans fiches", ok, nq,
-         f"{ok} trouves, {nq} absents fiches appuis"),
     ]
+    if ok == 0 and nq > 0:
+        checks.append(("Appuis presents dans fiches", nq, 0,
+                        f"0 fiches trouvees, {nq} poteaux sans comparaison"))
+    else:
+        checks.append(("Appuis presents dans fiches", ok, nq,
+                        f"{ok} trouves, {nq} absents fiches appuis"))
+    return checks
 
 
 def _checks_comac(r):
@@ -287,6 +298,14 @@ def _checks_comac(r):
         else:
             checks.append(("Verif boitiers COMAC vs BPE", nb_non, 0,
                             f"{nb_oui} Oui, {nb_non} Non, aucune verif BPE necessaire"))
+    verif_portees = r.get('verif_portees')
+    if verif_portees:
+        ok_p = sum(1 for e in verif_portees if e.get('statut') == 'OK')
+        ecart_p = sum(1 for e in verif_portees if e.get('statut') == 'ECART')
+        absent_p = sum(1 for e in verif_portees if e.get('statut') == 'ABSENT_REF')
+        nok_p = ecart_p + absent_p
+        checks.append(("Verif portees PCM vs reference", ok_p, nok_p,
+                        f"{ok_p} OK, {ecart_p} ecarts, {absent_p} absents"))
     if not checks:
         checks = [("Analyse COMAC", 0, 0, "Pas de resultats")]
     return checks
@@ -303,8 +322,12 @@ def _checks_c6bd(r):
                         f"{ok} trouves, {nok} absents"))
     out_df = r.get('df_poteaux_out')
     n_out = len(out_df) if out_df is not None and not out_df.empty else 0
-    checks.append(("Poteaux hors perimetre", 0, n_out,
-                    f"{n_out} hors perimetre" if n_out > 0 else "Aucun"))
+    if n_out > 0 and r.get('be_type') == 'axione':
+        checks.append(("Poteaux hors perimetre", n_out, 0,
+                        f"{n_out} hors zones etude (normal GraceTHD - zone elargie)"))
+    else:
+        checks.append(("Poteaux hors perimetre", 0, n_out,
+                        f"{n_out} hors perimetre" if n_out > 0 else "Aucun"))
     verif = r.get('verif_etudes')
     if verif:
         sans_c6 = len(verif.get('etudes_sans_c6', []))
@@ -384,7 +407,7 @@ def _write_dashboard(wb, batch_results):
     ws.cell(row=3, column=1, value="Modules :").font = _F_BOLD
     ws.cell(row=3, column=2, value=str(len(batch_results))).font = _F_DATA
 
-    # QP-04: Resume executif
+    # QP-04: Resume executif — detect be_type and propagate to all results
     sro = ''
     be_label = ''
     summary_parts = []
@@ -393,6 +416,10 @@ def _write_dashboard(wb, batch_results):
             sro = res.get('fddcpi_sro', '') or ''
         if not be_label:
             be_label = res.get('be_type', '')
+    if be_label:
+        for res in batch_results.values():
+            if isinstance(res, dict) and 'be_type' not in res:
+                res['be_type'] = be_label
     if sro:
         summary_parts.append(f"SRO {sro}")
     if be_label:
@@ -694,7 +721,7 @@ def write_comac(wb, result):
                     e.get('bpe_noe_type', ''),
                     e.get('boitier_statut', '')])
             fill = _P_OK if st == 'OK' else (_P_CRIT if st == 'ECART' else (
-                _P_WARN if st == 'ABSENT_BDD' else None))
+                _P_WARN if st.startswith('ABSENT') else None))
             _row(ws, r, vals, fill=fill)
             if has_boitier:
                 bst = e.get('boitier_statut', '')
@@ -704,6 +731,49 @@ def write_comac(wb, result):
                 elif bst == 'OK':
                     for c in range(9, 12):
                         ws.cell(row=r, column=c).fill = _P_OK
+            r += 1
+
+    verif_portees = result.get('verif_portees')
+    if verif_portees:
+        ws = wb.create_sheet("COMAC_PORTEES")
+        has_gracethd = any(e.get('source_ref') == 'GraceTHD' for e in verif_portees)
+        hdrs = ["ETUDE", "CABLE", "CAPA FO",
+                "DEPART PCM", "ARRIVEE PCM", "PORTEE PCM (m)",
+                "DEPART REF", "ARRIVEE REF", "PORTEE REF (m)",
+                "ECART (m)", "ECART (%)", "STATUT", "MESSAGE"]
+        widths = [25, 18, 10, 18, 18, 14, 18, 18, 14, 12, 12, 14, 55]
+        if has_gracethd:
+            hdrs.insert(-2, "CONFIANCE")
+            widths.insert(-2, 10)
+        _init_sheet(ws, key, hdrs, widths)
+        r = 2
+        for e in verif_portees:
+            st = e.get('statut', '')
+            portee_pcm = e.get('portee_pcm', 0)
+            portee_ref = e.get('portee_ref', 0)
+            ecart_m = e.get('ecart_m', 0)
+            ecart_pct = e.get('ecart_pct', 0)
+            vals = [
+                e.get('etude', ''), e.get('cable', ''),
+                e.get('capacite_fo', 0),
+                e.get('support_depart_pcm', ''),
+                e.get('support_arrivee_pcm', ''),
+                portee_pcm if portee_pcm else '',
+                e.get('support_depart_ref', ''),
+                e.get('support_arrivee_ref', ''),
+                portee_ref if portee_ref else '',
+                ecart_m if ecart_m else '',
+                ecart_pct if ecart_pct else '',
+            ]
+            if has_gracethd:
+                conf = e.get('confiance_ref', 0)
+                vals.append(conf if conf else '')
+            vals.extend([st, e.get('message', '')])
+            fill = (_P_OK if st == 'OK'
+                    else _P_CRIT if st == 'ECART'
+                    else _P_WARN if st.startswith('ABSENT')
+                    else None)
+            _row(ws, r, vals, fill=fill)
             r += 1
 
 
@@ -732,8 +802,9 @@ def write_c6bd(wb, result):
     if poteaux_out is not None and not poteaux_out.empty:
         ws_out = _df_sheet(wb, "C6BD_HORS_PERIM", poteaux_out, key)
         ncols = len(poteaux_out.columns)
+        fill = _P_INFO if result.get('be_type') == 'axione' else _P_CRIT
         for r in range(2, len(poteaux_out) + 2):
-            _fill_row(ws_out, r, _P_CRIT, ncols)
+            _fill_row(ws_out, r, fill, ncols)
 
     if verif_etudes:
         sans_c6 = verif_etudes.get('etudes_sans_c6', [])
@@ -807,7 +878,7 @@ def write_police(wb, result):
                     a.get('boitier_c6', ''), a.get('bpe_noe_type', ''),
                     a.get('boitier_statut', '')]
             st = a['statut']
-            fill = _P_OK if st == 'OK' else (_P_WARN if st == 'ABSENT_BDD' else _P_ERR)
+            fill = _P_OK if st == 'OK' else (_P_WARN if st.startswith('ABSENT') else _P_ERR)
             _row(ws_d, dr, vals, fill=fill)
 
             bst = a.get('boitier_statut', '')

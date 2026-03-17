@@ -114,6 +114,28 @@ class VerifSecurite:
 
 
 @dataclass
+class PorteePCM:
+    """Troncon cable FO entre deux poteaux, extrait du PCM."""
+    cable: str
+    capacite_fo: int
+    support_depart: str
+    support_arrivee: str
+    portee_m: float
+    a_poser: bool = False
+    etude: str = ""
+
+
+@dataclass
+class PorteeGlobale:
+    """Portee physique globale (section <Portees> du PCM)."""
+    support_gauche: str
+    support_droit: str
+    longueur: float
+    angle: float = 0.0
+    route: bool = False
+
+
+@dataclass
 class EtudePCM:
     """Étude COMAC complète"""
     num_etude: str = ""
@@ -123,6 +145,7 @@ class EtudePCM:
     supports: Dict[str, Support] = field(default_factory=dict)
     lignes_tcf: List[LigneTCF] = field(default_factory=list)
     lignes_bt: List[LigneBT] = field(default_factory=list)
+    portees_globales: List[PorteeGlobale] = field(default_factory=list)
     verifications: List[VerifSecurite] = field(default_factory=list)
     erreurs_parse: List[str] = field(default_factory=list)
 
@@ -182,6 +205,9 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
         # Lignes BT
         _parse_lignes_bt(root, etude)
         
+        # Portees globales (catalogue physique des spans)
+        _parse_portees_globales(root, etude)
+
     except ET.ParseError as e:
         etude.erreurs_parse.append(f"Erreur XML: {e}")
         _log_message(f"Erreur parse {filepath}: {e}", "PCM_PARSER", 2)
@@ -300,6 +326,73 @@ def _parse_lignes_bt(root: ET.Element, etude: EtudePCM):
                     ligne.portees.append(safe_float(portee_elem.text))
         
         etude.lignes_bt.append(ligne)
+
+
+def _parse_portees_globales(root: ET.Element, etude: EtudePCM):
+    """Parse section <Portees> globale (catalogue physique des spans)."""
+    portees_elem = root.find('Portees')
+    if portees_elem is None:
+        return
+    for p_elem in portees_elem.findall('Portee'):
+        longueur_raw = get_xml_text(p_elem, 'Longueur')
+        if not longueur_raw:
+            continue
+        etude.portees_globales.append(PorteeGlobale(
+            support_gauche=get_xml_text(p_elem, 'SuppG'),
+            support_droit=get_xml_text(p_elem, 'SuppD'),
+            longueur=safe_float(longueur_raw),
+            angle=get_xml_float(p_elem, 'Angle'),
+            route=get_xml_text(p_elem, 'Route') == '1',
+        ))
+
+
+# =============================================================================
+# EXTRACTION PORTEES PAR CABLE (pour comparaison avec BDD/GraceTHD)
+# =============================================================================
+
+def extraire_portees_par_cable(
+    etudes: Dict[str, EtudePCM]
+) -> List[PorteePCM]:
+    """Extrait les troncons cable FO (support_depart -> support_arrivee, portee)
+    depuis les LignesTCF de toutes les etudes PCM.
+
+    Chaque LigneTCF contient N supports et N-1 portees ordonnees.
+    Le troncon i va de supports[i] a supports[i+1] avec portees[i].
+
+    Args:
+        etudes: Dict {nom_etude: EtudePCM} depuis parse_repertoire_pcm()
+
+    Returns:
+        Liste plate de PorteePCM, toutes etudes confondues.
+    """
+    result = []
+    for nom_etude, etude in etudes.items():
+        for ligne in etude.lignes_tcf:
+            if ligne.capacite_fo == 0:
+                continue
+            if len(ligne.supports) < 2:
+                _log_message(
+                    f"Etude {nom_etude}: cable {ligne.cable} avec {len(ligne.supports)} "
+                    f"support(s) et {len(ligne.portees)} portee(s) -- ignore",
+                    "PCM_PARSER", 1
+                )
+                continue
+            nb_portees = min(len(ligne.portees), len(ligne.supports) - 1)
+            for i in range(nb_portees):
+                result.append(PorteePCM(
+                    cable=ligne.cable,
+                    capacite_fo=ligne.capacite_fo,
+                    support_depart=ligne.supports[i],
+                    support_arrivee=ligne.supports[i + 1],
+                    portee_m=ligne.portees[i],
+                    a_poser=ligne.a_poser,
+                    etude=nom_etude,
+                ))
+    _log_message(
+        f"extraire_portees_par_cable: {len(result)} troncons FO "
+        f"depuis {len(etudes)} etudes"
+    )
+    return result
 
 
 # =============================================================================

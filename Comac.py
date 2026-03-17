@@ -181,7 +181,7 @@ class Comac:
 
             table_poteau, table_etude_comac, colonne_comac,
 
-            pot_filter, 'COMAC'
+            pot_filter, 'COMAC', keep_commune=True
 
         )
 
@@ -465,7 +465,7 @@ class Comac:
 
                             if boitier_val.lower() in ('oui', 'non'):
 
-                                nompot_norm_b = normalize_appui_num(nompot)
+                                nompot_norm_b = normalize_appui_num(nompot, keep_commune=True)
 
                                 if nompot_norm_b:
 
@@ -483,7 +483,7 @@ class Comac:
 
                             if refs_cables:
 
-                                nompot_norm = normalize_appui_num(nompot)
+                                nompot_norm = normalize_appui_num(nompot, keep_commune=True)
 
                                 if nompot_norm:
 
@@ -606,6 +606,23 @@ class Comac:
                 f"[COMAC] Noms poteaux Excel (sample): {all_pot_names[:10]}",
                 "PoleAerien", Qgis.Info
             )
+        # Diagnostic: cles commune-aware dans dicts cables et boitiers
+        if dicoCablesParAppui:
+            cable_keys = sorted(dicoCablesParAppui.keys())[:10]
+            has_slash = sum(1 for k in dicoCablesParAppui if '/' in k)
+            QgsMessageLog.logMessage(
+                f"[COMAC] Cles cables (keep_commune): {has_slash}/{len(dicoCablesParAppui)} avec /commune, "
+                f"sample: {cable_keys}",
+                "PoleAerien", Qgis.Info
+            )
+        if dicoBoitierParAppui:
+            boit_keys = sorted(dicoBoitierParAppui.keys())[:10]
+            has_slash_b = sum(1 for k in dicoBoitierParAppui if '/' in k)
+            QgsMessageLog.logMessage(
+                f"[COMAC] Cles boitiers (keep_commune): {has_slash_b}/{len(dicoBoitierParAppui)} avec /commune, "
+                f"sample: {boit_keys}",
+                "PoleAerien", Qgis.Info
+            )
 
         return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui, dicoBoitierParAppui, dicoCoordsPoteaux
 
@@ -719,6 +736,23 @@ class Comac:
         if all_inf_nums is None:
             all_inf_nums = set()
 
+        # Index sans commune pour le check ABSENT vs HORS_PERIMETRE
+        # Les cles Excel NGE n'ont pas /commune (ex: "1016436") mais
+        # all_inf_nums a /commune (ex: "1016436/63041") quand keep_commune=True
+        all_inf_sans_commune = {k.split('/')[0] for k in all_inf_nums if '/' in k}
+        all_inf_sans_commune.update(k for k in all_inf_nums if '/' not in k)
+
+        # Fallback: quand aucune zone etude n'existe (0 polygones etude_comac),
+        # tous les poteaux sont "hors etude" et dico_qgis est vide.
+        # Dans ce cas, utiliser TOUS les poteaux QGIS pour le matching.
+        if not dicoEtudeComacPoteauQgis and coords_qgis:
+            dicoEtudeComacPoteauQgis = {'_TOUS_POTEAUX_': list(coords_qgis.keys())}
+            QgsMessageLog.logMessage(
+                f"[COMAC] Aucune zone etude_comac: {len(coords_qgis)} poteaux QGIS "
+                "utilises sans filtre geographique pour le matching",
+                "PoleAerien", Qgis.Info
+            )
+
         dicoPotBt_Excel_Introuvable = {}
         dicoPotBt_HorsPerimetre = {}
 
@@ -736,9 +770,28 @@ class Comac:
 
             for inf_num_bt in listePoteauxQgis:
 
-                cle = normalize_appui_num(inf_num_bt, strip_e_prefix=True)
+                cle = normalize_appui_num(inf_num_bt, strip_e_prefix=True, keep_commune=True)
 
                 index_qgis.setdefault(cle, []).append((etude_comac, inf_num_bt))
+
+        # Diagnostic: cles index_qgis commune-aware
+        qgis_keys = sorted(index_qgis.keys())[:15]
+        has_slash_q = sum(1 for k in index_qgis if '/' in k)
+        # Detecter les cles qui auraient collisionne sans commune
+        from collections import Counter
+        sans_commune = Counter(k.split('/')[0] for k in index_qgis)
+        collisions = {num: cnt for num, cnt in sans_commune.items() if cnt > 1}
+        QgsMessageLog.logMessage(
+            f"[COMAC] index_qgis: {len(index_qgis)} cles, {has_slash_q} avec /commune, "
+            f"sample: {qgis_keys}",
+            "PoleAerien", Qgis.Info
+        )
+        if collisions:
+            QgsMessageLog.logMessage(
+                f"[COMAC] COMMUNES DISTINCTES: {len(collisions)} numeros identiques dans communes differentes "
+                f"(auraient collisionne sans keep_commune): {dict(list(collisions.items())[:10])}",
+                "PoleAerien", Qgis.Warning
+            )
 
 
 
@@ -753,7 +806,7 @@ class Comac:
 
             for poteauSt in listePoteau:
 
-                cle_excel = normalize_appui_num(poteauSt, strip_e_prefix=True)
+                cle_excel = normalize_appui_num(poteauSt, strip_e_prefix=True, keep_commune=True)
 
                 
 
@@ -793,7 +846,8 @@ class Comac:
 
                 else:
                     # Poteau non trouve dans les zones etude: verifier s'il existe dans la couche
-                    if cle_excel and cle_excel in all_inf_nums:
+                    # Chercher avec et sans commune (Excel NGE n'a pas /commune)
+                    if cle_excel and (cle_excel in all_inf_nums or cle_excel in all_inf_sans_commune):
                         PotBtHorsPerimetreSt.append(poteauSt)
                     else:
                         PotBtintrouvableSt.append(poteauSt)
@@ -938,7 +992,9 @@ class Comac:
 
             get_capacites_fn=get_capacites_possibles,
 
-            ref_label=ref_label
+            ref_label=ref_label,
+
+            dedup_refs=True
 
         )
 
@@ -1396,7 +1452,7 @@ class Comac:
 
                     color = red_color
 
-                elif statut == 'ABSENT_BDD':
+                elif statut.startswith('ABSENT'):
 
                     color = orange_color
 

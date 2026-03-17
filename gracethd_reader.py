@@ -47,6 +47,8 @@ _CSV_ENCODING = 'utf-8'
 
 _LOG_TAG = 'GraceTHD'
 
+_PLACEHOLDER_ETIQUETS = {'OO-XXXX-XXXX', 'CDAXX_REF-PTO'}
+
 
 # ---------------------------------------------------------------------------
 #  Validation result
@@ -75,12 +77,30 @@ class GraceTHDValidation:
 # ---------------------------------------------------------------------------
 
 def _load_csv(filepath: str) -> List[Dict[str, str]]:
-    """Load a semicolon-delimited CSV into a list of dicts."""
+    """Load a semicolon-delimited CSV into a list of dicts.
+
+    Tries utf-8 first, falls back to latin-1 (ISO 8859-1) which accepts
+    all byte values and is the encoding used by some GraceTHD exports.
+    """
     if not os.path.isfile(filepath):
         return []
-    with open(filepath, 'r', encoding=_CSV_ENCODING, errors='replace') as f:
-        reader = csv.DictReader(f, delimiter=_CSV_DELIMITER)
-        return list(reader)
+    for enc in ('utf-8', 'latin-1'):
+        try:
+            with open(filepath, 'r', encoding=enc) as f:
+                rows = list(csv.DictReader(f, delimiter=_CSV_DELIMITER))
+            if rows:
+                QgsMessageLog.logMessage(
+                    f"CSV {os.path.basename(filepath)}: {len(rows)} lignes, encoding={enc}",
+                    _LOG_TAG, Qgis.Info
+                )
+            return rows
+        except UnicodeDecodeError:
+            continue
+    QgsMessageLog.logMessage(
+        f"CSV {os.path.basename(filepath)}: echec lecture (utf-8 + latin-1)",
+        _LOG_TAG, Qgis.Warning
+    )
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +152,7 @@ class GraceTHDReader:
     def __init__(self, gracethd_dir: str):
         self._dir = gracethd_dir
         self._noeuds: Optional[Dict[str, QgsFeature]] = None
+        self._ptech_cache: Optional[List[Dict[str, str]]] = None
 
     def _path(self, filename: str) -> str:
         return os.path.join(self._dir, filename)
@@ -176,6 +197,43 @@ class GraceTHDReader:
                 _LOG_TAG, Qgis.Info
             )
         return self._noeuds
+
+    def _ensure_ptech(self) -> List[Dict[str, str]]:
+        """Load t_ptech.csv once, cache for reuse across load methods."""
+        if self._ptech_cache is None:
+            self._ptech_cache = _load_csv(self._path('t_ptech.csv'))
+        return self._ptech_cache
+
+    def _ensure_ptech_by_nd(self) -> Dict[str, str]:
+        """Build nd_code -> pt_typephy index from t_ptech.csv (cached)."""
+        if not hasattr(self, '_ptech_by_nd_cache') or self._ptech_by_nd_cache is None:
+            ptech = self._ensure_ptech()
+            self._ptech_by_nd_cache = {}
+            for row in ptech:
+                nd = row.get('pt_nd_code', '').strip()
+                if nd:
+                    self._ptech_by_nd_cache[nd] = row.get('pt_typephy', '').upper()
+        return self._ptech_by_nd_cache
+
+    def _determine_posemode(self, cb_nd1: str, cb_nd2: str) -> int:
+        """Determine posemode from cable endpoint infrastructure types.
+
+        Logic (aligned with fddcpiax SQL):
+            poteau(A) + poteau(A) -> 1 (aerien)
+            facade(F) at either end -> 2 (facade)
+            chambre(C) at either end -> 0 (souterrain)
+            unknown -> 4 (indetermine)
+        """
+        by_nd = self._ensure_ptech_by_nd()
+        t1 = by_nd.get(cb_nd1.strip(), '')
+        t2 = by_nd.get(cb_nd2.strip(), '')
+        if t1 == 'C' or t2 == 'C':
+            return 0
+        if t1 == 'F' or t2 == 'F':
+            return 2
+        if t1 == 'A' or t2 == 'A':
+            return 1
+        return 4
 
     def _noeud_geom_wkt(self, nd_code: str) -> str:
         """Get WKT geometry for a noeud code, or '' if not found."""
@@ -224,8 +282,14 @@ class GraceTHDReader:
         # 4. Join and produce CableSegment
         segments = []
         missing_geom = 0
+        skipped_placeholder = 0
 
         for idx, row in enumerate(cables_csv):
+            cb_etiquet = row.get('cb_etiquet', '').strip()
+            if cb_etiquet in _PLACEHOLDER_ETIQUETS:
+                skipped_placeholder += 1
+                continue
+
             cb_code = row.get('cb_code', '')
             cl_feat = cableline_feats.get(cb_code)
 
@@ -249,6 +313,10 @@ class GraceTHDReader:
             except (ValueError, TypeError):
                 pass
 
+            cb_nd1 = row.get('cb_nd1', '').strip()
+            cb_nd2 = row.get('cb_nd2', '').strip()
+            posemode = self._determine_posemode(cb_nd1, cb_nd2)
+
             segment = CableSegment(
                 gid_dc2=idx + 1,
                 gid_dc=idx + 1,
@@ -271,7 +339,7 @@ class GraceTHDReader:
                 dce='',
                 dist_type='',
                 affectation='',
-                posemode=1,  # default aerien, refined below
+                posemode=posemode,
                 geom_wkt=geom_wkt,
             )
             segments.append(segment)
@@ -284,17 +352,106 @@ class GraceTHDReader:
 
         # Resume detaille
         capas = {}
+        posemodes = {}
+        _PM_LABELS = {0: 'souterrain', 1: 'aerien', 2: 'facade', 4: 'indetermine'}
         for s in segments:
             capas[s.cab_capa] = capas.get(s.cab_capa, 0) + 1
+            posemodes[s.posemode] = posemodes.get(s.posemode, 0) + 1
         capas_str = ', '.join(f'{c}FO x{n}' for c, n in sorted(capas.items(), reverse=True))
+        pm_str = ', '.join(
+            f'{_PM_LABELS.get(pm, str(pm))}={n}' for pm, n in sorted(posemodes.items())
+        )
         QgsMessageLog.logMessage(
             f"GraceTHD cables: {len(segments)} segments {typelog_filter} charges "
-            f"({len(cables_csv)} filtres, {missing_geom} sans geom) | "
-            f"Capacites: [{capas_str}]",
+            f"({len(cables_csv)} filtres, {missing_geom} sans geom, "
+            f"{skipped_placeholder} placeholders exclus) | "
+            f"Capacites: [{capas_str}] | Posemode: [{pm_str}]",
             _LOG_TAG, Qgis.Info
         )
 
         return segments
+
+    # ------------------------------------------------------------------
+    #  Cables with node endpoints (for portee reconstruction)
+    # ------------------------------------------------------------------
+
+    def load_cables_with_nodes(
+        self, typelog_filter: str = 'DI'
+    ) -> List[Dict]:
+        """Load cables with endpoint node info (cb_nd1/cb_nd2) and geometry.
+
+        Combines t_cable.csv (attributs + nd1/nd2) with t_cableline.shp
+        (geometry) and t_noeud.shp (node positions). Produces a structure
+        richer than CableSegment, usable for portee reconstruction.
+
+        Args:
+            typelog_filter: 'DI' for distribution cables
+
+        Returns:
+            List of dicts:
+            {cb_code, cb_etiquet, cab_capa, cb_nd1, cb_nd2,
+             nd1_geom: QgsGeometry|None, nd2_geom: QgsGeometry|None,
+             cable_geom: QgsGeometry, cable_length: float}
+        """
+        cableline_feats = _load_shp_as_dict(
+            self._path('t_cableline.shp'), 'cl_cb_code'
+        )
+        cables_csv = _load_csv(self._path('t_cable.csv'))
+        self._ensure_noeuds()
+
+        if typelog_filter:
+            cables_csv = [
+                r for r in cables_csv
+                if r.get('cb_typelog', '').upper() == typelog_filter.upper()
+            ]
+
+        result = []
+        missing_geom = 0
+
+        for row in cables_csv:
+            cb_etiquet = row.get('cb_etiquet', '').strip()
+            if cb_etiquet in _PLACEHOLDER_ETIQUETS:
+                continue
+
+            cb_code = row.get('cb_code', '')
+            cl_feat = cableline_feats.get(cb_code)
+            if not cl_feat or not cl_feat.hasGeometry():
+                missing_geom += 1
+                continue
+
+            cable_geom = QgsGeometry(cl_feat.geometry())
+            cable_length = cable_geom.length()
+
+            cb_nd1 = row.get('cb_nd1', '').strip()
+            cb_nd2 = row.get('cb_nd2', '').strip()
+
+            cab_capa = 0
+            try:
+                cab_capa = int(row.get('cb_capafo', '0'))
+            except (ValueError, TypeError):
+                pass
+
+            posemode = self._determine_posemode(cb_nd1, cb_nd2)
+
+            result.append({
+                'cb_code': cb_code,
+                'cb_etiquet': row.get('cb_etiquet', ''),
+                'cab_capa': cab_capa,
+                'posemode': posemode,
+                'cb_nd1': cb_nd1,
+                'cb_nd2': cb_nd2,
+                'nd1_geom': self._noeud_geom(cb_nd1),
+                'nd2_geom': self._noeud_geom(cb_nd2),
+                'cable_geom': cable_geom,
+                'cable_length': cable_length,
+            })
+
+        QgsMessageLog.logMessage(
+            f"GraceTHD cables_with_nodes: {len(result)} cables {typelog_filter} "
+            f"({missing_geom} sans geom exclus)",
+            _LOG_TAG, Qgis.Info
+        )
+        return result
 
     # ------------------------------------------------------------------
     #  BPE  (P1-3)
@@ -312,7 +469,7 @@ class GraceTHDReader:
             compatible with db_connection.query_bpe_by_sro() output.
         """
         # 1. Load t_ptech.csv indexed by pt_code
-        ptech_csv = _load_csv(self._path('t_ptech.csv'))
+        ptech_csv = self._ensure_ptech()
         ptech_by_code = {r['pt_code']: r for r in ptech_csv if r.get('pt_code')}
 
         # 2. Load t_ebp.csv
@@ -333,10 +490,18 @@ class GraceTHDReader:
         results = []
         no_geom = 0
 
+        skipped_placeholder = 0
+
         for idx, row in enumerate(ebp_csv):
+            bp_etiquet = row.get('bp_etiquet', '').strip()
+            if bp_etiquet == 'OO-XXXX-XXXX':
+                skipped_placeholder += 1
+                continue
+
             bp_pt_code = row.get('bp_pt_code', '').strip()
-            bp_typelog = row.get('bp_typelog', '')
+            bp_typelog = row.get('bp_typelog', '').upper()
             bp_typephy = row.get('bp_typephy', '')
+            bp_codeext = row.get('bp_codeext', '').strip()
 
             # Find geometry via ptech -> noeud
             geom_wkt = ''
@@ -352,9 +517,17 @@ class GraceTHDReader:
                 no_geom += 1
                 continue
 
+            # Map bp_typelog to BDD-compatible noe_type
+            if bp_typelog == 'PBO':
+                noe_type = 'PBO'
+            elif bp_typelog == 'BPE' and bp_codeext.upper().startswith('PA'):
+                noe_type = 'PA'
+            else:
+                noe_type = 'PEP'
+
             results.append({
                 'gid': idx + 1,
-                'noe_type': bp_typelog,
+                'noe_type': noe_type,
                 'noe_usage': bp_typephy,
                 'inf_num': inf_num,
                 'geom_wkt': geom_wkt,
@@ -368,7 +541,7 @@ class GraceTHDReader:
 
         QgsMessageLog.logMessage(
             f"GraceTHD BPE: {len(results)} boitiers charges "
-            f"({no_geom} sans geom exclus)",
+            f"({no_geom} sans geom, {skipped_placeholder} placeholders exclus)",
             _LOG_TAG, Qgis.Info
         )
 
@@ -383,12 +556,14 @@ class GraceTHDReader:
 
         Source: t_ptech.csv WHERE pt_typephy = 'A'
         Geometry: t_noeud.shp via pt_nd_code = nd_code
+        inf_num: nd_codeext (primary) then pt_etiquet (fallback)
+            -- aligned with load_poteaux_as_layer()
 
         Returns:
             List of dicts {pt_code, inf_num, nd_code, nature, geom_wkt, geom}
         """
-        ptech_csv = _load_csv(self._path('t_ptech.csv'))
-        self._ensure_noeuds()
+        ptech_csv = self._ensure_ptech()
+        noeuds = self._ensure_noeuds()
 
         poteaux = []
         no_geom = 0
@@ -404,9 +579,22 @@ class GraceTHDReader:
                 no_geom += 1
                 continue
 
+            # inf_num from nd_codeext (primary) or pt_etiquet (fallback)
+            inf_num = ''
+            noeud_feat = noeuds.get(nd_code)
+            if noeud_feat:
+                try:
+                    nd_codeext = str(noeud_feat['nd_codeext']).strip() if noeud_feat['nd_codeext'] else ''
+                    if nd_codeext:
+                        inf_num = nd_codeext
+                except (KeyError, IndexError):
+                    pass
+            if not inf_num:
+                inf_num = row.get('pt_etiquet', '').strip()
+
             poteaux.append({
                 'pt_code': row.get('pt_code', ''),
-                'inf_num': row.get('pt_etiquet', ''),
+                'inf_num': inf_num,
                 'nd_code': nd_code,
                 'nature': row.get('pt_nature', ''),
                 'geom_wkt': geom.asWkt(),
@@ -431,25 +619,50 @@ class GraceTHDReader:
     #  Poteaux as QgsVectorLayer (compatible infra_pt_pot)
     # ------------------------------------------------------------------
 
-    # Mapping pt_prop values to inf_type (POT-FT / POT-BT)
-    # Known Orange/Enedis codes -- will be refined after user validation
-    _PROP_FT = {'FT', 'ORANGE', 'ORA', 'ORF'}
-    _PROP_BT = {'ENEDIS', 'ERDF', 'EDF', 'ENE', 'END'}
+    # SIREN codes -> proprietaire label
+    _SIREN_PROPRI = {
+        'OR033001001581': 'ORANGE',
+        'OR033002000000': 'ENEDIS',
+        'OR033001001714': 'RAUV',
+        'OR033001000259': 'ATHD',
+    }
+    # Fallback: legacy short codes -> propri label
+    _SHORT_PROPRI = {
+        'FT': 'ORANGE', 'ORANGE': 'ORANGE', 'ORA': 'ORANGE', 'ORF': 'ORANGE',
+        'ENEDIS': 'ENEDIS', 'ERDF': 'ENEDIS', 'EDF': 'ENEDIS',
+        'ENE': 'ENEDIS', 'END': 'ENEDIS',
+        'RAUV': 'RAUV',
+        'ATHD': 'ATHD',
+    }
+    # Propri -> infra type per infrastructure category
+    _PROPRI_TO_POT = {
+        'ORANGE': 'POT-FT', 'ENEDIS': 'POT-BT',
+        'RAUV': 'POT-AC', 'ATHD': 'POT-TI',
+    }
+    _PROPRI_TO_CHB = {
+        'ORANGE': 'CHB-FT', 'RAUV': 'CHB-AC',
+    }
+    _PROPRI_TO_FAC = {}  # FAC has no propri-based subtype
+    _DEFAULT_POT = ('POT-TI', 'ATHD')
+    _DEFAULT_CHB = ('CHB-EX', 'ATHD')
+    _DEFAULT_FAC = ('FAC', 'TIERS')
 
     def load_poteaux_as_layer(self, layer_name: str = 'gracethd_poteaux') -> Optional[QgsVectorLayer]:
         """Create a QgsVectorLayer from GraceTHD poteaux, compatible with infra_pt_pot.
 
         Fields created:
         - inf_num: from t_noeud.nd_codeext (e.g. 'E000117/03158')
-        - inf_type: POT-FT / POT-BT / POT-IND (from pt_prop/pt_prop_do mapping)
+        - inf_type: POT-FT / POT-BT / POT-AC / POT-TI (from pt_prop SIREN mapping)
+        - inf_propri: ORANGE / ENEDIS / RAUV / ATHD (from pt_prop SIREN mapping)
         - commentaire: from pt_comment (empty if absent)
+        - etat: from pt_etat
         - geometry: Point from t_noeud.geom
 
         Returns:
             QgsVectorLayer (memory) or None on failure.
         """
         import warnings
-        ptech_csv = _load_csv(self._path('t_ptech.csv'))
+        ptech_csv = self._ensure_ptech()
         noeuds = self._ensure_noeuds()
 
         if not ptech_csv or not noeuds:
@@ -474,6 +687,7 @@ class GraceTHDReader:
             pr.addAttributes([
                 QgsField("inf_num", QVariant.String),
                 QgsField("inf_type", QVariant.String),
+                QgsField("inf_propri", QVariant.String),
                 QgsField("commentaire", QVariant.String),
                 QgsField("etat", QVariant.String),
             ])
@@ -483,6 +697,9 @@ class GraceTHDReader:
         no_geom = 0
         no_codeext = 0
         prop_values = {}  # {pt_prop_value: count} for diagnostic
+        match_methods = {}  # {method: count}
+        prop_type_cross = {}  # {(pt_prop, inf_type): count}
+        prop_method_map = {}  # {pt_prop: method} (last seen)
 
         for nd_code, ptech_row in ptech_by_nd.items():
             noeud_feat = noeuds.get(nd_code)
@@ -510,7 +727,11 @@ class GraceTHDReader:
             prop_key = pt_prop or pt_prop_do or '(vide)'
             prop_values[prop_key] = prop_values.get(prop_key, 0) + 1
 
-            inf_type = self._map_prop_to_inf_type(pt_prop, pt_prop_do)
+            inf_type, inf_propri, match_method = self._map_prop_to_inf_type(pt_prop, pt_prop_do)
+            match_methods[match_method] = match_methods.get(match_method, 0) + 1
+            cross_key = (prop_key, inf_type)
+            prop_type_cross[cross_key] = prop_type_cross.get(cross_key, 0) + 1
+            prop_method_map[prop_key] = match_method
 
             # commentaire from pt_comment
             commentaire = ptech_row.get('pt_comment', '').strip()
@@ -521,6 +742,7 @@ class GraceTHDReader:
             feat.setGeometry(QgsGeometry(noeud_feat.geometry()))
             feat.setAttribute('inf_num', nd_codeext)
             feat.setAttribute('inf_type', inf_type)
+            feat.setAttribute('inf_propri', inf_propri)
             feat.setAttribute('commentaire', commentaire)
             feat.setAttribute('etat', etat)
             features.append(feat)
@@ -542,62 +764,252 @@ class GraceTHDReader:
             type_counts[t] = type_counts.get(t, 0) + 1
         type_str = ', '.join(f'{t}: {n}' for t, n in sorted(type_counts.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
-            f"GraceTHD poteaux inf_type: {type_str}",
+            f"GraceTHD poteaux inf_type repartition: {type_str}",
             _LOG_TAG, Qgis.Info
         )
 
-        # Log pt_prop values for user validation
+        # Log pt_prop distinct values
         prop_str = ', '.join(f'{v}: {n}' for v, n in sorted(prop_values.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
-            f"GraceTHD poteaux pt_prop valeurs: {prop_str}",
+            f"GraceTHD poteaux pt_prop valeurs distinctes: {prop_str}",
             _LOG_TAG, Qgis.Info
         )
 
-        # Log sample inf_num for user validation
-        sample = [feat['inf_num'] for feat in features[:5]]
+        # Log match method breakdown
+        method_str = ', '.join(f'{m}: {n}' for m, n in sorted(match_methods.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
-            f"GraceTHD poteaux inf_num (sample): {sample}",
+            f"GraceTHD poteaux match_method: {method_str}",
             _LOG_TAG, Qgis.Info
         )
+
+        # Log cross-tab pt_prop x inf_type
+        for (pv, it), cnt in sorted(prop_type_cross.items(), key=lambda x: -x[1]):
+            QgsMessageLog.logMessage(
+                f"GraceTHD classification: pt_prop={pv!r} -> {it} (x{cnt}, methode={prop_method_map.get(pv, '?')})",
+                _LOG_TAG, Qgis.Info
+            )
+
+        # Log sample poteaux with full detail
+        sample_limit = min(10, len(features))
+        QgsMessageLog.logMessage(
+            f"GraceTHD poteaux echantillon ({sample_limit} premiers):",
+            _LOG_TAG, Qgis.Info
+        )
+        for feat in features[:sample_limit]:
+            QgsMessageLog.logMessage(
+                f"  inf_num={feat['inf_num']}, inf_type={feat['inf_type']}, "
+                f"etat={feat['etat']}, commentaire={feat['commentaire'][:50]}",
+                _LOG_TAG, Qgis.Info
+            )
 
         return lyr
 
     @staticmethod
-    def _map_prop_to_inf_type(pt_prop: str, pt_prop_do: str) -> str:
-        """Map pt_prop / pt_prop_do to inf_type (POT-FT / POT-BT / POT-IND).
+    def _resolve_propri(pt_prop: str, pt_prop_do: str) -> Tuple[str, str]:
+        """Resolve pt_prop / pt_prop_do SIREN code to proprietaire label.
 
-        Falls back to POT-FT if owner cannot be determined (most common case
-        for Axione livrables where poteaux are new fiber installs).
+        Returns:
+            (propri_label, match_method) -- e.g. ('ORANGE', 'siren')
         """
         for val in (pt_prop, pt_prop_do):
             if not val:
                 continue
-            if val in GraceTHDReader._PROP_FT:
-                return 'POT-FT'
-            if val in GraceTHDReader._PROP_BT:
-                return 'POT-BT'
-        # Default: POT-FT (fibre = FT pour les etudes Axione)
-        return 'POT-FT'
+            siren = GraceTHDReader._SIREN_PROPRI.get(val)
+            if siren:
+                return siren, 'siren'
+            short = GraceTHDReader._SHORT_PROPRI.get(val)
+            if short:
+                return short, 'exact'
+        return '', 'default'
+
+    @staticmethod
+    def _map_prop_to_inf_type(pt_prop: str, pt_prop_do: str) -> Tuple[str, str, str]:
+        """Map pt_prop / pt_prop_do to (inf_type, inf_propri, match_method) for poteaux."""
+        propri, method = GraceTHDReader._resolve_propri(pt_prop, pt_prop_do)
+        if propri:
+            inf_type = GraceTHDReader._PROPRI_TO_POT.get(
+                propri, GraceTHDReader._DEFAULT_POT[0]
+            )
+            return inf_type, propri, method
+        return GraceTHDReader._DEFAULT_POT[0], GraceTHDReader._DEFAULT_POT[1], method
+
+    @staticmethod
+    def _map_prop_to_chb_type(pt_prop: str, pt_prop_do: str) -> Tuple[str, str, str]:
+        """Map pt_prop / pt_prop_do to (inf_type, inf_propri, match_method) for chambres."""
+        propri, method = GraceTHDReader._resolve_propri(pt_prop, pt_prop_do)
+        if propri:
+            inf_type = GraceTHDReader._PROPRI_TO_CHB.get(
+                propri, GraceTHDReader._DEFAULT_CHB[0]
+            )
+            return inf_type, propri, method
+        return GraceTHDReader._DEFAULT_CHB[0], GraceTHDReader._DEFAULT_CHB[1], method
 
     # ------------------------------------------------------------------
-    #  Cheminements (bonus - pour deduire posemode)
+    #  Chambres (pt_typephy='C')
+    # ------------------------------------------------------------------
+
+    def load_chambres(self) -> List[Dict]:
+        """Load chambres from GraceTHD.
+
+        Source: t_ptech.csv WHERE pt_typephy = 'C'
+        Geometry: t_noeud.shp via pt_nd_code = nd_code
+
+        Returns:
+            List of dicts {pt_code, inf_num, inf_type, inf_propri, inf_mat,
+                           nd_code, geom_wkt, geom}
+        """
+        ptech_csv = self._ensure_ptech()
+        self._ensure_noeuds()
+
+        chambres = []
+        no_geom = 0
+
+        for row in ptech_csv:
+            if row.get('pt_typephy', '').upper() != 'C':
+                continue
+
+            nd_code = row.get('pt_nd_code', '')
+            geom = self._noeud_geom(nd_code)
+
+            if not geom:
+                no_geom += 1
+                continue
+
+            pt_prop = row.get('pt_prop', '').strip().upper()
+            pt_prop_do = row.get('pt_prop_do', '').strip().upper()
+            inf_type, inf_propri, _ = self._map_prop_to_chb_type(pt_prop, pt_prop_do)
+
+            chambres.append({
+                'pt_code': row.get('pt_code', ''),
+                'inf_num': row.get('pt_etiquet', ''),
+                'inf_type': inf_type,
+                'inf_propri': inf_propri,
+                'inf_mat': row.get('pt_nature', ''),
+                'nd_code': nd_code,
+                'geom_wkt': geom.asWkt(),
+                'geom': geom,
+            })
+
+        if no_geom:
+            QgsMessageLog.logMessage(
+                f"t_ptech: {no_geom} chambres sans geometrie (noeud manquant)",
+                _LOG_TAG, Qgis.Warning
+            )
+
+        QgsMessageLog.logMessage(
+            f"GraceTHD chambres: {len(chambres)} chargees "
+            f"({no_geom} sans geom exclus)",
+            _LOG_TAG, Qgis.Info
+        )
+
+        return chambres
+
+    # ------------------------------------------------------------------
+    #  Facades (pt_typephy='F')
+    # ------------------------------------------------------------------
+
+    def load_facades(self) -> List[Dict]:
+        """Load facades from GraceTHD.
+
+        Source: t_ptech.csv WHERE pt_typephy = 'F'
+        Geometry: t_noeud.shp via pt_nd_code = nd_code
+
+        Returns:
+            List of dicts {pt_code, inf_num, inf_type, inf_propri,
+                           nd_code, geom_wkt, geom}
+        """
+        ptech_csv = self._ensure_ptech()
+        self._ensure_noeuds()
+
+        facades = []
+        no_geom = 0
+
+        for row in ptech_csv:
+            if row.get('pt_typephy', '').upper() != 'F':
+                continue
+
+            nd_code = row.get('pt_nd_code', '')
+            geom = self._noeud_geom(nd_code)
+
+            if not geom:
+                no_geom += 1
+                continue
+
+            facades.append({
+                'pt_code': row.get('pt_code', ''),
+                'inf_num': row.get('pt_etiquet', ''),
+                'inf_type': 'FAC',
+                'inf_propri': 'TIERS',
+                'nd_code': nd_code,
+                'geom_wkt': geom.asWkt(),
+                'geom': geom,
+            })
+
+        if no_geom:
+            QgsMessageLog.logMessage(
+                f"t_ptech: {no_geom} facades sans geometrie (noeud manquant)",
+                _LOG_TAG, Qgis.Warning
+            )
+
+        QgsMessageLog.logMessage(
+            f"GraceTHD facades: {len(facades)} chargees "
+            f"({no_geom} sans geom exclus)",
+            _LOG_TAG, Qgis.Info
+        )
+
+        return facades
+
+    # ------------------------------------------------------------------
+    #  Cheminements (avec champs complets)
     # ------------------------------------------------------------------
 
     def load_cheminements(self) -> List[Dict]:
         """Load cheminements from GraceTHD.
 
         Returns:
-            List of dicts {cm_code, cm_ndcode1, cm_ndcode2, cm_typ_imp, cm_long, geom_wkt}
+            List of dicts {cm_code, cm_ndcode1, cm_ndcode2, cm_avct,
+            cm_typlog, cm_typ_imp, cm_compo, gc, cm_long, proprio, geom_wkt}
         """
         features = _load_shp_features(self._path('t_cheminement.shp'))
         results = []
+
+        field_names = set()
+        if features:
+            field_names = {f.name() for f in features[0].fields()}
+
+        def _s(feat, name):
+            if name not in field_names:
+                return ''
+            v = feat[name]
+            return str(v).strip() if v else ''
+
+        def _f(feat, name):
+            if name not in field_names:
+                return 0.0
+            v = feat[name]
+            if not v:
+                return 0.0
+            try:
+                return float(str(v).replace(',', '.'))
+            except (ValueError, TypeError):
+                return 0.0
+
         for feat in features:
+            # Proprietaire mapping (cm_prop_do SIREN -> label)
+            prop_raw = _s(feat, 'cm_prop_do') or _s(feat, 'cm_prop')
+            propri, _ = self._resolve_propri(prop_raw.upper(), '')
+
             results.append({
-                'cm_code': str(feat['cm_code']) if feat['cm_code'] else '',
-                'cm_ndcode1': str(feat['cm_ndcode1']) if feat['cm_ndcode1'] else '',
-                'cm_ndcode2': str(feat['cm_ndcode2']) if feat['cm_ndcode2'] else '',
-                'cm_typ_imp': str(feat['cm_typ_imp']) if feat['cm_typ_imp'] else '',
-                'cm_long': float(feat['cm_long']) if feat['cm_long'] else 0.0,
+                'cm_code': _s(feat, 'cm_code'),
+                'cm_ndcode1': _s(feat, 'cm_ndcode1'),
+                'cm_ndcode2': _s(feat, 'cm_ndcode2'),
+                'cm_avct': _s(feat, 'cm_avct'),
+                'cm_typlog': _s(feat, 'cm_typlog'),
+                'cm_typ_imp': _s(feat, 'cm_typ_imp'),
+                'cm_compo': _s(feat, 'cm_compo'),
+                'gc': _s(feat, 'cm_comment'),
+                'cm_long': _f(feat, 'cm_long'),
+                'proprio': propri if propri else prop_raw,
                 'geom_wkt': feat.geometry().asWkt() if feat.hasGeometry() else '',
             })
 

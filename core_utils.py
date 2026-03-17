@@ -121,16 +121,19 @@ def build_export_path(chemin: str, default_name: str) -> str:
 # NORMALISATION APPUIS
 # =============================================================================
 
-def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False):
+def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False,
+                        keep_commune=False):
     """Normalise un numéro d'appui pour comparaison.
     
     Args:
         inf_num: Numéro d'appui brut (ex: "1016436/63041", "E000123", "BT-123")
         strip_e_prefix: Si True, enlève préfixe E (pour matching existant)
         strip_bt_prefix: Si True, enlève préfixes BT-/BT
+        keep_commune: Si True, conserve le suffixe /commune (ex: "78/63041").
+            Indispensable quand un même numéro existe dans plusieurs communes.
         
     Returns:
-        str: Numéro normalisé (sans zéros de tête, partie avant le /)
+        str: Numéro normalisé (sans zéros de tête, avec ou sans /commune)
     """
     try:
         if inf_num is None:
@@ -139,9 +142,13 @@ def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False):
         if not s:
             return ""
         
-        # Extraire la partie avant le slash (format numéro/insee)
+        # Extraire la partie commune (après le slash)
+        commune_suffix = ""
         if "/" in s:
-            s = s.split("/")[0].strip()
+            parts = s.split("/", 1)
+            s = parts[0].strip()
+            if keep_commune and parts[1].strip():
+                commune_suffix = "/" + parts[1].strip()
         
         # Enlever le suffixe .0 (conversion float -> str)
         if s.endswith(".0"):
@@ -152,7 +159,7 @@ def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False):
             if strip_e_prefix:
                 s = s[1:]
             else:
-                return s
+                return s + commune_suffix
         
         # Préfixe BT: enlever si demandé
         if strip_bt_prefix:
@@ -166,9 +173,9 @@ def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False):
         
         # Si c'est un nombre pur, enlever les zéros de tête
         if s_clean.isdigit():
-            return s_clean.lstrip("0") or "0"
+            return (s_clean.lstrip("0") or "0") + commune_suffix
         
-        return s
+        return s + commune_suffix
     except Exception:
         return ""
 

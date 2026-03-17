@@ -601,9 +601,13 @@ class PoleAerienDialogV2(QDialog):
         sro_lbl.setFont(_make_font(pt=9, bold=True))
         sro_lay.addWidget(sro_lbl)
 
-        self._sro_value = QLabel("-")
+        self._sro_value = QLineEdit()
+        self._sro_value.setPlaceholderText('XXXXX/YYY/ZZZ/NNNNN')
+        self._sro_value.setMaxLength(25)
         self._sro_value.setFont(_make_font(pt=9, bold=True, family='Consolas'))
-        _set_foreground(self._sro_value, _ThemeColors.info())
+        self._sro_value.setMinimumWidth(180)
+        self._sro_value.setMaximumWidth(220)
+        self._sro_value.textChanged.connect(self._on_sro_text_changed)
         sro_lay.addWidget(self._sro_value)
         sro_lay.addStretch()
 
@@ -611,13 +615,6 @@ class PoleAerienDialogV2(QDialog):
         self._sro_status.setFont(_make_font(pt=8))
         sro_lay.addWidget(self._sro_status)
 
-        self._sro_edit_btn = QPushButton()
-        self._sro_edit_btn.setIcon(_qgs_icon('mActionEditTable.svg'))
-        self._sro_edit_btn.setIconSize(QSize(14, 14))
-        self._sro_edit_btn.setToolTip('Saisir le SRO manuellement')
-        self._sro_edit_btn.setCursor(Qt.PointingHandCursor)
-        self._sro_edit_btn.clicked.connect(self._on_sro_edit)
-        sro_lay.addWidget(self._sro_edit_btn)
 
         self._sro_row.setVisible(False)
         lay.addWidget(self._sro_row)
@@ -907,36 +904,29 @@ class PoleAerienDialogV2(QDialog):
             self._run_detection(path)
             self._log_info("Detection resynchronisee.")
 
-    def _on_sro_edit(self):
-        """Open the SRO manual input dialog with DB autocomplete."""
-        # Load SRO list from DB (cached)
-        if not hasattr(self, '_sro_cache'):
-            self._sro_cache = []
-        if not self._sro_cache:
-            try:
-                from .db_connection import get_shared_connection
-                db = get_shared_connection()
-                if db.connect():
-                    self._sro_cache = db.fetch_sro_list()
-            except Exception:
-                pass
+    def _on_sro_text_changed(self, text):
+        """Validate SRO as user types in the editable field."""
+        text = text.strip()
+        if not text:
+            self._sro_status.setText("[--] Saisissez le SRO")
+            _set_foreground(self._sro_status, _ThemeColors.warn())
+            self._detection.sro = ''
+            self._validate_start()
+            return
+        normalized = text.replace('-', '/').replace('_', '/')
+        if _SRO_REGEX.match(normalized):
+            parts = normalized.split('/')
+            sro = f'{parts[0]}/{parts[1]}/{parts[2]}/{parts[3]}'
+            self._detection.sro = sro
+            self._sro_status.setText("[OK]")
+            _set_foreground(self._sro_status, _ThemeColors.ok())
+            self._radio_project.setEnabled(True)
+        else:
+            self._sro_status.setText("[--] Format invalide")
+            _set_foreground(self._sro_status, _ThemeColors.warn())
+            self._detection.sro = ''
+        self._validate_start()
 
-        dlg = SroInputDialog(
-            current_sro=self._detection.sro,
-            project_name=self._detection.project_name,
-            sro_list=self._sro_cache,
-            parent=self
-        )
-        if dlg.exec_() == QDialog.Accepted:
-            sro = dlg.get_sro()
-            if sro:
-                self._detection.sro = sro
-                self._sro_value.setText(sro)
-                self._sro_status.setText("[OK] SRO saisi manuellement")
-                _set_foreground(self._sro_status, _ThemeColors.info())
-                self._radio_project.setEnabled(True)
-                self._log_ok(f"  SRO saisi manuellement : {sro}")
-                self._validate_start()
 
     def _on_mode_changed(self, button):
         is_project = (button == self._radio_project)
@@ -950,9 +940,9 @@ class PoleAerienDialogV2(QDialog):
 
         # Prompt SRO input if project mode selected but no SRO
         if is_project and not self._detection.sro:
-            self._sro_value.setText("-")
+            self._sro_value.clear()
             self._sro_status.setText(
-                "[--] SRO requis - cliquez le bouton pour saisir"
+                "[--] Saisissez le SRO ou utilisez la liste BDD"
             )
             _set_foreground(self._sro_status, _ThemeColors.warn())
 
@@ -980,9 +970,9 @@ class PoleAerienDialogV2(QDialog):
             _set_foreground(self._sro_status, _ThemeColors.ok())
             self._radio_project.setEnabled(True)
         else:
-            self._sro_value.setText("-")
+            self._sro_value.clear()
             self._sro_status.setText(
-                "[--] SRO non reconnu - cliquez le bouton pour saisir"
+                "[--] Saisissez le SRO ou utilisez la liste BDD"
             )
             _set_foreground(self._sro_status, _ThemeColors.warn())
             self._radio_project.setEnabled(True)
@@ -1049,7 +1039,7 @@ class PoleAerienDialogV2(QDialog):
         self._project_tag.setVisible(False)
         self._subtitle.setText("  -  Selectionnez un dossier projet")
         self._det_summary.setVisible(False)
-        self._sro_value.setText("-")
+        self._sro_value.clear()
         self._sro_status.setText("")
         self._radio_project.setEnabled(False)
         for row in self._module_rows.values():

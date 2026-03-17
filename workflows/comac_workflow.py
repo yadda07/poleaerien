@@ -77,21 +77,22 @@ class ComacWorkflow(QObject):
             return
 
         # 2. Extraction SRO + appuis WKB pour verif cables (Main Thread)
-        # Utiliser le cache batch si disponible (evite double extraction)
+        # SRO: reutiliser le cache batch si disponible
         if sro_appuis_cache:
             sro = sro_appuis_cache.get('sro') or sro
-            appuis_wkb = sro_appuis_cache.get('appuis_wkb', [])
+        if not sro:
+            sro = extract_sro_from_layer(lyr_pot)
+        # Appuis WKB: toujours extraire avec keep_commune=True (COMAC a besoin
+        # de /commune pour distinguer poteaux de communes differentes).
+        # Ne pas reutiliser le cache Police C6 qui est sans commune.
+        appuis_wkb = []
+        if sro:
+            appuis_wkb = extraire_appuis_wkb(lyr_pot, keep_commune=True)
         else:
-            if not sro:
-                sro = extract_sro_from_layer(lyr_pot)
-            appuis_wkb = []
-            if sro:
-                appuis_wkb = extraire_appuis_wkb(lyr_pot)
-            else:
-                QgsMessageLog.logMessage(
-                    "[COMAC] SRO non trouve - verif cables desactivee",
-                    "PoleAerien", Qgis.Warning
-                )
+            QgsMessageLog.logMessage(
+                "[COMAC] SRO non trouve - verif cables desactivee",
+                "PoleAerien", Qgis.Warning
+            )
 
         # 3. Préparation des données pour la Task
         fichier_export = build_export_path(chemin_export, "ANALYSE_COMAC.xlsx")
@@ -147,7 +148,7 @@ class ComacWorkflow(QObject):
                 result['fichier_export'],
                 result.get('dico_verif_secu'),
                 result.get('verif_cables'),
-                result.get('verif_boitiers')
+                result.get('verif_boitiers'),
             ],
             payload=result,
         )

@@ -101,6 +101,14 @@ def insert_layer_in_group(couche, group_name):
     group.insertChildNode(1, QgsLayerTreeLayer(couche))
 
 
+def show_feature_count(layer):
+    """Active 'Afficher le nombre d'entites' dans le panneau couches QGIS."""
+    root = QgsProject.instance().layerTreeRoot()
+    node = root.findLayer(layer.id())
+    if node:
+        node.setCustomProperty("showFeatureCount", True)
+
+
 def get_layer_safe(layer_name, context=""):
     """Récupère une couche QGIS de manière sécurisée.
     
@@ -362,7 +370,7 @@ def detect_duplicates(layer, field, request=None):
 
 def extraire_poteaux_etude(
     table_poteau, table_etude, colonne_etude,
-    pot_type_filter, context
+    pot_type_filter, context, keep_commune=False
 ):
     """Extraction complete poteaux/etude en une seule passe.
     
@@ -376,6 +384,7 @@ def extraire_poteaux_etude(
         colonne_etude: Champ nom etude
         pot_type_filter: 'POT-FT' ou 'POT-BT'
         context: Contexte erreur
+        keep_commune: Si True, conserve /commune dans all_inf_nums (pour COMAC)
     
     Returns:
         tuple: (doublons_etudes, poteaux_hors_etude, dict_poteaux_par_etude, dict_poteaux_prives)
@@ -468,7 +477,8 @@ def extraire_poteaux_etude(
     for fid, feat_pot in poteaux_dict.items():
         raw_inf = feat_pot["inf_num"]
         if raw_inf and raw_inf != NULL:
-            cle = normalize_appui_num(raw_inf, strip_e_prefix=True)
+            cle = normalize_appui_num(raw_inf, strip_e_prefix=True,
+                                     keep_commune=keep_commune)
             if cle:
                 all_inf_nums.add(cle)
             if feat_pot.hasGeometry():
@@ -484,6 +494,14 @@ def extraire_poteaux_etude(
         f"{len(dico_prives)} etudes avec terrains prives, {len(doublons)} doublons",
         "PoleAerien", Qgis.Info
     )
+    if keep_commune and all_inf_nums:
+        sample_inf = sorted(all_inf_nums)[:10]
+        has_slash = sum(1 for k in all_inf_nums if '/' in k)
+        QgsMessageLog.logMessage(
+            f"[{context}] all_inf_nums (keep_commune=True): {has_slash}/{len(all_inf_nums)} avec /commune, "
+            f"sample: {sample_inf}",
+            "PoleAerien", Qgis.Info
+        )
     if dico_etude:
         sample_etudes = list(dico_etude.keys())[:5]
         sample_str = ', '.join(f'{e}({len(dico_etude[e])})' for e in sample_etudes)
