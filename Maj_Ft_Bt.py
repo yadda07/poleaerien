@@ -452,7 +452,7 @@ class MajFtBt:
         if colonne_nom_etude not in df_excel.columns:
             QgsMessageLog.logMessage(
                 f"[MAJ_BD] Colonne '{colonne_nom_etude}' absente du DataFrame",
-                "MAJ_FT_BT", Qgis.Warning
+                "PoleAerien", Qgis.Warning
             )
             return result
         
@@ -663,12 +663,12 @@ class MajFtBt:
             raise
 
         except AttributeError as lettre:
-            QgsMessageLog.logMessage(f"FICHIER : {fichier_Excel} - {lettre}", "MAJ_FT_BT", Qgis.Warning)
+            QgsMessageLog.logMessage(f"FICHIER : {fichier_Excel} - {lettre}", "PoleAerien", Qgis.Warning)
             df_ft = pd.DataFrame({})
             df_bt = pd.DataFrame({})
 
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur fichier {fichier_Excel}: {e}", "MAJ_FT_BT", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur fichier {fichier_Excel}: {e}", "PoleAerien", Qgis.Critical)
             df_ft = pd.DataFrame({})
             df_bt = pd.DataFrame({})
 

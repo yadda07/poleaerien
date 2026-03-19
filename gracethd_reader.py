@@ -45,7 +45,7 @@ _OPTIONAL_FILES = ['t_cable.csv', 't_ptech.csv', 't_ebp.csv', 't_cheminement.shp
 _CSV_DELIMITER = ';'
 _CSV_ENCODING = 'utf-8'
 
-_LOG_TAG = 'GraceTHD'
+_LOG_TAG = 'PoleAerien'
 
 _PLACEHOLDER_ETIQUETS = {'OO-XXXX-XXXX', 'CDAXX_REF-PTO'}
 
@@ -118,7 +118,9 @@ def _load_shp_features(filepath: str) -> List[QgsFeature]:
             _LOG_TAG, Qgis.Warning
         )
         return []
-    return list(layer.getFeatures())
+    features = list(layer.getFeatures())
+    del layer
+    return features
 
 
 def _load_shp_as_dict(filepath: str, key_field: str) -> Dict[str, QgsFeature]:
@@ -303,8 +305,11 @@ class GraceTHDReader:
 
             # cl_long from cableline (may be more accurate)
             cl_long = cl_feat['cl_long']
-            if cl_long and float(cl_long) > 0:
-                length = float(cl_long)
+            try:
+                if cl_long and float(cl_long) > 0:
+                    length = float(cl_long)
+            except (ValueError, TypeError):
+                pass
 
             cab_capa = 0
             raw_capa = row.get('cb_capafo', '0')

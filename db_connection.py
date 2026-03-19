@@ -124,7 +124,10 @@ class DatabaseConnection:
             cur.execute('SELECT 1')
             cur.close()
             return True
-        except Exception:
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"is_connected check echoue: {e}", "PoleAerien", Qgis.Warning
+            )
             self.connection = None
             return False
 
@@ -184,8 +187,10 @@ class DatabaseConnection:
         if self.connection:
             try:
                 self.connection.close()
-            except Exception:
-                pass
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"disconnect echoue: {e}", "PoleAerien", Qgis.Warning
+                )
             self.connection = None
     
     def execute_fddcpi2(self, sro: str) -> List[CableSegment]:
@@ -202,6 +207,7 @@ class DatabaseConnection:
             if not self.connect():
                 return []
         
+        cursor = None
         try:
             cursor = self.connection.cursor()
             
@@ -213,7 +219,6 @@ class DatabaseConnection:
             segments = []
             
             for row in rows:
-                # Mapper les colonnes vers CableSegment
                 segment = CableSegment(
                     gid_dc2=row[0] or 0,
                     gid_dc=row[1] or 0,
@@ -237,17 +242,14 @@ class DatabaseConnection:
                     dist_type=row[20] or '',
                     affectation=row[21] or '',
                     posemode=row[22] or 0,
-                    geom_wkt=row[23] or ''  # ST_AsText(geom)
+                    geom_wkt=row[23] or ''
                 )
                 segments.append(segment)
-            
-            cursor.close()
             
             QgsMessageLog.logMessage(
                 f"fddcpi2({sro}): {len(segments)} segments de câbles récupérés",
                 "PoleAerien", Qgis.Info
             )
-            
             return segments
             
         except Exception as e:
@@ -255,7 +257,17 @@ class DatabaseConnection:
                 f"Erreur exécution fddcpi2: {e}",
                 "PoleAerien", Qgis.Warning
             )
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             return []
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
     
     def fetch_sro_list(self) -> List[str]:
         """
@@ -269,6 +281,7 @@ class DatabaseConnection:
             if not self.connect():
                 return []
 
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute(
@@ -276,21 +289,30 @@ class DatabaseConnection:
                 "WHERE sro IS NOT NULL ORDER BY sro"
             )
             rows = cursor.fetchall()
-            cursor.close()
             return [row[0] for row in rows if row[0]]
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur requete za_sro: {e}",
                 "PoleAerien", Qgis.Warning
             )
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             return []
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
     def get_cables_aeriens(self, sro: str) -> List[CableSegment]:
         """
-        Récupère uniquement les câbles aériens (posemode=1).
+        Récupère les câbles aériens et façade (posemode in (1, 2)).
         """
         all_segments = self.execute_fddcpi2(sro)
-        return [s for s in all_segments if s.posemode == 1]
+        return [s for s in all_segments if s.posemode in (1, 2)]
 
     def query_bpe_by_sro(self, sro: str) -> List[dict]:
         """
@@ -306,6 +328,7 @@ class DatabaseConnection:
             if not self.connect():
                 return []
         
+        cursor = None
         try:
             cursor = self.connection.cursor()
             query = sql.SQL(
@@ -325,13 +348,10 @@ class DatabaseConnection:
                     'geom_wkt': row[4] or ''
                 })
             
-            cursor.close()
-            
             QgsMessageLog.logMessage(
                 f"BPE({sro}): {len(results)} boîtiers récupérés",
                 "PoleAerien", Qgis.Info
             )
-            
             return results
             
         except Exception as e:
@@ -339,7 +359,17 @@ class DatabaseConnection:
                 f"Erreur requête BPE: {e}",
                 "PoleAerien", Qgis.Warning
             )
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             return []
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
 
     def query_attaches_by_sro(self, sro: str) -> List[dict]:
@@ -360,6 +390,7 @@ class DatabaseConnection:
             if not self.connect():
                 return []
         
+        cursor = None
         try:
             cursor = self.connection.cursor()
             query = sql.SQL(
@@ -377,13 +408,10 @@ class DatabaseConnection:
                         'geom_wkt': row[1]
                     })
             
-            cursor.close()
-            
             QgsMessageLog.logMessage(
                 f"Attaches({sro}): {len(results)} attaches recuperees",
                 "PoleAerien", Qgis.Info
             )
-            
             return results
             
         except Exception as e:
@@ -391,7 +419,17 @@ class DatabaseConnection:
                 f"Erreur requete attaches: {e}",
                 "PoleAerien", Qgis.Warning
             )
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             return []
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
     def query_sro_be(self, sro: str) -> Optional[str]:
         """
@@ -410,6 +448,7 @@ class DatabaseConnection:
             if not self.connect():
                 return None
         
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute(
@@ -418,15 +457,11 @@ class DatabaseConnection:
                 (f'%{sro}%',)
             )
             row = cursor.fetchone()
-            cursor.close()
-            
             be = row[0] if row else None
-            
             QgsMessageLog.logMessage(
                 f"SRO BE({sro}): {be or 'non trouve'}",
                 "PoleAerien", Qgis.Info
             )
-            
             return be
             
         except Exception as e:
@@ -434,7 +469,17 @@ class DatabaseConnection:
                 f"Erreur requete sro_nge_axione: {e}",
                 "PoleAerien", Qgis.Warning
             )
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             return None
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -486,8 +531,11 @@ def extract_sro_from_layer(layer) -> Optional[str]:
     
     for sro_field in sro_fields:
         if sro_field in field_names:
-            # Récupérer la première valeur non vide
-            for feature in layer.getFeatures():
+            from qgis.core import QgsFeatureRequest
+            req = QgsFeatureRequest().setFilterExpression(
+                f'"{sro_field}" IS NOT NULL AND "{sro_field}" != \'\''
+            ).setLimit(1).setFlags(QgsFeatureRequest.NoGeometry)
+            for feature in layer.getFeatures(req):
                 value = feature[sro_field]
                 if value and str(value).strip():
                     return str(value).strip()

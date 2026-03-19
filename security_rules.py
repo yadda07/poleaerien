@@ -20,16 +20,7 @@ try:
     )
     _HAS_COMAC_DB = True
 except ImportError:
-    try:
-        from comac_db_reader import (
-            get_cable_capacite as _db_get_capacite,
-            get_cable_capacites_possibles as _db_get_capas_possibles,
-            get_zone_vent_from_hypotheses as _db_get_zone_hypo,
-            get_zone_vent_from_insee as _db_get_zone_insee
-        )
-        _HAS_COMAC_DB = True
-    except ImportError:
-        _HAS_COMAC_DB = False
+    _HAS_COMAC_DB = False
 
 # =============================================================================
 # CONSTANTES - Portées maximales (mètres) selon capacité FO et zone climatique

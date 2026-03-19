@@ -1,0 +1,2788 @@
+{
+  "metadata": {
+    "standard": "ISO/IEC 11179 — Information technology — Metadata registries",
+    "title": "Dictionnaire de donnees - Plugin Pole Aerien",
+    "description": "Registre ISO/IEC 11179. 7 modules + tableau de bord.",
+    "version": "1.1.0",
+    "language": "fr",
+    "organization": "NGE — Pole Aerien",
+    "creation_date": "2026-03-18",
+    "scope": "Rapport de diagnostic unifie et rapports individuels"
+  },
+  "glossary": [
+    {
+      "term": "SRO",
+      "definition": "Sous-Repartiteur Optique. Zone geographique de desserte fibre optique (ex: 63041/B1I/PMZ/00003)."
+    },
+    {
+      "term": "inf_num",
+      "definition": "Identifiant unique d'un poteau en BDD PostgreSQL. Format: numero/code_commune (ex: E000058/63041)."
+    },
+    {
+      "term": "noe_codext",
+      "definition": "Code terrain du poteau. Format: prefixe+numero/commune (ex: BT0393/03112). Nom utilise sur le terrain et dans les PCM."
+    },
+    {
+      "term": "POT-FT",
+      "definition": "Poteau France Telecom (reseau cuivre). Gere par CAP FT, C6 vs BD, Police C6."
+    },
+    {
+      "term": "POT-BT",
+      "definition": "Poteau Basse Tension (reseau electrique partage). Gere par COMAC."
+    },
+    {
+      "term": "POT-AC",
+      "definition": "Poteau A Creer. Nouveau poteau a implanter (action Implantation). Proprietaire: RAUV. Attribue automatiquement quand l'action est Implantation dans le fichier FT-BT KO."
+    },
+    {
+      "term": "Annexe C6",
+      "definition": "Fichier Excel de diagnostic terrain des appuis. Resultats de l'inspection visuelle."
+    },
+    {
+      "term": "C3A",
+      "definition": "Fichier Excel des commandes de liaison (travaux cable prevus entre deux appuis)."
+    },
+    {
+      "term": "C7",
+      "definition": "Fichier Excel des commandes d'appuis (remplacements physiques de poteaux)."
+    },
+    {
+      "term": "CAP FT",
+      "definition": "Dossier de CAPacite FT. Fiches appuis individuelles FicheAppui_*.xlsx."
+    },
+    {
+      "term": "COMAC",
+      "definition": "COmmission Mixte Appuis Communs. Export etudes remplacement poteaux BT."
+    },
+    {
+      "term": "PCM",
+      "definition": "Format de fichier XML natif du logiciel COMAC (extension .pcm, encodage ISO-8859-1). Contient une etude complete: supports, cables FO/BT, portees, hypotheses climatiques, armements."
+    },
+    {
+      "term": "BPE",
+      "definition": "Boitier de Protection d'Epissure. Equipement raccordement fibre optique."
+    },
+    {
+      "term": "PBO",
+      "definition": "Point de Branchement Optique. Boitier distribution raccordement abonnes."
+    },
+    {
+      "term": "GraceTHD",
+      "definition": "Format d'echange standardise reseaux THD (SHP+CSV). Utilise par Axione."
+    },
+    {
+      "term": "fddcpiax",
+      "definition": "Fonction SQL PostgreSQL decoupage cables par appui. Retourne segments correctement decoupes."
+    },
+    {
+      "term": "NFC 11201",
+      "definition": "Norme francaise construction lignes aeriennes. Portees max, hauteurs min."
+    },
+    {
+      "term": "Zone climatique",
+      "definition": "ZVN = Zone Vent Normal, ZVF = Zone Vent Fort. Affecte portees maximales."
+    },
+    {
+      "term": "NGE",
+      "definition": "Bureau d'etudes principal. Donnees conformes en BDD PostgreSQL."
+    },
+    {
+      "term": "Axione",
+      "definition": "Bureau d'etudes secondaire. Donnees via GraceTHD (fichiers locaux)."
+    },
+    {
+      "term": "etude_cap_ft",
+      "definition": "Couche QGIS polygones zones d'etude CAP FT."
+    },
+    {
+      "term": "etude_comac",
+      "definition": "Couche QGIS polygones zones d'etude COMAC."
+    },
+    {
+      "term": "infra_pt_pot",
+      "definition": "Couche QGIS des poteaux. Table PostgreSQL rip_avg_nge.infra_pt_pot (~240k enregistrements)."
+    },
+    {
+      "term": "Portee",
+      "definition": "Distance horizontale en metres entre deux appuis consecutifs."
+    },
+    {
+      "term": "Portee molle",
+      "definition": "Portee depassant la limite NFC 11201 pour la capacite FO et zone climatique."
+    },
+    {
+      "term": "Capacite FO",
+      "definition": "Nombre de fibres optiques dans un cable. Valeurs: 6, 12, 24, 36, 48, 72, 144."
+    },
+    {
+      "term": "Recalage",
+      "definition": "Remise a la verticale d'un poteau penche."
+    },
+    {
+      "term": "Implantation",
+      "definition": "Creation et pose d'un nouveau poteau a un emplacement ou il n'en existait pas. Le poteau recoit le type POT-AC et le proprietaire RAUV. Concerne FT et BT."
+    },
+    {
+      "term": "POT-TI",
+      "definition": "Poteau Tiers. Poteau appartenant a un operateur tiers (ex: Axione/ATHD). Proprietaire: ATHD."
+    },
+    {
+      "term": "RAUV",
+      "definition": "Code proprietaire des poteaux a creer (POT-AC). Correspond au SIREN OR033001001714. Attribue automatiquement lors d'une implantation."
+    },
+    {
+      "term": "GESPOT",
+      "definition": "Logiciel de diagnostic terrain des poteaux. Produit des fichiers CSV (delimiteur point-virgule) avec l'etat de chaque poteau apres inspection."
+    },
+    {
+      "term": "Posemode",
+      "definition": "Mode de pose cable: 0=souterrain, 1=aerien, 2=facade, 4=indetermine."
+    },
+    {
+      "term": "cab_type CDI",
+      "definition": "Cable Distribution. Seul type compare (exclut RAC raccordement et TRA transport)."
+    },
+    {
+      "term": "Remplacement",
+      "definition": "Action de maintenance: remplacement physique complet du poteau. Source: feuille Bases, colonne Nature des travaux."
+    },
+    {
+      "term": "Renforcement",
+      "definition": "Action de maintenance: ajout hauban, tuteur ou contrefiche pour renforcer un poteau insuffisant. Source: feuille Bases, colonne Nature des travaux."
+    },
+    {
+      "term": "PB",
+      "definition": "Pose de Boitier. Type de boitier optique dans l'Annexe C6 (PBO). Source: feuille Bases, colonne Type de boitier."
+    },
+    {
+      "term": "PEO",
+      "definition": "Point d'Eclatement Optique. Type de boitier optique dans l'Annexe C6. Source: feuille Bases, colonne Type de boitier."
+    },
+    {
+      "term": "Nappe haute",
+      "definition": "Cable pose en nappe haute sur le poteau (partie superieure). Source: feuille Bases, colonne Nappe."
+    },
+    {
+      "term": "Nappe standard",
+      "definition": "Cable pose en nappe standard sur le poteau. Source: feuille Bases, colonne Nappe."
+    },
+    {
+      "term": "Nappe basse",
+      "definition": "Cable pose en nappe basse sur le poteau (partie inferieure). Source: feuille Bases, colonne Nappe."
+    },
+    {
+      "term": "Format GESPOT",
+      "definition": "Codification des types d'appui utilisee dans les fichiers GESPOT/CAPFT. Ex: BS8 = Bois Simple 8m, BC7 ANC = Bois Couple 7m ancre, MS7 = Metallique Simple 7m, MI8 = Metallique (profilé I) 8m. Source: feuille Bases, colonne A."
+    },
+    {
+      "term": "EDF BT",
+      "definition": "Type d'appui dans l'Annexe C6 designant un poteau bois du distributeur electrique (Enedis). Correspond aux poteaux de classe A, D, S dans le PCM COMAC avec Nature=BE."
+    },
+    {
+      "term": "ORT",
+      "definition": "Operateur Reseau Tiers. Type d'appui GESPOT designant un poteau n'appartenant ni a Enedis ni a France Telecom. Source: feuille Bases."
+    },
+    {
+      "term": "Hypothese climatique",
+      "definition": "Parametres climatiques pour le calcul mecanique COMAC/CAMELIA. Codes: A1, A2, A3 et variantes (A3-CAL, A3-GUA, A3-GUY, A3-MAR, A3-SAI, A3-REU), B0, B1, B2, G1. Source: feuille Bases, colonne Hypotheses climatiques."
+    },
+    {
+      "term": "Milieu environnant",
+      "definition": "Classification de l'environnement autour de l'appui. Codes: TER (terrain normal), BMP (bord de mer protege), SOC (sol corrosif), ROC (rocher). Source: feuille Bases, colonne Milieu environnant."
+    },
+    {
+      "term": "Voisinage electrique",
+      "definition": "Presence et type de lignes electriques a proximite de l'appui. Codes: Non, BGC (BT garde conforme), BGP (BT garde pas conforme), BNC (BT nu conforme), BNP (BT nu pas conforme), HAC (HTA garde conforme), HAP (HTA garde pas conforme), HBC (HTA nu conforme), HBP (HTA nu pas conforme). Source: feuille Bases."
+    },
+    {
+      "term": "Appui strategique",
+      "definition": "Appui situe pres d'un site sensible. Codes: Non, TRM (transformateur), TDL (telecommande depart ligne), TCR (telephonie cable reseau), SPC (site public classe), SPB (site public batiment), PCH (passage chemin), PCG (passage a grande circulation), PCP (passage canal/plan d'eau). Source: feuille Bases."
+    },
+    {
+      "term": "Appui inaccessible vehicule",
+      "definition": "Accessibilite du site pour vehicule nacelle. Codes: Non (accessible), INV (inaccessible vehicule), IN8 (inaccessible 8t), IN9 (inaccessible 9t). Source: feuille Bases."
+    },
+    {
+      "term": "Transition souterraine",
+      "definition": "Passage aerien/souterrain au pied de l'appui. Codes: Non, Existante, Creation. Source: feuille Bases."
+    },
+    {
+      "term": "Controle visuel",
+      "definition": "Resultat de l'inspection visuelle terrain de l'appui. Codes: Oui (OK), ou defaut constate: AUT (autre), BRU (brulure), CAS (cassure), CHO (choc), DEL (delamination), EPA (ecaillage pied d'appui), FEN (fendillement), INS (insectes), PER (perforation), PIV (pivotement), POU (pourriture), ROU (rouille), TET (defaut tete). Source: feuille Bases, colonne Test visuel."
+    }
+  ],
+  "reference_values": {
+    "source": "Feuille 'Bases' des fichiers CAPFT (ex: NGE_S05_PMZ_74109_ARTERE_008.xlsx). Referentiel officiel GESPOT/CAPFT.",
+    "nature_travaux": {
+      "description": "Nature des travaux prevus sur l'appui (colonne I de la feuille Bases).",
+      "values": ["Remplacement", "Renforcement", "Recalage"]
+    },
+    "type_boitier": {
+      "description": "Type de boitier optique a poser sur l'appui (colonne J).",
+      "values": ["Non", "PB", "PEO"]
+    },
+    "nappe": {
+      "description": "Position de la nappe cable sur le poteau (colonne F).",
+      "values": ["haute", "standard", "basse"]
+    },
+    "hypotheses_climatiques": {
+      "description": "Hypothese climatique pour le calcul mecanique COMAC (colonne G).",
+      "values": ["A1", "A2", "A3", "A3-CAL", "A3-GUA", "A3-GUY", "A3-MAR", "A3-SAI", "A3-REU", "B0", "B1", "B2", "G1"]
+    },
+    "milieu_environnant": {
+      "description": "Milieu environnant de l'appui (colonne K).",
+      "values": [
+        {"code": "TER", "label": "Terrain normal"},
+        {"code": "BMP", "label": "Bord de mer protege"},
+        {"code": "SOC", "label": "Sol corrosif"},
+        {"code": "ROC", "label": "Rocher"}
+      ]
+    },
+    "voisinage_electrique": {
+      "description": "Voisinage electrique de l'appui (colonne L).",
+      "values": [
+        {"code": "Non", "label": "Pas de voisinage electrique"},
+        {"code": "BGC", "label": "BT garde conforme"},
+        {"code": "BGP", "label": "BT garde pas conforme"},
+        {"code": "BNC", "label": "BT nu conforme"},
+        {"code": "BNP", "label": "BT nu pas conforme"},
+        {"code": "HAC", "label": "HTA garde conforme"},
+        {"code": "HAP", "label": "HTA garde pas conforme"},
+        {"code": "HBC", "label": "HTA nu conforme"},
+        {"code": "HBP", "label": "HTA nu pas conforme"}
+      ]
+    },
+    "appui_strategique": {
+      "description": "Site sensible a proximite de l'appui (colonne M).",
+      "values": [
+        {"code": "Non", "label": "Pas de site strategique"},
+        {"code": "TRM", "label": "Transformateur"},
+        {"code": "TDL", "label": "Telecommande depart ligne"},
+        {"code": "TCR", "label": "Telephonie cable reseau"},
+        {"code": "SPC", "label": "Site public classe"},
+        {"code": "SPB", "label": "Site public batiment"},
+        {"code": "PCH", "label": "Passage chemin"},
+        {"code": "PCG", "label": "Passage a grande circulation"},
+        {"code": "PCP", "label": "Passage canal/plan d'eau"}
+      ]
+    },
+    "inaccessible_vehicule": {
+      "description": "Accessibilite du site pour vehicule nacelle (colonne N).",
+      "values": [
+        {"code": "Non", "label": "Accessible"},
+        {"code": "INV", "label": "Inaccessible vehicule"},
+        {"code": "IN8", "label": "Inaccessible 8 tonnes"},
+        {"code": "IN9", "label": "Inaccessible 9 tonnes"}
+      ]
+    },
+    "transition_souterraine": {
+      "description": "Passage aerien/souterrain au pied de l'appui (colonne O).",
+      "values": ["Non", "Existante", "Creation"]
+    },
+    "nb_boitier": {
+      "description": "Nombre de boitiers optiques sur l'appui (colonne P).",
+      "values": ["0", "1", "2", ">2"]
+    },
+    "test_visuel": {
+      "description": "Resultat du controle visuel terrain (colonne Q).",
+      "values": [
+        {"code": "Oui", "label": "Controle visuel OK"},
+        {"code": "AUT", "label": "Autre defaut"},
+        {"code": "BRU", "label": "Brulure"},
+        {"code": "CAS", "label": "Cassure"},
+        {"code": "CHO", "label": "Choc"},
+        {"code": "DEL", "label": "Delamination"},
+        {"code": "EPA", "label": "Ecaillage pied d'appui"},
+        {"code": "FEN", "label": "Fendillement"},
+        {"code": "INS", "label": "Insectes"},
+        {"code": "PER", "label": "Perforation"},
+        {"code": "PIV", "label": "Pivotement"},
+        {"code": "POU", "label": "Pourriture"},
+        {"code": "ROU", "label": "Rouille"},
+        {"code": "TET", "label": "Defaut tete de poteau"}
+      ]
+    },
+    "reponse": {
+      "description": "Reponse binaire Oui/Non (colonne H).",
+      "values": ["Oui", "Non"]
+    },
+    "types_appui_bois": {
+      "description": "Types d'appui bois dans le format GESPOT (colonne A, prefixes B). Source: feuille Bases.",
+      "examples": [
+        {"code": "197", "description": "Bois simple type EDF 190 daN hauteur 7 m"},
+        {"code": "198", "description": "Bois simple type EDF 190 daN hauteur 8 m"},
+        {"code": "BS6", "description": "Bois simple hauteur 6 m"},
+        {"code": "BS7", "description": "Bois simple hauteur 7 m"},
+        {"code": "BS8", "description": "Bois simple hauteur 8 m"},
+        {"code": "BC7", "description": "Bois Couples simples hauteur 7 m"},
+        {"code": "BC7 ANC", "description": "Bois Couples ancres et cales hauteur 7 m"},
+        {"code": "BH7 S30", "description": "Bois Haubane simple, 30 deg hauteur 7 m"},
+        {"code": "BM7", "description": "Bois Moises (ou jumeles) hauteur 7 m"},
+        {"code": "BP7", "description": "Bois Portiques (ou jumeles avec entretoises) hauteur 7 m"},
+        {"code": "BR7", "description": "Bois simple Rehausse hauteur 7 m"},
+        {"code": "B36", "description": "Bois Triple (Couple avec 2 jambes de forces) hauteur 6 m"}
+      ]
+    },
+    "types_appui_beton": {
+      "description": "Types d'appui beton dans le format GESPOT (colonne A, prefixes BA/BB). Source: feuille Bases.",
+      "examples": [
+        {"code": "BA6", "description": "Beton arme classe A hauteur 6 m"},
+        {"code": "BB7", "description": "Beton arme classe B hauteur 7 m"},
+        {"code": "BD8", "description": "Beton arme classe D hauteur 8 m"}
+      ]
+    },
+    "types_appui_metallique": {
+      "description": "Types d'appui metallique dans le format GESPOT (colonne A, prefixes M/X). Source: feuille Bases.",
+      "examples": [
+        {"code": "MI6", "description": "Metallique (profile I) hauteur 6 m"},
+        {"code": "MI8", "description": "Metallique (profile I) hauteur 8 m"},
+        {"code": "MS7", "description": "Metallique simple 175 daN hauteur 7 m"},
+        {"code": "MT8", "description": "Metallique simple Tirage 330 daN hauteur 8 m"},
+        {"code": "MX7", "description": "Metallique simple X 90 daN hauteur 7 m"},
+        {"code": "MM7", "description": "Metalliques moises ou Mats Lorrain jumeles hauteur 7 m"},
+        {"code": "MR7", "description": "Metallique simple rehausse hauteur 7 m"},
+        {"code": "XC7 MAX", "description": "Metalliques Couples X ouverture max hauteur 7 m"},
+        {"code": "XC7 ANC MIN", "description": "Metalliques Couples X ancres et cales ouv min hauteur 7 m"}
+      ]
+    },
+    "types_appui_speciaux": {
+      "description": "Types d'appui speciaux dans le format GESPOT. Source: feuille Bases.",
+      "examples": [
+        {"code": "ORT", "description": "Poteau Operateur Reseau Tiers"},
+        {"code": "POT", "description": "Potelet mat lorrain sur mur ou facade"},
+        {"code": "POT MAX", "description": "Potelet scellement fort (double) sur facade"},
+        {"code": "POT MIN", "description": "Potelet scellement moyen (simple) sur facade"}
+      ]
+    },
+    "colonnes_saisie_terrain": {
+      "description": "Colonnes de la feuille 'Saisies terrain' des fichiers CAPFT. Correspond a l'onglet Export 1 de l'Annexe C6.",
+      "columns": [
+        {"col": "A", "name": "N. appui", "description": "Numero du poteau (inf_num ou noe_codext)"},
+        {"col": "B", "name": "Type d'appui (format GESPOT)", "description": "Code type appui selon referentiel GESPOT"},
+        {"col": "C", "name": "Adresse de l'appui", "description": "Numero, rue ou lieu-dit"},
+        {"col": "D", "name": "Latitude (WGS84)", "description": "Coordonnee latitude"},
+        {"col": "E", "name": "Longitude (WGS84)", "description": "Coordonnee longitude"},
+        {"col": "F", "name": "Controle visuel OK", "description": "Resultat inspection visuelle"},
+        {"col": "G", "name": "Controle verticalite OK et absence etiquette orange", "description": "Verticalite et etiquette"},
+        {"col": "H", "name": "Controle flamblement OK", "description": "Verification flamblement poteau"},
+        {"col": "I", "name": "Respect voisinage reseau electrique", "description": "Conformite distances electriques"},
+        {"col": "J", "name": "Controle pointe carree OK", "description": "Verification pointe carree"},
+        {"col": "K", "name": "Controle secousses OK", "description": "Test secousses"},
+        {"col": "L", "name": "Controle percussion OK", "description": "Test percussion"},
+        {"col": "M", "name": "Absence etiquette jaune", "description": "Verification etiquette jaune reglementaire"},
+        {"col": "N", "name": "Appui utilisable en l'etat", "description": "Synthese: peut supporter de nouveaux cables"},
+        {"col": "O", "name": "Milieu environnant de l'appui", "description": "Code milieu (TER/BMP/SOC/ROC)"},
+        {"col": "P", "name": "Environnement electrique appui", "description": "Code voisinage electrique"},
+        {"col": "Q", "name": "Appui strategique", "description": "Code site sensible"},
+        {"col": "R", "name": "Appui inaccessible vehicule", "description": "Code accessibilite"},
+        {"col": "S", "name": "Nom du cable", "description": "Reference cable (ex: 98-8-4, L1092-14-P)"},
+        {"col": "T", "name": "Longueur portee", "description": "Portee en metres"},
+        {"col": "U", "name": "Angle en grade", "description": "Angle des cables sur le support"},
+        {"col": "V", "name": "Hauteur nappe", "description": "Position nappe (haute/standard/basse)"},
+        {"col": "W", "name": "Hauteur de fleche portee", "description": "Fleche du cable"},
+        {"col": "X", "name": "Temperature du releve fleche", "description": "Temperature lors de la mesure"},
+        {"col": "Y", "name": "N. appui destination", "description": "Numero du poteau a l'autre bout de la portee"},
+        {"col": "Z", "name": "Forfait cuivre", "description": "Branchement cuivre Oui/Non"},
+        {"col": "AA", "name": "Forfait optique", "description": "Branchement optique Oui/Non"},
+        {"col": "AB", "name": "Effort disponible avant ajout cable", "description": "Effort disponible en daN (vide = appui EDF)"},
+        {"col": "AC", "name": "Effort disponible apres ajout cable", "description": "Effort residuel apres pose cable FO"}
+      ]
+    }
+  },
+  "color_codes": [
+    {
+      "hex": "#1F4E79",
+      "usage": "En-tetes colonnes",
+      "meaning": "Bleu fonce professionnel"
+    },
+    {
+      "hex": "#C6EFCE",
+      "usage": "Fond cellule",
+      "meaning": "Vert — conforme, OK"
+    },
+    {
+      "hex": "#FFEB9C",
+      "usage": "Fond cellule",
+      "meaning": "Orange — avertissement, absent secondaire"
+    },
+    {
+      "hex": "#FFC7CE",
+      "usage": "Fond cellule",
+      "meaning": "Rouge — non conforme, erreur"
+    },
+    {
+      "hex": "#FF6B6B",
+      "usage": "Fond cellule",
+      "meaning": "Rouge fonce — critique, depassement securite"
+    },
+    {
+      "hex": "#D6E4F0",
+      "usage": "Fond cellule",
+      "meaning": "Bleu clair — information, hors perimetre normal"
+    }
+  ],
+  "modules": [
+    {
+      "module_id": "mod_0_maj",
+      "module_name": "0. MAJ BD",
+      "tab_color": "#F59E0B",
+      "description": "Importe les actions de maintenance depuis un fichier Excel FT-BT KO vers la BDD QGIS (infra_pt_pot).",
+      "input_files": "FT-BT KO *.xlsx (onglets FT et BT)",
+      "sheets": [
+        {
+          "sheet_id": "MAJ_RESUME",
+          "sheet_name": "MAJ_RESUME",
+          "description": "Synthese: nombre de poteaux identifies et introuvables, par type FT et BT.",
+          "data_elements": [
+            {
+              "element_id": "maj_resume_element",
+              "name": "ELEMENT",
+              "definition": "Categorie de poteaux comptabilisee.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "FT identifies",
+                    "definition": "Poteaux FT presents dans l'Excel ET trouves dans QGIS"
+                  },
+                  {
+                    "value": "FT introuvables (Excel sans QGIS)",
+                    "definition": "Poteaux FT dans l'Excel mais absents de QGIS"
+                  },
+                  {
+                    "value": "BT identifies",
+                    "definition": "Poteaux BT presents dans l'Excel ET trouves dans QGIS"
+                  },
+                  {
+                    "value": "BT introuvables (Excel sans QGIS)",
+                    "definition": "Poteaux BT dans l'Excel mais absents de QGIS"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "maj_resume_nombre",
+              "name": "NOMBRE",
+              "definition": "Nombre de poteaux dans cette categorie.",
+              "data_type": "integer",
+              "unit": "poteaux"
+            },
+            {
+              "element_id": "maj_resume_statut",
+              "name": "STATUT",
+              "definition": "Resultat de la categorie.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Aucune anomalie",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ANOMALIE",
+                    "definition": "Au moins 1 poteau introuvable",
+                    "color": "#FFC7CE"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "MAJ_FT",
+          "sheet_name": "MAJ_FT",
+          "description": "Poteaux FT identifies (correspondance Excel/QGIS trouvee).",
+          "data_elements": [
+            {
+              "element_id": "maj_ft_num",
+              "name": "N. appui",
+              "definition": "Numero court normalise du poteau.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "maj_ft_inf_num",
+              "name": "inf_num",
+              "definition": "Identifiant complet en BDD (ex: E000058/63041).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "maj_ft_etude",
+              "name": "Nom Etudes",
+              "definition": "Nom du polygone etude_cap_ft contenant le poteau.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "maj_ft_action",
+              "name": "Action",
+              "definition": "Action de maintenance a effectuer.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "Remplacement",
+                    "definition": "Poteau a remplacer physiquement. Etat cible: A REMPLACER"
+                  },
+                  {
+                    "value": "Recalage",
+                    "definition": "Poteau penche a remettre a la verticale. Etat cible: A RECALER"
+                  },
+                  {
+                    "value": "Renforcement",
+                    "definition": "Poteau a renforcer (hauban, tuteur). Etat cible: A RENFORCER"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "maj_ft_etat",
+              "name": "Etat",
+              "definition": "Etat actuel du poteau en BDD AVANT mise a jour.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ]
+        },
+        {
+          "sheet_id": "MAJ_BT",
+          "sheet_name": "MAJ_BT",
+          "description": "Poteaux BT identifies. Meme structure que MAJ_FT + action Implantation.",
+          "data_elements": [
+            {
+              "element_id": "maj_bt_num",
+              "name": "N. appui",
+              "definition": "Numero court normalise du poteau BT.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "maj_bt_inf_num",
+              "name": "inf_num",
+              "definition": "Identifiant complet du poteau BT en BDD.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "maj_bt_etude",
+              "name": "Nom Etudes",
+              "definition": "Nom du polygone etude_comac contenant le poteau.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "maj_bt_action",
+              "name": "Action",
+              "definition": "Action de maintenance. BT autorise en plus Implantation.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "Implantation",
+                    "definition": "Nouveau poteau BT a creer. Etat cible: BT KO. typ_po_mod doit etre renseigne"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "MAJ_FT_INTROUV",
+          "sheet_name": "MAJ_FT_INTROUV",
+          "description": "Poteaux FT dans l'Excel mais introuvables dans QGIS.",
+          "data_elements": [
+            {
+              "element_id": "maj_ft_introuv_num",
+              "name": "N. appui",
+              "definition": "Numero du poteau non trouve dans la couche QGIS.",
+              "data_type": "string"
+            }
+          ]
+        },
+        {
+          "sheet_id": "MAJ_BT_INTROUV",
+          "sheet_name": "MAJ_BT_INTROUV",
+          "description": "Poteaux BT dans l'Excel mais introuvables dans QGIS.",
+          "data_elements": [
+            {
+              "element_id": "maj_bt_introuv_num",
+              "name": "N. appui",
+              "definition": "Numero du poteau BT non trouve dans QGIS.",
+              "data_type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "mod_1_capft",
+      "module_name": "1. VERIF CAP_FT",
+      "tab_color": "#34D399",
+      "description": "Compare les poteaux FT QGIS (POT-FT dans etude_cap_ft) avec les fiches appuis terrain (FicheAppui_*.xlsx).",
+      "input_files": "FicheAppui_*.xlsx dans le repertoire CAP FT",
+      "sheets": [
+        {
+          "sheet_id": "CAPFT_ANALYSE",
+          "sheet_name": "CAPFT_ANALYSE",
+          "description": "Comparaison poteaux FT QGIS vs fiches appuis Excel.",
+          "data_elements": [
+            {
+              "element_id": "capft_inf_num_qgis",
+              "name": "INF_NUM QGIS",
+              "definition": "Identifiant complet du poteau dans QGIS. Vide si absent QGIS.",
+              "data_type": "string",
+              "nullable": true,
+              "example": "E000058/63041"
+            },
+            {
+              "element_id": "capft_etude_qgis",
+              "name": "ETUDE QGIS",
+              "definition": "Nom du polygone etude_cap_ft contenant le poteau.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "capft_inf_num_excel",
+              "name": "INF_NUM EXCEL",
+              "definition": "Nom de la fiche appui (= numero poteau). Vide si absent fiches.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "capft_nom_fichier",
+              "name": "NOM FICHIER",
+              "definition": "Dossier parent contenant la fiche appui.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "capft_statut",
+              "name": "STATUT",
+              "definition": "Resultat de la comparaison.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Poteau existe dans QGIS ET fiche appui trouvee",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ABSENT QGIS",
+                    "definition": "Poteau dans les fiches mais absent de la couche QGIS. Verifier creation en base",
+                    "color": "#FFC7CE"
+                  },
+                  {
+                    "value": "ABSENT FICHES APPUIS",
+                    "definition": "Poteau dans QGIS mais aucune fiche terrain. Verifier si inspecte",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "HORS PERIMETRE",
+                    "definition": "Poteau existe dans la zone SRO mais hors polygones etude_cap_ft",
+                    "color": "#D6E4F0"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "mod_2_gespot_c6",
+      "module_name": "2. GESPOT vs C6",
+      "tab_color": "#0EA5E9",
+      "description": "Compare champ par champ les donnees GESPOT (CSV) avec les Annexes C6 (Excel). 11 criteres compares par appui.",
+      "input_files": "Fichiers GESPOT (CSV) et Annexe C6 (Excel)",
+      "sheets": [
+        {
+          "sheet_id": "GESPOT_ANALYSE",
+          "sheet_name": "GESPOT_ANALYSE",
+          "description": "Comparaison detaillee des 11 criteres. Triplets: valeur GESPOT, valeur C6, statut OK.",
+          "note": "Les colonnes _OK partagent toutes le meme domaine de valeurs (OK, ECART, ABSENT_C6, NON_GESPOT).",
+          "ok_column_domain": {
+            "type": "enumerated",
+            "values": [
+              {
+                "value": "OK",
+                "definition": "Valeurs identiques (insensible a la casse)",
+                "color": "#C6EFCE"
+              },
+              {
+                "value": "ECART",
+                "definition": "Valeurs differentes",
+                "color": "#FFEB9C"
+              },
+              {
+                "value": "ABSENT_C6",
+                "definition": "Presente dans GESPOT, vide dans C6",
+                "color": "#FFC7CE"
+              },
+              {
+                "value": "NON_GESPOT",
+                "definition": "Presente dans C6, vide dans GESPOT",
+                "color": "#FFC7CE"
+              }
+            ]
+          },
+          "data_elements": [
+            {
+              "element_id": "g_num",
+              "name": "NUM",
+              "definition": "Numero d'appui normalise. Cle de jointure GESPOT/C6.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "g_voie",
+              "name": "VOIE",
+              "definition": "Voie/rue depuis GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_adresse_c6",
+              "name": "ADRESSE_C6",
+              "definition": "Adresse depuis C6 (col C, Export 1).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_adresse_ok",
+              "name": "ADRESSE_OK",
+              "definition": "Comparaison voie GESPOT vs adresse C6.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_centre_gespot",
+              "name": "CENTRE_GESPOT",
+              "definition": "Code centre/commune depuis GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_centre_c6",
+              "name": "CENTRE_C6",
+              "definition": "Code centre depuis cellule E3 du C6.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_centre_ok",
+              "name": "CENTRE_OK",
+              "definition": "Comparaison centre.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_type_gespot",
+              "name": "TYPE_GESPOT",
+              "definition": "Type d'appui calcule depuis GESPOT (materiau, hauteur, classe).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_type_c6",
+              "name": "TYPE_C6",
+              "definition": "Type d'appui depuis C6 (col B).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_type_ok",
+              "name": "TYPE_OK",
+              "definition": "Comparaison type appui.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_strat_gespot",
+              "name": "STRAT_GESPOT",
+              "definition": "Appui strategique calcule GESPOT (site sensible: hopital, ecole...).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_strat_c6",
+              "name": "STRAT_C6",
+              "definition": "Appui strategique C6 (col Q). Whitelist depuis onglet Bases.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_strat_ok",
+              "name": "STRAT_OK",
+              "definition": "Comparaison strategie.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_env_gespot",
+              "name": "ENV_GESPOT",
+              "definition": "Milieu environnant GESPOT (urbain, rural, boise...).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_env_c6",
+              "name": "ENV_C6",
+              "definition": "Milieu environnant C6 (col O).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_env_ok",
+              "name": "ENV_OK",
+              "definition": "Comparaison environnement.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_elec_gespot",
+              "name": "ELEC_GESPOT",
+              "definition": "Presence electrique GESPOT (lignes electriques a proximite).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_elec_c6",
+              "name": "ELEC_C6",
+              "definition": "Environnement electrique C6 (col P). Oui/Non.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_elec_ok",
+              "name": "ELEC_OK",
+              "definition": "Comparaison electrique.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_inacc_gespot",
+              "name": "INACC_GESPOT",
+              "definition": "Inaccessibilite GESPOT (vehicule nacelle impossible).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_inacc_c6",
+              "name": "INACC_C6",
+              "definition": "Inaccessibilite C6 (col R).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_inacc_ok",
+              "name": "INACC_OK",
+              "definition": "Comparaison inaccessibilite.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_recalage",
+              "name": "RECALAGE",
+              "definition": "Indicateur recalage GESPOT brut. O=penche (verticalite Non), N=vertical (verticalite Oui).",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "O",
+                    "definition": "Poteau penche, correspond a verticalite Non"
+                  },
+                  {
+                    "value": "N",
+                    "definition": "Poteau vertical, correspond a verticalite Oui"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "g_vertic_c6",
+              "name": "VERTIC_C6",
+              "definition": "Verticalite C6 (col G). Oui=vertical, Non=penche.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_vertic_ok",
+              "name": "VERTIC_OK",
+              "definition": "Comparaison recalage GESPOT vs verticalite C6.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_yellow_gespot",
+              "name": "YELLOW_GESPOT",
+              "definition": "Etat etiquette jaune reglementaire depuis GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_yellow_c6",
+              "name": "YELLOW_C6",
+              "definition": "Absence etiquette jaune C6 (col M).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_yellow_ok",
+              "name": "YELLOW_OK",
+              "definition": "Comparaison etiquette jaune.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_usable_gespot",
+              "name": "USABLE_GESPOT",
+              "definition": "Appui utilisable GESPOT (peut supporter nouveaux cables).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_usable_c6",
+              "name": "USABLE_C6",
+              "definition": "Appui utilisable C6 (col N).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_usable_ok",
+              "name": "USABLE_OK",
+              "definition": "Comparaison utilisabilite.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_ctrl_vis_gespot",
+              "name": "CTRL_VIS_GESPOT",
+              "definition": "Controle visuel GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_ctrl_vis_c6",
+              "name": "CTRL_VIS_C6",
+              "definition": "Controle visuel C6 (col F).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "g_ctrl_vis_ok",
+              "name": "CTRL_VIS_OK",
+              "definition": "Comparaison controle visuel.",
+              "data_type": "string",
+              "uses_domain": "ok_column_domain"
+            },
+            {
+              "element_id": "g_nb_ecarts",
+              "name": "NB_ECARTS",
+              "definition": "Nombre total de criteres en ecart (0 a 11).",
+              "data_type": "integer",
+              "value_domain": {
+                "type": "range",
+                "min": 0,
+                "max": 11
+              }
+            },
+            {
+              "element_id": "g_statut",
+              "name": "STATUT",
+              "definition": "Statut global de l'appui.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Tous criteres identiques"
+                  },
+                  {
+                    "value": "ECART",
+                    "definition": "Au moins un critere differe"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "g_source_gespot",
+              "name": "SOURCE_GESPOT",
+              "definition": "Fichier GESPOT CSV source.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "g_source_c6",
+              "name": "SOURCE_C6",
+              "definition": "Fichier C6 Excel source.",
+              "data_type": "string"
+            }
+          ]
+        },
+        {
+          "sheet_id": "GESPOT_ABSENT_C6",
+          "sheet_name": "GESPOT_ABSENT_C6",
+          "description": "Appuis dans GESPOT mais absents des C6.",
+          "data_elements": [
+            {
+              "element_id": "ga_num",
+              "name": "NUM",
+              "definition": "Numero d'appui.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "ga_voie",
+              "name": "VOIE",
+              "definition": "Voie depuis GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_centre",
+              "name": "CENTRE",
+              "definition": "Centre GESPOT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_type",
+              "name": "TYPE_GESPOT",
+              "definition": "Type appui calcule.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_strat",
+              "name": "STRAT_GESPOT",
+              "definition": "Strategie.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_env",
+              "name": "ENV_GESPOT",
+              "definition": "Environnement.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_elec",
+              "name": "ELEC_GESPOT",
+              "definition": "Electrique.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_inacc",
+              "name": "INACC_GESPOT",
+              "definition": "Inaccessibilite.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ga_source",
+              "name": "SOURCE_GESPOT",
+              "definition": "Fichier source.",
+              "data_type": "string"
+            }
+          ]
+        },
+        {
+          "sheet_id": "GESPOT_ABSENT_GESPOT",
+          "sheet_name": "GESPOT_ABSENT_GESPOT",
+          "description": "Appuis dans les C6 mais absents de GESPOT.",
+          "data_elements": [
+            {
+              "element_id": "gb_num",
+              "name": "NUM",
+              "definition": "Numero d'appui.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "gb_adresse",
+              "name": "ADRESSE_C6",
+              "definition": "Adresse C6.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_centre",
+              "name": "CENTRE_C6",
+              "definition": "Centre C6.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_type",
+              "name": "TYPE_C6",
+              "definition": "Type appui.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_strat",
+              "name": "STRAT_C6",
+              "definition": "Strategie.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_env",
+              "name": "ENV_C6",
+              "definition": "Environnement.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_elec",
+              "name": "ELEC_C6",
+              "definition": "Electrique.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_inacc",
+              "name": "INACC_C6",
+              "definition": "Inaccessibilite.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gb_source",
+              "name": "SOURCE_C6",
+              "definition": "Fichier source.",
+              "data_type": "string"
+            }
+          ]
+        },
+        {
+          "sheet_id": "GESPOT_ANOMALIES",
+          "sheet_name": "GESPOT_ANOMALIES",
+          "description": "Anomalies dans les fichiers source (doublons, fichiers invalides).",
+          "data_elements": [
+            {
+              "element_id": "gan_source",
+              "name": "SOURCE",
+              "definition": "Origine: C6 ou GESPOT.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "C6",
+                    "definition": "Anomalie fichier C6"
+                  },
+                  {
+                    "value": "GESPOT",
+                    "definition": "Anomalie fichier GESPOT"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "gan_fichier",
+              "name": "FICHIER",
+              "definition": "Nom du fichier concerne.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "gan_num",
+              "name": "NUM",
+              "definition": "Numero d'appui si applicable.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "gan_type",
+              "name": "TYPE_ANOMALIE",
+              "definition": "Classification anomalie.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "FICHIER_IGNORE",
+                    "definition": "Fichier invalide ou illisible"
+                  },
+                  {
+                    "value": "CENTRE_C6_ABSENT",
+                    "definition": "Cellule E3 vide dans Export 1"
+                  },
+                  {
+                    "value": "DOUBLON_IDENTIQUE",
+                    "definition": "Meme appui plusieurs fichiers, valeurs identiques"
+                  },
+                  {
+                    "value": "DOUBLON_CONFLICTUEL",
+                    "definition": "Meme appui plusieurs fichiers, valeurs differentes"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "gan_detail",
+              "name": "DETAIL",
+              "definition": "Description detaillee.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "gan_action",
+              "name": "ACTION",
+              "definition": "Action corrective recommandee.",
+              "data_type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "mod_3_comac",
+      "module_name": "3. VERIF COMAC",
+      "tab_color": "#EA580C",
+      "description": "Module le plus complet. 6 verifications: (1) correspondance poteaux QGIS/Excel, (2) securite portees NFC 11201, (3) hauteur sol, (4) cables COMAC vs BDD/GraceTHD, (5) boitiers vs BPE, (6) portees PCM.",
+      "input_files": "ExportComac.xlsx + fichiers .pcm (XML)",
+      "sheets": [
+        {
+          "sheet_id": "COMAC_ANALYSE",
+          "sheet_name": "COMAC_ANALYSE",
+          "description": "Correspondance poteaux BT QGIS vs exports COMAC. Matching multi-strategie: nom exact, sans commune, spatial (<7.5m).",
+          "data_elements": [
+            {
+              "element_id": "ca_inf_qgis",
+              "name": "INF_NUM QGIS",
+              "definition": "Identifiant complet poteau QGIS. Vide si absent.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ca_etude",
+              "name": "ETUDE QGIS",
+              "definition": "Polygone etude_comac contenant le poteau.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ca_inf_excel",
+              "name": "INF_NUM EXCEL",
+              "definition": "Numero poteau dans l'export COMAC (col A).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ca_fichier",
+              "name": "NOM FICHIER",
+              "definition": "Fichier/dossier COMAC source.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ca_statut",
+              "name": "STATUT",
+              "definition": "Resultat matching multi-strategie.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK (nom)",
+                    "definition": "Correspondance directe par numero de poteau",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "OK (spatial Xm)",
+                    "definition": "Correspondance par proximite geographique (<7.5m). X = distance",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "AMBIGU COMMUNE",
+                    "definition": "Code poteau dans plusieurs communes, non resolu par spatial",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT SRO",
+                    "definition": "Poteau dans COMAC mais absent de infra_pt_pot du SRO",
+                    "color": "#FFC7CE"
+                  },
+                  {
+                    "value": "NON COUVERT",
+                    "definition": "Poteau BT dans QGIS mais absent de tous fichiers COMAC",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "HORS ZONE ETUDE",
+                    "definition": "Poteau existe dans SRO mais hors polygones etude_comac",
+                    "color": "#D6E4F0"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "ca_explication",
+              "name": "EXPLICATION",
+              "definition": "Description detaillee du statut et actions possibles.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ]
+        },
+        {
+          "sheet_id": "COMAC_SECURITE",
+          "sheet_name": "COMAC_SECURITE",
+          "description": "Verification NFC 11201: portees max et hauteur sol >= 4m.",
+          "data_elements": [
+            {
+              "element_id": "cs_fichier",
+              "name": "FICHIER",
+              "definition": "Fichier COMAC source.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cs_poteau",
+              "name": "POTEAU",
+              "definition": "Numero du poteau.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cs_portee",
+              "name": "PORTEE (m)",
+              "definition": "Longueur portee en metres (col AU, index 46).",
+              "data_type": "decimal",
+              "unit": "metres"
+            },
+            {
+              "element_id": "cs_capa",
+              "name": "CAPACITE FO",
+              "definition": "Nombre fibres optiques. Derive du code cable.",
+              "data_type": "integer",
+              "unit": "fibres",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "6"
+                  },
+                  {
+                    "value": "12"
+                  },
+                  {
+                    "value": "24"
+                  },
+                  {
+                    "value": "36"
+                  },
+                  {
+                    "value": "48"
+                  },
+                  {
+                    "value": "72"
+                  },
+                  {
+                    "value": "144"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cs_type",
+              "name": "TYPE LIGNE",
+              "definition": "Reference cable FO (ex: L1092-14-P).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cs_portee_max",
+              "name": "PORTEE MAX (m)",
+              "definition": "Maximum autorise NFC 11201 pour cette capacite et zone climatique.",
+              "data_type": "decimal",
+              "unit": "metres"
+            },
+            {
+              "element_id": "cs_depassement",
+              "name": "DEPASSEMENT (m)",
+              "definition": "Ecart positif si portee > max. 0 si conforme.",
+              "data_type": "decimal",
+              "unit": "metres"
+            },
+            {
+              "element_id": "cs_hauteur",
+              "name": "HAUTEUR SOL (m)",
+              "definition": "Distance cable/sol (col G). Minimum reglementaire: 4m.",
+              "data_type": "decimal",
+              "unit": "metres"
+            },
+            {
+              "element_id": "cs_verif_portee",
+              "name": "VERIF PORTEE",
+              "definition": "Resultat verification portee.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Portee dans les limites NFC 11201",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "DEPASSEMENT (+X.Xm)",
+                    "definition": "Portee depasse la limite. Non-conformite reglementaire",
+                    "color": "#FF6B6B"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cs_verif_hauteur",
+              "name": "VERIF HAUTEUR",
+              "definition": "Resultat verification hauteur sol.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Hauteur >= 4m",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "INSUFFISANT (X.Xm)",
+                    "definition": "Hauteur < 4m. Non-conforme",
+                    "color": "#FF6B6B"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "COMAC_CABLES",
+          "sheet_name": "COMAC_CABLES",
+          "description": "Verification cables FO par appui: COMAC (Excel col AO) vs BDD/GraceTHD. Optionnellement: boitiers vs BPE.",
+          "data_elements": [
+            {
+              "element_id": "cc_appui",
+              "name": "APPUI",
+              "definition": "Numero normalise de l'appui (avec commune si COMAC).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cc_nb_comac",
+              "name": "NB COMAC",
+              "definition": "Nombre cables FO dans l'export COMAC.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "cc_refs",
+              "name": "REFS COMAC",
+              "definition": "References cables concatenees (ex: L1092-12-P, L1092-14-P).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cc_capas_comac",
+              "name": "CAPAS COMAC",
+              "definition": "Capacites FO concatenees (ex: 24+48).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cc_nb_bdd",
+              "name": "NB BDD",
+              "definition": "Nombre cables physiques distincts (groupes par GID) en BDD/GraceTHD.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "cc_capas_bdd",
+              "name": "CAPAS BDD",
+              "definition": "Capacites FO BDD concatenees.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cc_statut",
+              "name": "STATUT",
+              "definition": "Resultat comparaison cables.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Nombre et capacites coherents",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ECART",
+                    "definition": "Nombre ou capacites differents",
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "value": "ABSENT_BDD",
+                    "definition": "Aucun cable BDD pour cet appui (NGE)",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_GRACETHD",
+                    "definition": "Aucun cable GraceTHD (Axione)",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_BDD_NON_RESOLU",
+                    "definition": "Appui non resolu (ambiguite commune)",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_BDD_HORS_PERIMETRE",
+                    "definition": "Appui hors perimetre etude",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cc_message",
+              "name": "MESSAGE",
+              "definition": "Description detaillee de l'ecart.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "cc_boitier_comac",
+              "name": "BOITIER COMAC",
+              "definition": "Boitier FO col AR (index 43). Colonne conditionnelle.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "oui",
+                    "definition": "Boitier FO declare present. Verification BPE effectuee"
+                  },
+                  {
+                    "value": "non",
+                    "definition": "Pas de boitier declare"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cc_bpe_type",
+              "name": "BPE TYPE",
+              "definition": "Type BPE en BDD pres de l'appui. Si boitier=oui.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "PBO",
+                    "definition": "Point de Branchement Optique"
+                  },
+                  {
+                    "value": "BPE",
+                    "definition": "Boitier Protection Epissure"
+                  },
+                  {
+                    "value": "PEP",
+                    "definition": "Point Eclatement Principal"
+                  },
+                  {
+                    "value": "appui non localise",
+                    "definition": "Appui non localise en BDD"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cc_boitier_statut",
+              "name": "BOITIER STATUT",
+              "definition": "Resultat verification boitier. Colonne conditionnelle.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "BPE coherent trouve",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ERREUR",
+                    "definition": "Aucun BPE ou appui non localise",
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "value": "ECART",
+                    "definition": "BPE type inattendu",
+                    "color": "#FF6B6B"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "COMAC_PORTEES",
+          "sheet_name": "COMAC_PORTEES",
+          "description": "Portees PCM vs BDD/GraceTHD. Seuil tolerance: 15%.",
+          "data_elements": [
+            {
+              "element_id": "cp_etude",
+              "name": "ETUDE",
+              "definition": "Nom etude PCM.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cp_cable",
+              "name": "CABLE",
+              "definition": "Reference cable FO.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cp_capa",
+              "name": "CAPA FO",
+              "definition": "Capacite fibres.",
+              "data_type": "integer",
+              "unit": "fibres"
+            },
+            {
+              "element_id": "cp_dep_pcm",
+              "name": "DEPART PCM",
+              "definition": "Support depart dans le PCM.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cp_arr_pcm",
+              "name": "ARRIVEE PCM",
+              "definition": "Support arrivee dans le PCM.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "cp_portee_pcm",
+              "name": "PORTEE PCM (m)",
+              "definition": "Longueur portee dans le PCM.",
+              "data_type": "decimal",
+              "unit": "metres"
+            },
+            {
+              "element_id": "cp_dep_ref",
+              "name": "DEPART REF",
+              "definition": "Support depart dans la reference.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "cp_arr_ref",
+              "name": "ARRIVEE REF",
+              "definition": "Support arrivee dans la reference.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "cp_portee_ref",
+              "name": "PORTEE REF (m)",
+              "definition": "Longueur recalculee depuis BDD/GraceTHD.",
+              "data_type": "decimal",
+              "unit": "metres",
+              "nullable": true
+            },
+            {
+              "element_id": "cp_ecart_m",
+              "name": "ECART (m)",
+              "definition": "Difference absolue en metres.",
+              "data_type": "decimal",
+              "unit": "metres",
+              "nullable": true
+            },
+            {
+              "element_id": "cp_ecart_pct",
+              "name": "ECART (%)",
+              "definition": "Difference relative. Seuil: 15%.",
+              "data_type": "decimal",
+              "unit": "%",
+              "nullable": true
+            },
+            {
+              "element_id": "cp_confiance",
+              "name": "CONFIANCE",
+              "definition": "Indice confiance matching spatial (GraceTHD uniquement, 1-5).",
+              "data_type": "integer",
+              "nullable": true,
+              "conditional": "Visible uniquement si GraceTHD"
+            },
+            {
+              "element_id": "cp_statut",
+              "name": "STATUT",
+              "definition": "Resultat comparaison portee.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Ecart < 15%",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ECART",
+                    "definition": "Ecart >= 15%",
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "value": "ABSENT_REF",
+                    "definition": "Portee PCM sans correspondance en reference",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_PCM",
+                    "definition": "Portee reference absente du PCM",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "cp_message",
+              "name": "MESSAGE",
+              "definition": "Description detaillee.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ]
+        },
+        {
+          "sheet_id": "PCM_SUPPORTS",
+          "sheet_name": "PCM_SUPPORTS",
+          "description": "Supports PCM vs BDD (infra_pt_pot). Matching: noe_codext, inf_num, numerique, spatial.",
+          "data_elements": [
+            {
+              "element_id": "ps_etude",
+              "name": "ETUDE",
+              "definition": "Nom etude PCM.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "ps_nom",
+              "name": "NOM PCM",
+              "definition": "Nom du support dans le PCM (ex: BT0393, E000058).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "ps_inf_num",
+              "name": "INF_NUM BDD",
+              "definition": "inf_num du poteau en BDD. Vide si absent.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_noe",
+              "name": "NOE_CODEXT BDD",
+              "definition": "Code terrain en BDD.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_methode",
+              "name": "METHODE",
+              "definition": "Methode matching.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "noe_codext",
+                    "definition": "Match par code terrain (le plus fiable)"
+                  },
+                  {
+                    "value": "inf_num",
+                    "definition": "Match par identifiant COMAC"
+                  },
+                  {
+                    "value": "numerique",
+                    "definition": "Match par partie numerique"
+                  },
+                  {
+                    "value": "spatial",
+                    "definition": "Match par coordonnees"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "ps_type_pcm",
+              "name": "TYPE PCM",
+              "definition": "Type support dans le PCM.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_type_bdd",
+              "name": "TYPE BDD",
+              "definition": "inf_type en BDD (POT-FT, POT-BT...).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_type_ok",
+              "name": "TYPE OK",
+              "definition": "Coherence type: OK ou KO.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_ecart",
+              "name": "ECART COORD (m)",
+              "definition": "Distance entre coordonnees PCM et BDD.",
+              "data_type": "decimal",
+              "unit": "metres",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_etat_pcm",
+              "name": "ETAT PCM",
+              "definition": "Etat support dans le PCM.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_etat_bdd",
+              "name": "ETAT BDD",
+              "definition": "Etat support en BDD.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "ps_statut",
+              "name": "STATUT",
+              "definition": "Statut global.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Trouve, type et coords coherents",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "TYPE_KO",
+                    "definition": "Trouve mais type differe",
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "value": "COORD_KO",
+                    "definition": "Trouve mais ecart coords significatif",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_BDD",
+                    "definition": "Support non trouve en BDD",
+                    "color": "#FFC7CE"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "PCM_CABLES",
+          "sheet_name": "PCM_CABLES",
+          "description": "Cables PCM vs BDD. Verifie capacites et portees.",
+          "data_elements": [
+            {
+              "element_id": "pcab_etude",
+              "name": "ETUDE",
+              "definition": "Nom etude.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "pcab_cable",
+              "name": "CABLE PCM",
+              "definition": "Reference cable PCM.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "pcab_capa_pcm",
+              "name": "CAPA PCM",
+              "definition": "Capacite FO dans le PCM.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "pcab_capa_bdd",
+              "name": "CAPA BDD",
+              "definition": "Capacite FO en BDD.",
+              "data_type": "integer",
+              "nullable": true
+            },
+            {
+              "element_id": "pcab_capa_ok",
+              "name": "CAPA OK",
+              "definition": "Coherence capacite: OK ou KO.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "pcab_seg_pcm",
+              "name": "NB SEG PCM",
+              "definition": "Nombre segments dans le PCM.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "pcab_seg_bdd",
+              "name": "NB SEG BDD",
+              "definition": "Nombre segments en BDD.",
+              "data_type": "integer",
+              "nullable": true
+            },
+            {
+              "element_id": "pcab_ecarts",
+              "name": "ECARTS PORTEES",
+              "definition": "Detail ecarts portees par segment.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "pcab_statut",
+              "name": "STATUT",
+              "definition": "Statut global.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Capacite et portees coherents",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "CAPA_KO",
+                    "definition": "Capacite differente",
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "value": "PORTEE_KO",
+                    "definition": "Ecarts portees significatifs",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_BDD",
+                    "definition": "Cable non trouve en BDD",
+                    "color": "#FFC7CE"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "PCM_MECANIQUE",
+          "sheet_name": "PCM_MECANIQUE",
+          "description": "Validation mecanique PCM vs referentiel COMAC (hypotheses, armements, catalogue).",
+          "data_elements": [
+            {
+              "element_id": "pm_etude",
+              "name": "ETUDE",
+              "definition": "Nom etude.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "pm_type",
+              "name": "TYPE",
+              "definition": "Type anomalie mecanique.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "HYPOTHESE INCONNUE",
+                    "definition": "Hypothese climatique non referencee dans le catalogue COMAC"
+                  },
+                  {
+                    "value": "ARMEMENT INCONNU",
+                    "definition": "Configuration armement non referencee"
+                  },
+                  {
+                    "value": "CABLE INCONNU",
+                    "definition": "Reference cable non referencee"
+                  },
+                  {
+                    "value": "SUPPORT HORS CATALOGUE",
+                    "definition": "Combinaison hauteur/classe/effort hors catalogue"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "pm_detail",
+              "name": "DETAIL",
+              "definition": "Description de l'element inconnu.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "pm_valeur",
+              "name": "VALEUR",
+              "definition": "Informations complementaires (support, conducteur, dimensions).",
+              "data_type": "string",
+              "nullable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "mod_4_c6bd",
+      "module_name": "4. C6 vs BD",
+      "tab_color": "#EC4899",
+      "description": "Compare les numeros d'appui des fichiers Annexe C6 (Excel) avec les poteaux FT de la couche QGIS. Identifie les poteaux C6 absents de la BDD, les poteaux hors perimetre, et la coherence etudes/fichiers.",
+      "input_files": "Fichiers Annexe C6 (Excel) dans le repertoire CAP FT",
+      "sheets": [
+        {
+          "sheet_id": "C6BD_ANALYSE",
+          "sheet_name": "C6BD_ANALYSE",
+          "description": "Resultat principal: croisement poteaux C6 Excel avec poteaux FT QGIS (POT-FT dans etude_cap_ft). Chaque ligne est un poteau extrait d'un fichier C6.",
+          "data_elements": [
+            {
+              "element_id": "c6bd_num_appui",
+              "name": "N. appui",
+              "definition": "Numero court du poteau extrait du fichier C6 (colonne 'N. appui' de l'onglet Export 1). Numero entier apres nettoyage.",
+              "data_type": "integer",
+              "nullable": false,
+              "example": "1234567"
+            },
+            {
+              "element_id": "c6bd_nature",
+              "name": "Nature des travaux",
+              "definition": "Nature des travaux prevus pour ce poteau, extraite du fichier C6 (colonne 'Nature des travaux'). Indique le type d'intervention prevu.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "Recalage",
+                    "definition": "Le poteau doit etre remis a la verticale"
+                  },
+                  {
+                    "value": "Remplacement",
+                    "definition": "Le poteau doit etre remplace"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "c6bd_excel",
+              "name": "Excel",
+              "definition": "Nom du fichier Excel C6 source dont ce poteau a ete extrait.",
+              "data_type": "string",
+              "nullable": false,
+              "example": "FTTH-NGE-ETUDE-B1L-63041-7.xlsx"
+            },
+            {
+              "element_id": "c6bd_etudes",
+              "name": "Etudes",
+              "definition": "Nom de l'etude derive du nom du fichier C6 (sans extension .xlsx).",
+              "data_type": "string",
+              "nullable": false
+            },
+            {
+              "element_id": "c6bd_inf_num_qgis",
+              "name": "inf_num (QGIS)",
+              "definition": "Identifiant complet du poteau dans la couche QGIS infra_pt_pot. Rempli si le poteau a ete trouve dans QGIS (POT-FT dans etude_cap_ft). Vide si absent.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6bd_etat",
+              "name": "Etat",
+              "definition": "Etat actuel du poteau dans la couche QGIS. Derive du champ 'etat' de infra_pt_pot. Peut etre vide, A RECALER, A REMPLACER, etc.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6bd_statut",
+              "name": "Statut",
+              "definition": "Resultat de la recherche du poteau C6 dans la couche QGIS.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "(numero ou vide)",
+                    "definition": "Poteau trouve dans la couche QGIS. Pas de surlignage"
+                  },
+                  {
+                    "value": "ABSENT",
+                    "definition": "Poteau present dans le C6 mais introuvable dans la couche QGIS infra_pt_pot. Verifier la creation en base",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "C6BD_HORS_PERIM",
+          "sheet_name": "C6BD_HORS_PERIM",
+          "description": "Poteaux FT presents dans la couche QGIS (POT-FT) mais situes en dehors de tous les polygones etude_cap_ft. Ces poteaux ne sont couverts par aucune etude.",
+          "data_elements": [
+            {
+              "element_id": "c6bd_hp_num",
+              "name": "N. appui",
+              "definition": "Numero court normalise du poteau hors perimetre.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "c6bd_hp_inf_num",
+              "name": "inf_num",
+              "definition": "Identifiant complet en BDD.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "c6bd_hp_etat",
+              "name": "etat",
+              "definition": "Etat du poteau en BDD.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ],
+          "notes": "Couleur fond: bleu #D6E4F0 si Axione (normal pour GraceTHD, zone elargie), rouge #FF6B6B sinon (anomalie a verifier)."
+        },
+        {
+          "sheet_id": "C6BD_VERIF_ETUDES",
+          "sheet_name": "C6BD_VERIF_ETUDES",
+          "description": "Coherence entre les noms d'etudes dans la couche QGIS etude_cap_ft et les fichiers C6 dans le repertoire. Detecte les etudes sans fichier C6 et les fichiers C6 sans etude QGIS.",
+          "data_elements": [
+            {
+              "element_id": "c6bd_ve_sans_c6",
+              "name": "ETUDES CAP FT SANS C6",
+              "definition": "Noms d'etudes presentes dans la couche QGIS etude_cap_ft mais pour lesquelles aucun fichier Excel C6 correspondant n'a ete trouve dans le repertoire. Verifier que le fichier C6 a bien ete depose.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6bd_ve_sans_etude",
+              "name": "FICHIERS C6 SANS ETUDE",
+              "definition": "Noms de fichiers Excel C6 trouves dans le repertoire mais pour lesquels aucun polygone etude correspondant n'existe dans la couche QGIS. Verifier le nommage du fichier ou la couche etude_cap_ft.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ],
+          "notes": "Les cellules non vides sont surlignees en orange #FFEB9C."
+        }
+      ]
+    },
+    {
+      "module_id": "mod_5_police_c6",
+      "module_name": "5. POLICE C6",
+      "tab_color": "#A855F7",
+      "description": "Pour chaque etude C6, compare le nombre et les capacites des cables FO declares dans l'Annexe C6 (en gras uniquement) avec les cables reels en BDD (fddcpiax) ou GraceTHD. Verifie les boitiers (BPE). Exclut les appuis EDF.",
+      "input_files": "Fichiers Annexe C6 (Excel) + donnees BDD/GraceTHD",
+      "filters": [
+        {
+          "filter": "Cables en gras",
+          "description": "Seuls les cables avec police gras dans la colonne 'Nom du cable' sont compares. Les cables en police normale sont existants (non compares)."
+        },
+        {
+          "filter": "Appuis EDF exclus",
+          "description": "Les appuis sans valeur dans la colonne 'Effort disponible avant ajout cable' sont des appuis EDF et sont exclus de l'analyse."
+        },
+        {
+          "filter": "Cables L[digit]",
+          "description": "Seuls les noms commencant par L suivi d'un chiffre sont des cables (L1092...). 'Liaison X-Y' est exclu."
+        },
+        {
+          "filter": "cab_type CDI",
+          "description": "Seuls les cables de type Distribution (CDI) sont comptes. RAC (raccordement) et TRA (transport) exclus."
+        },
+        {
+          "filter": "Posemode 1 ou 2",
+          "description": "Seuls les cables aeriens (1) et facade (2) sont comptes. Souterrain (0) et indetermine (4) exclus."
+        }
+      ],
+      "sheets": [
+        {
+          "sheet_id": "PLC6_RECAP",
+          "sheet_name": "PLC6_RECAP",
+          "description": "Recapitulatif par etude C6. Une ligne par etude analysee avec les compteurs agreges.",
+          "data_elements": [
+            {
+              "element_id": "plc6_etude",
+              "name": "ETUDE",
+              "definition": "Nom de l'etude C6 (derive du nom du fichier Excel ou du nom d'etude dans la couche QGIS).",
+              "data_type": "string"
+            },
+            {
+              "element_id": "plc6_appuis",
+              "name": "APPUIS C6",
+              "definition": "Nombre total d'appuis Orange (hors EDF) trouves dans le fichier C6 pour cette etude.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6_ok",
+              "name": "OK",
+              "definition": "Nombre d'appuis conformes: cables et boitiers identiques entre C6 et BDD/GraceTHD.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6_ecarts",
+              "name": "ECARTS",
+              "definition": "Nombre d'appuis avec ecart cable (nombre de cables different ou capacites incompatibles).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6_absents",
+              "name": "ABSENTS BDD",
+              "definition": "Nombre d'appuis C6 non trouves dans la BDD/GraceTHD. L'appui est reference dans le C6 mais absent de l'infrastructure.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6_boitier",
+              "name": "BOITIER ERR",
+              "definition": "Nombre d'appuis avec erreur de boitier: boitier declare dans le C6 (PB ou PEO) mais aucun BPE correspondant en BDD.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6_pct",
+              "name": "% CONFORMITE",
+              "definition": "Pourcentage de conformite: OK / APPUIS C6 * 100. Arrondi a l'entier.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "description",
+                "rules": [
+                  {
+                    "condition": "100%",
+                    "color": "#C6EFCE",
+                    "meaning": "Tous appuis conformes"
+                  },
+                  {
+                    "condition": ">= 80%",
+                    "color": "#FFEB9C",
+                    "meaning": "Avertissement"
+                  },
+                  {
+                    "condition": "< 80%",
+                    "color": "#FFC7CE",
+                    "meaning": "Non conforme"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "sheet_id": "PLC6_DETAIL",
+          "sheet_name": "PLC6_DETAIL",
+          "description": "Detail par appui pour toutes les etudes. Chaque ligne represente un appui Orange d'un fichier C6 avec le resultat de la comparaison cables et boitier.",
+          "data_elements": [
+            {
+              "element_id": "plc6d_etude",
+              "name": "ETUDE",
+              "definition": "Nom de l'etude C6.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "plc6d_appui",
+              "name": "N APPUI",
+              "definition": "Numero normalise de l'appui.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "plc6d_cables_c6",
+              "name": "CABLES C6",
+              "definition": "References des cables declares dans le C6 (en gras uniquement). Concatenees par virgule.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "plc6d_nb_c6",
+              "name": "NB C6",
+              "definition": "Nombre de cables declares dans le C6 (en gras).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6d_nb_bdd",
+              "name": "NB BDD",
+              "definition": "Nombre de cables en BDD/GraceTHD touchant cet appui (filtres CDI + aerien/facade).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "plc6d_capa_c6",
+              "name": "CAPA C6",
+              "definition": "Capacites FO des cables C6 concatenees avec + (ex: 24+48). Chaque capacite est la liste des capacites possibles pour le code cable.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "plc6d_capa_bdd",
+              "name": "CAPA BDD",
+              "definition": "Capacites FO des cables BDD/GraceTHD concatenees avec +.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "plc6d_statut",
+              "name": "STATUT",
+              "definition": "Resultat de la comparaison cables pour cet appui.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Nombre de cables identique ET capacites compatibles (au moins une combinaison possible valide)",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ECART",
+                    "definition": "Nombre de cables different OU capacites incompatibles",
+                    "color": "#FFC7CE"
+                  },
+                  {
+                    "value": "ABSENT_BDD",
+                    "definition": "Appui non trouve en BDD (NGE)",
+                    "color": "#FFEB9C"
+                  },
+                  {
+                    "value": "ABSENT_GRACETHD",
+                    "definition": "Appui non trouve dans GraceTHD (Axione)",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "plc6d_detail",
+              "name": "DETAIL",
+              "definition": "Message explicatif: nature de l'ecart, cables manquants, capacites attendues vs trouvees.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "plc6d_boitier_c6",
+              "name": "BOITIER C6",
+              "definition": "Pose de boitier declaree dans le C6 (colonne 'Pose d'un boitier optique'). Valeur extraite de la premiere ligne non vide de l'appui.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "PB",
+                    "definition": "Pose d'un boitier de protection (PBO). Un BPE de type PBO doit exister pres de l'appui"
+                  },
+                  {
+                    "value": "PEO",
+                    "definition": "Pose d'un point d'eclatement optique. Un BPE doit exister pres de l'appui"
+                  },
+                  {
+                    "value": "(vide)",
+                    "definition": "Pas de pose de boitier declaree. Aucune verification BPE"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "plc6d_bpe_type",
+              "name": "BPE TYPE",
+              "definition": "Type de BPE (Boitier de Protection d'Epissure) trouve en BDD a proximite de l'appui (<1m). Types possibles: PBO, BPE, PEP, PTO.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "plc6d_boitier_statut",
+              "name": "BOITIER STATUT",
+              "definition": "Resultat de la verification du boitier.",
+              "data_type": "string",
+              "nullable": true,
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "OK",
+                    "definition": "Boitier declare et BPE coherent trouve pres de l'appui",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "ERREUR",
+                    "definition": "Boitier declare mais aucun BPE trouve, ou appui non localise",
+                    "color": "#FF6B6B"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "mod_6_c6c3a",
+      "module_name": "6. C6-C3A-BD",
+      "tab_color": "#3B82F6",
+      "description": "Croisement des donnees entre l'Annexe C6, l'Annexe C3A, le fichier C7 et la couche QGIS pour verifier la coherence des appuis dans chaque source. Identifie les poteaux absents d'une source.",
+      "input_files": "Annexe C6 (Excel), Annexe C3A (Excel), optionnel: C7 (Excel), couches QGIS",
+      "sheets": [
+        {
+          "sheet_id": "C6C3A_ANALYSE",
+          "sheet_name": "C6C3A_ANALYSE",
+          "description": "Croisement principal. Chaque ligne est un poteau identifie dans au moins une source. Les colonnes indiquent la presence/absence dans chaque source.",
+          "data_elements": [
+            {
+              "element_id": "c6c3a_num",
+              "name": "N. appui",
+              "definition": "Numero court du poteau. Cle de jointure entre les 3 sources.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "c6c3a_nature",
+              "name": "Nature des travaux",
+              "definition": "Nature des travaux depuis la BDD QGIS. OUI si remplacement prevu.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6c3a_inf_num_qgis",
+              "name": "inf_num (ETUDES_QGIS)",
+              "definition": "Identifiant complet du poteau dans la couche QGIS (POT-FT dans etude_cap_ft). Vaut 'ABSENT' si le poteau n'est pas couvert par les polygones etude QGIS.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "mixed",
+                "description": "Identifiant complet (ex: E000058/63041) si present, ou 'ABSENT' si non trouve dans QGIS",
+                "special_values": [
+                  {
+                    "value": "ABSENT",
+                    "definition": "Poteau non trouve dans la couche QGIS",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "c6c3a_etat_qgis",
+              "name": "Etat (ETUDES_QGIS)",
+              "definition": "Etat du poteau en BDD QGIS. Vide si ABSENT.",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6c3a_inf_num_c3a",
+              "name": "inf_num (C3A)",
+              "definition": "Identifiant du poteau dans le fichier C3A. Extrait des colonnes num_a/num_b de l'onglet Commandes Fermes. Vaut 'ABSENT' si non reference dans le C3A.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "mixed",
+                "special_values": [
+                  {
+                    "value": "ABSENT",
+                    "definition": "Poteau non trouve dans le C3A",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "c6c3a_etat_c3a",
+              "name": "Etat (C3A)",
+              "definition": "Etat dans le C3A (ex: oui remplacement appui).",
+              "data_type": "string",
+              "nullable": true
+            },
+            {
+              "element_id": "c6c3a_excel_c6",
+              "name": "Excel (C6)",
+              "definition": "Nom du fichier C6 contenant ce poteau. Vaut 'ABSENT' si le poteau n'est pas reference dans les fichiers C6.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "mixed",
+                "special_values": [
+                  {
+                    "value": "ABSENT",
+                    "definition": "Poteau non trouve dans les C6",
+                    "color": "#FFEB9C"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "c6c3a_etat_c6",
+              "name": "Etat (C6)",
+              "definition": "Etat dans le C6.",
+              "data_type": "string",
+              "nullable": true
+            }
+          ],
+          "notes": "Les lignes avec au moins un 'ABSENT' sont surlignees en orange #FFEB9C."
+        },
+        {
+          "sheet_id": "C6C3A_REMPL",
+          "sheet_name": "C6C3A_REMPL",
+          "description": "Sous-ensemble filtre sur les poteaux a remplacer (Nature des travaux = OUI). Meme structure que C6C3A_ANALYSE avec colonnes C7 supplementaires si C7 present.",
+          "data_elements": [
+            {
+              "element_id": "c6c3a_r_num",
+              "name": "N. appui",
+              "definition": "Numero court du poteau a remplacer.",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "c6c3a_r_qgis",
+              "name": "inf_num (ETUDES_QGIS)",
+              "definition": "Identifiant QGIS ou ABSENT.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "c6c3a_r_c3a",
+              "name": "inf_num (C3A)",
+              "definition": "Identifiant C3A ou ABSENT.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "c6c3a_r_c6",
+              "name": "Excel (C6)",
+              "definition": "Fichier C6 ou ABSENT.",
+              "data_type": "string"
+            },
+            {
+              "element_id": "c6c3a_r_c7_fichier",
+              "name": "Fichier (C7) Excel",
+              "definition": "Nom du fichier C7 contenant ce poteau. Colonne presente uniquement si un fichier C7 a ete detecte dans le projet.",
+              "data_type": "string",
+              "nullable": true,
+              "conditional": "Visible uniquement si fichier C7 detecte"
+            },
+            {
+              "element_id": "c6c3a_r_c7_type",
+              "name": "Type de travaux (C7)",
+              "definition": "Type de travaux declare dans le C7 (onglet Commande). Ex: Remplacement simple, Renforcement.",
+              "data_type": "string",
+              "nullable": true,
+              "conditional": "Visible uniquement si fichier C7 detecte"
+            },
+            {
+              "element_id": "c6c3a_r_c7_avant",
+              "name": "Appui avant travaux (C7)",
+              "definition": "Reference de l'appui actuel (avant remplacement) dans le C7.",
+              "data_type": "string",
+              "nullable": true,
+              "conditional": "Visible uniquement si fichier C7 detecte"
+            },
+            {
+              "element_id": "c6c3a_r_c7_apres",
+              "name": "Appui apres travaux (C7)",
+              "definition": "Reference de l'appui de remplacement prevu dans le C7.",
+              "data_type": "string",
+              "nullable": true,
+              "conditional": "Visible uniquement si fichier C7 detecte"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "module_id": "dashboard",
+      "module_name": "TABLEAU DE BORD",
+      "tab_color": "#1F4E79",
+      "description": "Vue synthetique de tous les modules executes dans un batch. KPI agreges, verifications detaillees par module, pourcentage de conformite global.",
+      "sheets": [
+        {
+          "sheet_id": "TABLEAU_DE_BORD",
+          "sheet_name": "TABLEAU DE BORD",
+          "description": "Feuille principale du rapport unifie. Presente un resume executif, les KPI par module et le detail des verifications avec leur pourcentage de conformite.",
+          "sections": [
+            {
+              "section_id": "titre",
+              "row": 1,
+              "description": "Titre du rapport: RAPPORT DE DIAGNOSTIC - POLE AERIEN"
+            },
+            {
+              "section_id": "meta",
+              "rows": "2-3",
+              "description": "Date de generation et nombre de modules executes."
+            },
+            {
+              "section_id": "resume_executif",
+              "row": 4,
+              "description": "Ligne synthetique avec: SRO (si projet), type BE (NGE/AXIONE), nombre de modules, bilan par module (OK/total)."
+            }
+          ],
+          "data_elements": [
+            {
+              "element_id": "tb_module",
+              "name": "MODULE",
+              "definition": "Nom du module analyse. Les modules sont presentes dans l'ordre d'execution: 0. MAJ BD, 1. VERIF CAP_FT, 2. GESPOT vs C6, 3. VERIF COMAC, 4. C6 vs BD, 5. POLICE C6, 6. C6-C3A-BD. Seuls les modules executes apparaissent.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "0. MAJ BD",
+                    "definition": "Mise a jour FT/BT"
+                  },
+                  {
+                    "value": "1. VERIF CAP_FT",
+                    "definition": "Verification fiches appuis CAP FT"
+                  },
+                  {
+                    "value": "2. GESPOT vs C6",
+                    "definition": "Comparaison GESPOT vs Annexe C6"
+                  },
+                  {
+                    "value": "3. VERIF COMAC",
+                    "definition": "Verification COMAC (poteaux, cables, boitiers, portees, PCM)"
+                  },
+                  {
+                    "value": "4. C6 vs BD",
+                    "definition": "Comparaison C6 vs base de donnees"
+                  },
+                  {
+                    "value": "5. POLICE C6",
+                    "definition": "Police cables C6 vs BDD/GraceTHD"
+                  },
+                  {
+                    "value": "6. C6-C3A-BD",
+                    "definition": "Croisement C6, C3A, C7, BD"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "tb_verification",
+              "name": "VERIFICATION",
+              "definition": "Nom de la verification specifique effectuee au sein du module. Un module peut comporter plusieurs verifications (ex: COMAC verifie les poteaux, les portees, les cables, les boitiers). Chaque verification est une ligne distincte.",
+              "data_type": "string",
+              "examples": [
+                "Correspondance FT (Excel/QGIS)",
+                "Correspondance BT (Excel/QGIS)",
+                "Appuis presents dans QGIS",
+                "Appuis presents dans fiches",
+                "Correspondance appuis QGIS/Excel",
+                "Verif portees NFC 11201",
+                "Verif hauteurs sol",
+                "Verif cables COMAC vs BDD",
+                "Verif boitiers COMAC vs BPE",
+                "Verif portees PCM vs reference",
+                "Correspondance appuis C6/QGIS",
+                "Poteaux hors perimetre",
+                "Coherence etudes/fichiers C6",
+                "Comparaison cables C6/BDD",
+                "Presence appuis dans BDD",
+                "Verification boitiers (BPE)",
+                "Presence dans etudes QGIS",
+                "Presence dans C3A",
+                "Presence dans C6 Excel"
+              ]
+            },
+            {
+              "element_id": "tb_statut",
+              "name": "STATUT",
+              "definition": "Resultat global de cette verification.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "enumerated",
+                "values": [
+                  {
+                    "value": "CONFORME",
+                    "definition": "Aucune anomalie detectee (NON CONFORMES = 0)",
+                    "color": "#C6EFCE"
+                  },
+                  {
+                    "value": "NON CONFORME",
+                    "definition": "Au moins une anomalie detectee (NON CONFORMES > 0)",
+                    "color": "#FFEB9C ou #FFC7CE"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "tb_total",
+              "name": "TOTAL",
+              "definition": "Nombre total d'elements verifies pour cette verification (CONFORMES + NON CONFORMES).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "tb_conformes",
+              "name": "CONFORMES",
+              "definition": "Nombre d'elements conformes (OK, correspondance trouvee, verification reussie).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "tb_non_conformes",
+              "name": "NON CONFORMES",
+              "definition": "Nombre d'elements non conformes (absents, ecarts, erreurs, depassements).",
+              "data_type": "integer"
+            },
+            {
+              "element_id": "tb_pct",
+              "name": "% CONFORMITE",
+              "definition": "Pourcentage de conformite: CONFORMES / TOTAL * 100. Arrondi a l'entier. 100% si TOTAL = 0.",
+              "data_type": "string",
+              "value_domain": {
+                "type": "description",
+                "rules": [
+                  {
+                    "condition": "= 100%",
+                    "color": "#C6EFCE",
+                    "meaning": "Parfaitement conforme"
+                  },
+                  {
+                    "condition": ">= 80%",
+                    "color": "#FFEB9C",
+                    "meaning": "Avertissement — quelques anomalies"
+                  },
+                  {
+                    "condition": "< 80%",
+                    "color": "#FFC7CE",
+                    "meaning": "Non conforme — anomalies significatives"
+                  }
+                ]
+              }
+            },
+            {
+              "element_id": "tb_detail",
+              "name": "DETAIL",
+              "definition": "Description textuelle du resultat de la verification. Resume en une phrase le nombre d'elements conformes et non conformes avec leur nature.",
+              "data_type": "string",
+              "examples": [
+                "52 identifies, 3 introuvables",
+                "48 trouves, 5 absents QGIS",
+                "120 OK (98 nom, 22 spatial) | 3 absents SRO | 2 non resolus commune/code | 8 hors perimetre | 1 absents Excel",
+                "45 OK, 2 depassements",
+                "38 OK, 1 ecarts, 0 absents",
+                "Tous presents",
+                "Tous conformes"
+              ]
+            }
+          ],
+          "footer": {
+            "total_row": {
+              "description": "Ligne TOTAL avec somme de tous les conformes/non conformes de tous les modules. Fond bleu #D6E4F0."
+            },
+            "legend": {
+              "description": "Legende des couleurs en bas de page.",
+              "items": [
+                {
+                  "color": "#C6EFCE",
+                  "label": "Conforme"
+                },
+                {
+                  "color": "#FFEB9C",
+                  "label": "Avertissement"
+                },
+                {
+                  "color": "#FFC7CE",
+                  "label": "Non conforme"
+                },
+                {
+                  "color": "#FF6B6B",
+                  "label": "Critique"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

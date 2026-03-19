@@ -3,11 +3,7 @@
 
 import os
 import openpyxl
-from .qgis_utils import (
-    extraire_poteaux_etude,
-    verifications_donnees_etude,
-    liste_poteaux_par_etude
-)
+from .qgis_utils import extraire_poteaux_etude
 from .core_utils import normalize_appui_num
 
 
@@ -25,20 +21,6 @@ class CapFt:
             tuple: (doublons, hors_etude, dico_qgis, dico_poteaux_prives)
         """
         return extraire_poteaux_etude(
-            table_poteau, table_etude_cap_ft, colonne_cap_ft,
-            'POT-FT', 'CAP_FT'
-        )
-
-    def verificationsDonneesCapft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
-        """Vérifie doublons études + poteaux FT hors étude."""
-        return verifications_donnees_etude(
-            table_poteau, table_etude_cap_ft, colonne_cap_ft,
-            'POT-FT', 'CAP_FT'
-        )
-
-    def liste_poteau_cap_ft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
-        """Liste poteaux FT par étude avec détection terrains privés."""
-        return liste_poteaux_par_etude(
             table_poteau, table_etude_cap_ft, colonne_cap_ft,
             'POT-FT', 'CAP_FT'
         )
@@ -225,4 +207,12 @@ class CapFt:
         if 'Sheet' in fichierXlsx.sheetnames:
             del fichierXlsx['Sheet']
 
-        fichierXlsx.save(filename=nom)   # Enregistrement du fichier
+        try:
+            fichierXlsx.save(filename=nom)
+        except (PermissionError, OSError) as e:
+            from qgis.core import QgsMessageLog, Qgis
+            QgsMessageLog.logMessage(
+                f"[CAP_FT] Impossible d'ecrire le rapport: {nom} — {e}",
+                "PoleAerien", Qgis.Critical
+            )
+            raise

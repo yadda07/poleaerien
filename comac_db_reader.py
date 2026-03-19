@@ -92,6 +92,7 @@ _cache_cables: Dict[str, CableReference] = {}
 _cache_supports: Dict[str, SupportReference] = {}
 _cache_communes: Dict[str, CommuneInfo] = {}
 _cache_hypotheses: Dict[str, HypotheseClimatique] = {}
+_cache_armements: List[str] = []
 _cache_capacites_possibles: Dict[str, List[int]] = {}  # reference -> [capacités]
 _cache_loaded: bool = False
 _cache_source: str = ""  # "postgresql" or "gpkg"
@@ -173,22 +174,40 @@ def _get_pg_connection():
         cur.close()
         return None
     except Exception as e:
-        print(f"[COMAC_DB] PostgreSQL non disponible: {e}")
+        try:
+            from qgis.core import QgsMessageLog, Qgis
+            QgsMessageLog.logMessage(f"[COMAC_DB] PostgreSQL non disponible: {e}", "PoleAerien", Qgis.Warning)
+        except Exception:
+            pass
     
     return None
 
 
 def _query_with_conn(conn, sql: str, params: tuple = ()) -> List[dict]:
     """Execute requete sur une connexion PostgreSQL deja ouverte."""
-    rows = []
+    cursor = None
     try:
         cursor = conn.cursor()
         cursor.execute(sql, params)
         columns = [desc[0] for desc in cursor.description]
-        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"[COMAC_DB] Erreur requete PG: {e}")
-    return rows
+        try:
+            from qgis.core import QgsMessageLog, Qgis
+            QgsMessageLog.logMessage(f"[COMAC_DB] Erreur requete PG: {e}", "PoleAerien", Qgis.Warning)
+        except Exception:
+            pass
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return []
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
 
 def _query_pg(sql: str, params: tuple = ()) -> List[dict]:
@@ -309,6 +328,16 @@ def _load_hypotheses(conn=None) -> Dict[str, HypotheseClimatique]:
     return hypotheses
 
 
+def _load_armements(conn=None) -> List[str]:
+    armements = []
+    q = _query_with_conn(conn, f"SELECT nom FROM {PG_SCHEMA}.armements") if conn else _query(f"SELECT nom FROM {PG_SCHEMA}.armements")
+    for row in q:
+        nom = (row.get('nom') or '').strip()
+        if nom:
+            armements.append(nom)
+    return sorted(set(armements))
+
+
 def _load_capacites_possibles(conn=None) -> Dict[str, List[int]]:
     """Charge table cable_capacites_possibles depuis PostgreSQL."""
     capas = {}
@@ -327,7 +356,7 @@ def _load_capacites_possibles(conn=None) -> Dict[str, List[int]]:
 def _ensure_loaded():
     """Charge les données si pas encore fait - CRIT-02: Thread-safe"""
     global _cache_cables, _cache_supports, _cache_communes, _cache_hypotheses
-    global _cache_capacites_possibles, _cache_loaded, _cache_source
+    global _cache_armements, _cache_capacites_possibles, _cache_loaded, _cache_source
     
     if _cache_loaded:
         return
@@ -339,7 +368,11 @@ def _ensure_loaded():
         # Connexion unique pour tout le chargement
         pg_conn = _get_pg_connection()
         if not pg_conn:
-            print("[COMAC_DB] ERREUR: PostgreSQL non disponible")
+            try:
+                from qgis.core import QgsMessageLog, Qgis
+                QgsMessageLog.logMessage("[COMAC_DB] PostgreSQL non disponible (schema comac)", "PoleAerien", Qgis.Warning)
+            except Exception:
+                pass
             _cache_loaded = True
             return
         
@@ -349,15 +382,25 @@ def _ensure_loaded():
             _cache_supports = _load_supports(pg_conn)
             _cache_communes = _load_communes(pg_conn)
             _cache_hypotheses = _load_hypotheses(pg_conn)
+            _cache_armements = _load_armements(pg_conn)
             _cache_capacites_possibles = _load_capacites_possibles(pg_conn)
-            
-            print(
-                f"[COMAC_DB] Charge: {len(_cache_cables)} cables, "
-                f"{len(_cache_supports)} supports, {len(_cache_communes)} communes, "
-                f"{len(_cache_capacites_possibles)} refs multi-capa"
-            )
+            try:
+                from qgis.core import QgsMessageLog, Qgis
+                QgsMessageLog.logMessage(
+                    f"[COMAC_DB] Charge: {len(_cache_cables)} cables, "
+                    f"{len(_cache_supports)} supports, {len(_cache_communes)} communes, "
+                    f"{len(_cache_armements)} armements, "
+                    f"{len(_cache_capacites_possibles)} refs multi-capa",
+                    "PoleAerien", Qgis.Info
+                )
+            except Exception:
+                pass
         except Exception as e:
-            print(f"[COMAC_DB] ERR: Chargement BD echoue: {e}")
+            try:
+                from qgis.core import QgsMessageLog, Qgis
+                QgsMessageLog.logMessage(f"[COMAC_DB] ERR: Chargement BD echoue: {e}", "PoleAerien", Qgis.Critical)
+            except Exception:
+                pass
         finally:
             pg_conn.close()
         
@@ -550,6 +593,16 @@ def get_all_communes() -> Dict[str, CommuneInfo]:
     """Retourne toutes les communes (copie)"""
     _ensure_loaded()
     return dict(_cache_communes)
+
+
+def get_all_hypotheses() -> Dict[str, HypotheseClimatique]:
+    _ensure_loaded()
+    return dict(_cache_hypotheses)
+
+
+def get_all_armements() -> List[str]:
+    _ensure_loaded()
+    return list(_cache_armements)
 
 
 # =============================================================================

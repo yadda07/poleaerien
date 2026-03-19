@@ -50,7 +50,7 @@ class PoliceWorkflow(QObject):
         """Annule le traitement en cours"""
         self._cancelled = True
         self.police_logic.request_cancel()
-        QgsMessageLog.logMessage("Annulation demandée...", "POLICE_C6", Qgis.Info)
+        QgsMessageLog.logMessage("Annulation demandée...", "PoleAerien", Qgis.Info)
 
     def _emit_report_to_ui(self, report):
         """Diffuse le rapport détaillé vers l'UI avec code couleur."""

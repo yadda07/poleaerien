@@ -11,6 +11,7 @@ from ..async_tasks import ComacTask, ExcelExportTask, run_async_task
 from ..core_utils import build_export_path
 from ..db_connection import extract_sro_from_layer
 from ..cable_analyzer import extraire_appuis_wkb
+from ..qgis_utils import show_feature_count
 import os
 import copy
 
@@ -124,11 +125,134 @@ class ComacWorkflow(QObject):
         
         self.current_task.signals.progress.connect(self.progress_changed)
         self.current_task.signals.message.connect(self.message_received)
-        self.current_task.signals.finished.connect(self.analysis_finished)
+        self.current_task.signals.finished.connect(self._on_task_finished)
         self.current_task.signals.error.connect(self.error_occurred)
         
         # Utilisation de run_async_task pour compatibilité avec async_tasks.py
         run_async_task(self.current_task)
+
+    def _on_task_finished(self, result):
+        """Charge la couche cables fddcpi2 dans QGIS puis emet analysis_finished."""
+        cables_all = result.get('fddcpi_cables_all')
+        sro = result.get('fddcpi_sro', '')
+        be_type = result.get('be_type', 'nge')
+
+        if cables_all:
+            cables_aerial = [
+                c for c in cables_all
+                if c.posemode in (1, 2) and c.cab_capa >= 6
+            ]
+            cables_for_layer = [
+                {
+                    'gid_dc2': c.gid_dc2,
+                    'gid_dc': c.gid_dc,
+                    'cab_capa': c.cab_capa,
+                    'cab_type': c.cab_type,
+                    'cb_etiquet': c.cb_etiquet,
+                    'posemode': c.posemode,
+                    'length': c.length,
+                    'geom_wkt': c.geom_wkt,
+                }
+                for c in cables_aerial
+            ]
+            if cables_for_layer:
+                try:
+                    self._load_cables_layer(cables_for_layer, sro, be_type)
+                except Exception as e:
+                    self.message_received.emit(
+                        f"[!] Erreur chargement couche cables: {e}", "orange"
+                    )
+
+        self.analysis_finished.emit(result)
+
+    def _load_cables_layer(self, cables, sro, be_type='nge'):
+        """Charge les cables (fddcpi2 ou GraceTHD) comme couche temporaire dans QGIS."""
+        import warnings
+        from qgis.core import (
+            QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject
+        )
+        from qgis.PyQt.QtCore import QVariant
+
+        sro_safe = sro.replace('/', '_')
+        prefix = 'gracethd_cables' if be_type == 'axione' else 'fddcpi2'
+        layer_name = f"{prefix}_{sro_safe}"
+
+        layer = QgsVectorLayer(
+            "LineString?crs=EPSG:2154",
+            layer_name,
+            "memory"
+        )
+        provider = layer.dataProvider()
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            provider.addAttributes([
+                QgsField("gid_dc2", QVariant.LongLong),
+                QgsField("gid_dc", QVariant.LongLong),
+                QgsField("cab_capa", QVariant.Int),
+                QgsField("cab_type", QVariant.String),
+                QgsField("cb_etiquet", QVariant.String),
+                QgsField("posemode", QVariant.Int),
+                QgsField("length", QVariant.Double),
+            ])
+        layer.updateFields()
+
+        features = []
+        for cable in cables:
+            wkt = cable.get('geom_wkt')
+            if not wkt:
+                continue
+            geom = QgsGeometry.fromWkt(wkt)
+            if geom.isNull() or geom.isEmpty():
+                continue
+            feat = QgsFeature(layer.fields())
+            feat.setGeometry(geom)
+            feat.setAttribute("gid_dc2", cable.get('gid_dc2'))
+            feat.setAttribute("gid_dc", cable.get('gid_dc'))
+            feat.setAttribute("cab_capa", cable.get('cab_capa'))
+            feat.setAttribute("cab_type", cable.get('cab_type', ''))
+            feat.setAttribute("cb_etiquet", cable.get('cb_etiquet', ''))
+            feat.setAttribute("posemode", cable.get('posemode'))
+            feat.setAttribute("length", cable.get('length'))
+            features.append(feat)
+
+        if not features:
+            self.message_received.emit(
+                "Couche cables: 0 features valides (WKT absent ou invalide)", "orange"
+            )
+            return
+
+        provider.addFeatures(features)
+        layer.updateExtents()
+
+        QgsProject.instance().addMapLayer(layer)
+
+        root = QgsProject.instance().layerTreeRoot()
+        node = root.findLayer(layer.id())
+        if node:
+            node.setItemVisibilityChecked(True)
+            node.setCustomProperty("showFeatureCount", True)
+
+        style_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'styles', 'cables_dc.qml'
+        )
+        if os.path.exists(style_path):
+            layer.loadNamedStyle(style_path)
+            layer.triggerRepaint()
+
+        try:
+            from qgis.PyQt.QtCore import QTimer
+            from qgis.utils import iface as _iface
+            if _iface:
+                QTimer.singleShot(200, _iface.mapCanvas().refresh)
+        except Exception:
+            pass
+
+        self.message_received.emit(
+            f"Couche '{layer.name()}' chargee: {len(features)} cables aeriens/facade",
+            "green"
+        )
 
     def start_export(self, result):
         """

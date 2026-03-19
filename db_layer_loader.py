@@ -132,7 +132,8 @@ class DbLayerLoader:
         Returns:
             Filtered QgsVectorLayer or None.
         """
-        sql_filter = f"sro ILIKE '{sro}' AND affectation NOT LIKE '3'"
+        sro_safe = sro.replace("'", "''")
+        sql_filter = f"sro ILIKE '{sro_safe}' AND affectation NOT LIKE '3'"
         layer_name = f"infra_pt_pot [{sro}]"
         layer = self._create_layer('infra_pt_pot', sql_filter, layer_name)
 
@@ -153,7 +154,8 @@ class DbLayerLoader:
         Returns:
             Filtered QgsVectorLayer or None.
         """
-        sql_filter = f"sro ILIKE '{sro}'"
+        sro_safe = sro.replace("'", "''")
+        sql_filter = f"sro ILIKE '{sro_safe}'"
         layer_name = f"etude_cap_ft [{sro}]"
         layer = self._create_layer('etude_cap_ft', sql_filter, layer_name)
 
@@ -174,7 +176,8 @@ class DbLayerLoader:
         Returns:
             Filtered QgsVectorLayer or None.
         """
-        sql_filter = f"sro ILIKE '{sro}'"
+        sro_safe = sro.replace("'", "''")
+        sql_filter = f"sro ILIKE '{sro_safe}'"
         layer_name = f"etude_comac [{sro}]"
         layer = self._create_layer('etude_comac', sql_filter, layer_name)
 

@@ -52,6 +52,74 @@ def _sip_is_deleted(obj):
 
 
 
+def _deserialize_appuis_wkb(appuis_serialized):
+
+    from qgis.core import QgsGeometry
+
+    appuis_data = []
+
+    for appui in appuis_serialized or []:
+
+        geom = None
+
+        wkb = appui.get('geom_wkb')
+
+        if wkb:
+
+            geom = QgsGeometry()
+
+            geom.fromWkb(wkb)
+
+        appuis_data.append({
+
+            'num_appui': appui.get('num_appui', ''),
+
+            'inf_num': appui.get('inf_num', ''),
+
+            'feature_id': appui.get('feature_id'),
+
+            'geom': geom,
+
+            'inf_type': appui.get('inf_type', ''),
+
+            'etat': appui.get('etat', ''),
+
+            'noe_codext': appui.get('noe_codext', ''),
+
+        })
+
+    return appuis_data
+
+
+
+
+
+def _extract_wkt_endpoints(geom_wkt):
+
+    if not geom_wkt:
+
+        return 0.0, 0.0, 0.0, 0.0
+
+    from qgis.core import QgsGeometry
+
+    geom = QgsGeometry.fromWkt(geom_wkt)
+
+    if not geom or geom.isNull() or geom.isEmpty():
+
+        return 0.0, 0.0, 0.0, 0.0
+
+    line = geom.asMultiPolyline()[0] if geom.isMultipart() else geom.asPolyline()
+
+    if len(line) < 2:
+
+        return 0.0, 0.0, 0.0, 0.0
+
+    return line[0].x(), line[0].y(), line[-1].x(), line[-1].y()
+
+
+
+
+
 class TaskSignals(QObject):
 
     """Signals for async task communication"""
@@ -418,19 +486,19 @@ class AsyncTaskBase(QgsTask):
 
     def cancel(self):
 
-        """Override cancel to be completely safe during unload.
+        """Override cancel: appelle super() pour activer isCanceled(),
 
-        
-
-        QgsTask.cancel() is called by QGIS TaskManager during cleanup.
-
-        The C++ object may already be deleted at this point.
-
-        We simply pass to avoid any SIP access.
+        protege contre les objets SIP deja detruits lors du unload QGIS.
 
         """
 
-        pass
+        try:
+
+            super().cancel()
+
+        except (RuntimeError, Exception):
+
+            pass
 
     
 
@@ -892,11 +960,13 @@ class ComacTask(AsyncTaskBase):
         nb_absent_sro = sum(len(v) for v in resultats[0].values())
         nb_absent_excel = sum(len(v) for v in resultats[1].values())
         nb_hp = sum(len(v) for v in resultats[3].values()) if len(resultats) > 3 else 0
+        nb_non_resolu = sum(len(v) for v in resultats[5].values()) if len(resultats) > 5 else 0
         self.emit_message(
             f"Resultat: {nb_name + nb_spatial} correspondances ({nb_name} nom, {nb_spatial} spatial), "
             f"{nb_absent_sro} absents couche SRO, {nb_absent_excel} absents Excel"
+            + (f", {nb_non_resolu} non resolus commune/code" if nb_non_resolu else "")
             + (f", {nb_hp} hors perimetre" if nb_hp else ""),
-            "green" if nb_absent_sro == 0 else "orange"
+            "green" if (nb_absent_sro == 0 and nb_non_resolu == 0) else "orange"
         )
 
         if self.isCanceled():
@@ -935,65 +1005,50 @@ class ComacTask(AsyncTaskBase):
 
                 from .cable_analyzer import compter_cables_par_appui, verifier_boitiers
 
-                from qgis.core import QgsGeometry
-
                 
 
-                # Désérialiser WKB → QgsGeometry (thread-safe)
 
-                appuis_data = []
-
-                for appui in self.qgis_data.get('appuis', []):
-
-                    geom = None
-
-                    wkb = appui.get('geom_wkb')
-
-                    if wkb:
-
-                        geom = QgsGeometry()
-
-                        geom.fromWkb(wkb)
-
-                    appuis_data.append({
-
-                        'num_appui': appui.get('num_appui', ''),
-
-                        'feature_id': appui.get('feature_id'),
-
-                        'geom': geom
-
-                    })
+                appuis_data = _deserialize_appuis_wkb(self.qgis_data.get('appuis', []))
 
                 
 
                 # === Mapping noms Excel -> QGIS (pour cables et boitiers) ===
                 from .core_utils import normalize_appui_num
                 name_map = {}  # {excel_norm -> qgis_inf_num}
+                absent_sro_keys = set()
+                hors_perimetre_keys = set()
+                non_resolu_keys = set()
                 if resultats and len(resultats) > 2:
                     for _, vals in resultats[2].items():
                         name_map[normalize_appui_num(vals[2], keep_commune=True)] = vals[0]
                 if resultats and len(resultats) > 4:
                     for _, m in resultats[4].items():
                         name_map[normalize_appui_num(m['inf_num_excel'], keep_commune=True)] = m['inf_num_qgis']
+                if resultats and len(resultats) > 0:
+                    for _, appuis in resultats[0].items():
+                        for appui in appuis:
+                            norm = normalize_appui_num(appui, keep_commune=True)
+                            if norm:
+                                absent_sro_keys.add(norm)
+                if resultats and len(resultats) > 3:
+                    for _, appuis in resultats[3].items():
+                        for appui in appuis:
+                            norm = normalize_appui_num(appui, keep_commune=True)
+                            if norm:
+                                hors_perimetre_keys.add(norm)
+                if resultats and len(resultats) > 5:
+                    for _, appuis in resultats[5].items():
+                        for appui in appuis:
+                            norm = normalize_appui_num(appui, keep_commune=True)
+                            if norm:
+                                non_resolu_keys.add(norm)
 
                 self.emit_message(
                     f"Mapping poteaux: {len(name_map)} correspondances Excel->QGIS "
                     f"({nb_name} nom, {nb_spatial} spatial)",
                     "blue" if name_map else "orange"
                 )
-                # Diagnostic commune-aware: montrer cles name_map
-                if name_map:
-                    nm_sample = list(name_map.items())[:5]
-                    has_slash_k = sum(1 for k in name_map if '/' in k)
-                    has_slash_v = sum(1 for v in name_map.values() if '/' in str(v))
-                    from qgis.core import QgsMessageLog as _QML, Qgis as _Q
-                    _QML.logMessage(
-                        f"[COMAC] name_map (keep_commune): cles {has_slash_k}/{len(name_map)} avec /commune, "
-                        f"valeurs {has_slash_v}/{len(name_map)} avec /commune, "
-                        f"sample: {nm_sample}",
-                        "PoleAerien", _Q.Info
-                    )
+                reverse_map = {v: k for k, v in name_map.items()}
 
                 # === Routage NGE / Axione ===
                 be_type = self.params.get('be_type', 'nge')
@@ -1042,15 +1097,26 @@ class ComacTask(AsyncTaskBase):
 
                     cables_all_for_cache = cables_all
 
-                    cables = [c for c in cables_all if c.cab_type == 'CDI' and c.posemode in (1, 2)]
+                    cables = [c for c in cables_all
+                              if c.posemode in (1, 2) and c.cab_capa >= 6]
 
                     
 
                     nb_exclu = len(cables_all) - len(cables)
+                    nb_cdi = sum(1 for c in cables if c.cab_type == 'CDI')
+                    nb_tra = sum(1 for c in cables if c.cab_type == 'TRA')
+                    nb_rac = sum(1 for c in cables if c.cab_type == 'RAC')
+                    nb_other = len(cables) - nb_cdi - nb_tra - nb_rac
+                    nb_cuivre = sum(1 for c in cables_all
+                                     if c.posemode in (1, 2) and c.cab_capa < 6)
 
                     self.emit_message(
 
-                        f"  {len(cables)} câbles CDI aériens/façade ({nb_exclu} exclus sur {len(cables_all)})",
+                        f"  {len(cables)} câbles FO aériens/façade "
+                        f"(CDI={nb_cdi}, TRA={nb_tra}, RAC={nb_rac}"
+                        f"{f', autres={nb_other}' if nb_other else ''}"
+                        f", {nb_exclu} exclus dont {nb_cuivre} cuivre capa<6"
+                        f" sur {len(cables_all)})",
 
                         "blue"
 
@@ -1075,7 +1141,7 @@ class ComacTask(AsyncTaskBase):
                     # GraceTHD: cables places a ~1-1.5m des appuis (pas d'attache), tolerance elargie
                     cable_tol = 2.0 if cable_match == 'line' else 0.5
 
-                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=cable_tol, group_by_gid=True, match_mode=cable_match)
+                    cables_par_appui = compter_cables_par_appui(cables, appuis_data, tolerance=cable_tol, group_by_gid=True, match_mode=cable_match, cab_types={'CDI'})
 
                     # Diagnostic: combien d'appuis ont des cables matches
                     nb_with_cables = sum(1 for v in cables_par_appui.values() if v.get('count', 0) > 0)
@@ -1084,6 +1150,8 @@ class ComacTask(AsyncTaskBase):
                         f"  {nb_with_cables}/{len(cables_par_appui)} appuis QGIS avec câbles {src_label} (mode={cable_match})",
                         "blue"
                     )
+
+                    verif_cables = []
 
                     if dico_cables_comac:
 
@@ -1101,36 +1169,34 @@ class ComacTask(AsyncTaskBase):
                             else:
                                 dico_cables_translated[key_comac] = refs
 
-                        # Log cles COMAC pour diagnostic
-                        comac_keys = sorted(dico_cables_translated.keys())
-                        appui_keys_sample = sorted(cables_par_appui.keys())[:10]
-                        self.emit_message(
-                            f"Vérif câbles: comparaison {len(dico_cables_translated)} appuis COMAC"
-                            f" ({nb_translated} traduits via matching poles): {comac_keys[:15]}{'...' if len(comac_keys) > 15 else ''}",
-                            "grey"
-                        )
-                        # Diagnostic: comparer format cles COMAC vs appuis_wkb
-                        from qgis.core import QgsMessageLog as _QML2, Qgis as _Q2
-                        _QML2.logMessage(
-                            f"[COMAC] cables_translated keys (sample): {comac_keys[:10]}",
-                            "PoleAerien", _Q2.Info
-                        )
-                        _QML2.logMessage(
-                            f"[COMAC] cables_par_appui keys (sample): {appui_keys_sample}",
-                            "PoleAerien", _Q2.Info
-                        )
-                        # Intersection = cles qui matchent entre les deux dicts
-                        inter = set(dico_cables_translated.keys()) & set(cables_par_appui.keys())
-                        miss_comac = set(dico_cables_translated.keys()) - set(cables_par_appui.keys())
-                        _QML2.logMessage(
-                            f"[COMAC] Intersection cles: {len(inter)} matchent, "
-                            f"{len(miss_comac)} COMAC absentes appuis_wkb"
-                            + (f" (sample absentes: {sorted(miss_comac)[:5]})" if miss_comac else ""),
-                            "PoleAerien", _Q2.Info if not miss_comac else _Q2.Warning
-                        )
-
                         # Comparer COMAC vs cables
                         verif_cables = com.comparer_comac_cables(dico_cables_translated, cables_par_appui, ref_label=src_label)
+
+                        absent_prefix = f"ABSENT_{src_label.upper().replace(' ', '_')}"
+                        for entry in verif_cables:
+                            if not entry.get('statut', '').startswith('ABSENT'):
+                                continue
+                            num = entry.get('num_appui', '')
+                            excel_key = reverse_map.get(num, num)
+                            excel_norm = normalize_appui_num(excel_key, keep_commune=True)
+                            if excel_norm in non_resolu_keys:
+                                entry['statut'] = f"{absent_prefix}_NON_RESOLU"
+                                entry['message'] = (
+                                    "Code present dans la couche SRO, mais ambigu entre plusieurs communes "
+                                    "ou non leve par le matching spatial"
+                                )
+                            elif excel_norm in hors_perimetre_keys:
+                                entry['statut'] = f"{absent_prefix}_HORS_PERIMETRE"
+                                entry['message'] = (
+                                    f"Appui present dans la couche SRO {sro}, mais hors zones etude COMAC"
+                                    if sro else "Appui present dans la couche SRO, mais hors zones etude COMAC"
+                                )
+                            elif excel_norm in absent_sro_keys:
+                                entry['statut'] = f"{absent_prefix}_ABSENT_SRO"
+                                entry['message'] = (
+                                    f"Appui inexistant dans infra_pt_pot filtre sur le SRO {sro}"
+                                    if sro else "Appui inexistant dans infra_pt_pot filtre SRO"
+                                )
 
                         
 
@@ -1138,23 +1204,41 @@ class ComacTask(AsyncTaskBase):
 
                         nb_ecart = sum(1 for v in verif_cables if v['statut'] == 'ECART')
 
-                        nb_absent = sum(1 for v in verif_cables if v['statut'].startswith('ABSENT'))
+                        nb_absent = sum(1 for v in verif_cables if v['statut'] == absent_prefix or v['statut'].endswith('_ABSENT_SRO'))
+
+                        nb_commune = sum(1 for v in verif_cables if v['statut'].endswith('_NON_RESOLU'))
+
+                        nb_hors_p_cables = sum(1 for v in verif_cables if v['statut'].endswith('_HORS_PERIMETRE'))
 
                         self.emit_message(
 
-                            f"  Vérif câbles: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents {src_label}",
+                            f"  Vérif câbles: {nb_ok} OK, {nb_ecart} écarts, {nb_absent} absents {src_label}"
+                            + (f", {nb_commune} commune/code ambigus" if nb_commune else "")
+                            + (f", {nb_hors_p_cables} hors perimetre" if nb_hors_p_cables else ""),
 
-                            "green" if (nb_ecart == 0 and nb_absent == 0) else "orange"
+                            "green" if (nb_ecart == 0 and nb_absent == 0 and nb_commune == 0 and nb_hors_p_cables == 0) else "orange"
 
                         )
 
                         # Detail par appui en echec (comme Police C6)
                         for v in verif_cables:
                             nb_src = v.get('nb_cables_comac', '?')
-                            if v['statut'].startswith('ABSENT'):
+                            if v['statut'].endswith('_NON_RESOLU'):
+                                self.emit_message(
+                                    f"  [COMMUNE] Appui {v['num_appui']}: COMAC={nb_src} câbles, "
+                                    f"{src_label}=0 | {v.get('message', '')}",
+                                    "orange"
+                                )
+                            elif v['statut'].endswith('_HORS_PERIMETRE'):
+                                self.emit_message(
+                                    f"  [HORS_PERIMETRE] Appui {v['num_appui']}: COMAC={nb_src} câbles, "
+                                    f"{src_label}=0 | {v.get('message', '')}",
+                                    "orange"
+                                )
+                            elif v['statut'].startswith('ABSENT'):
                                 self.emit_message(
                                     f"  [ABSENT] Appui {v['num_appui']}: COMAC={nb_src} câbles, "
-                                    f"{src_label}=0 | {v.get('message', 'Appui non trouvé dans les appuis QGIS')}",
+                                    f"{src_label}=0 | {v.get('message', '')}",
                                     "orange"
                                 )
                             elif v['statut'] == 'ECART':
@@ -1170,7 +1254,6 @@ class ComacTask(AsyncTaskBase):
 
                 if dico_boitier_comac:
                     # Reverse lookup: qgis_name -> excel_name (pour retrouver boitier apres traduction cables)
-                    reverse_map = {v: k for k, v in name_map.items()}
                     for entry in verif_cables:
                         num = entry['num_appui']
                         excel_key = reverse_map.get(num, num)
@@ -1225,6 +1308,8 @@ class ComacTask(AsyncTaskBase):
 
                     bpe_geoms = []
 
+                    from qgis.core import QgsGeometry
+
                     for bpe in bpe_list:
 
                         if bpe['geom_wkt']:
@@ -1259,13 +1344,26 @@ class ComacTask(AsyncTaskBase):
 
                     nb_ok_b = sum(1 for v in verif_boitiers_result.values() if v['statut'] == 'OK')
 
-                    nb_err_b = sum(1 for v in verif_boitiers_result.values() if v['statut'] == 'ERREUR')
+                    nb_ecart_b = sum(1 for v in verif_boitiers_result.values() if v['statut'] == 'ECART')
+
+                    nb_err_loc = sum(
+                        1 for v in verif_boitiers_result.values()
+                        if v['statut'] == 'ERREUR' and v.get('bpe_noe_type') == 'appui non localisé'
+                    )
+
+                    nb_err_b = sum(
+                        1 for v in verif_boitiers_result.values()
+                        if v['statut'] == 'ERREUR' and v.get('bpe_noe_type') != 'appui non localisé'
+                    )
 
                     self.emit_message(
 
-                        f"  Vérif boîtiers: {nb_ok_b} OK, {nb_err_b} absents BPE",
+                        f"  Vérif boîtiers: {nb_ok_b} OK"
+                        + (f", {nb_ecart_b} écarts type" if nb_ecart_b else "")
+                        + (f", {nb_err_b} absents BPE" if nb_err_b else "")
+                        + (f", {nb_err_loc} appuis non resolus" if nb_err_loc else ""),
 
-                        "green" if nb_err_b == 0 else "orange"
+                        "green" if (nb_err_b == 0 and nb_err_loc == 0 and nb_ecart_b == 0) else "orange"
 
                     )
 
@@ -1337,6 +1435,20 @@ class ComacTask(AsyncTaskBase):
 
                     
 
+                # === Log fichier écarts câbles ===
+                if verif_cables:
+                    try:
+                        from .cable_analyzer import write_ecart_log
+                        import os as _os
+                        _export_dir = _os.path.dirname(self.params.get('fichier_export', ''))
+                        _log_path = write_ecart_log(verif_cables, _export_dir, sro)
+                        if _log_path:
+                            self.emit_message(
+                                f"Log écarts câbles: {_os.path.basename(_log_path)}", "grey"
+                            )
+                    except Exception as _le:
+                        self.emit_message(f"[!] write_ecart_log: {_le}", "grey")
+
             except Exception as e:
 
                 self.emit_message(f"Vérif câbles/boîtiers: erreur {e}", "orange")
@@ -1351,21 +1463,46 @@ class ComacTask(AsyncTaskBase):
 
         
 
-        # === Verification portees PCM vs BDD/GraceTHD ===
-        verif_portees = []
+        etudes_pcm = {}
+        erreurs_pcm = {}
         chemin_comac = self.params.get('chemin_comac', '')
 
-        if chemin_comac and sro:
+        if chemin_comac:
             try:
-                from .pcm_parser import parse_repertoire_pcm, extraire_portees_par_cable
-                from .cable_analyzer import reconstituer_portees_bdd, extraire_portees_gracethd, comparer_portees
+                from .pcm_parser import parse_repertoire_pcm
 
-                self.emit_progress(91)
-                self.emit_message("Verif portees: lecture fichiers PCM...", "grey")
+                self.emit_progress(89)
+                self.emit_message("Lecture fichiers PCM...", "grey")
 
                 etudes_pcm, erreurs_pcm = parse_repertoire_pcm(
                     chemin_comac, self.params.get('zone_climatique', 'ZVN')
                 )
+
+                if etudes_pcm:
+                    self.emit_message(
+                        f"  {len(etudes_pcm)} etudes PCM lues pour dessin et controles",
+                        "blue"
+                    )
+                elif erreurs_pcm:
+                    self.emit_message(
+                        f"Lecture PCM: {len(erreurs_pcm)} erreur(s)",
+                        "orange"
+                    )
+                else:
+                    self.emit_message("Lecture PCM: aucun fichier PCM trouve", "grey")
+            except Exception as e_pcm_read:
+                self.emit_message(f"Lecture PCM: erreur {e_pcm_read}", "orange")
+
+        # === Verification portees PCM vs BDD/GraceTHD ===
+        verif_portees = []
+
+        if etudes_pcm and sro:
+            try:
+                from .pcm_parser import extraire_portees_par_cable
+                from .cable_analyzer import reconstituer_portees_bdd, extraire_portees_gracethd, comparer_portees
+
+                self.emit_progress(91)
+                self.emit_message("Verif portees: preparation des troncons PCM...", "grey")
 
                 if etudes_pcm:
                     portees_pcm = extraire_portees_par_cable(etudes_pcm)
@@ -1378,18 +1515,7 @@ class ComacTask(AsyncTaskBase):
 
                         # Deserialiser appuis si pas deja fait (has_verif_work=False)
                         if not appuis_data:
-                            from qgis.core import QgsGeometry as _QgsGeomP
-                            for appui in self.qgis_data.get('appuis', []):
-                                geom = None
-                                wkb = appui.get('geom_wkb')
-                                if wkb:
-                                    geom = _QgsGeomP()
-                                    geom.fromWkb(wkb)
-                                appuis_data.append({
-                                    'num_appui': appui.get('num_appui', ''),
-                                    'feature_id': appui.get('feature_id'),
-                                    'geom': geom
-                                })
+                            appuis_data = _deserialize_appuis_wkb(self.qgis_data.get('appuis', []))
 
                         self.emit_progress(93)
                         self.emit_message("Verif portees: reconstruction troncons reference...", "grey")
@@ -1491,6 +1617,189 @@ class ComacTask(AsyncTaskBase):
             except Exception as e:
                 self.emit_message(f"Verif portees: erreur {e}", "orange")
 
+        # === Comparaison PCM vs BDD (supports + cables + mecanique) ===
+        pcm_vs_bdd_result = None
+        pcm_vs_bdd_mecanique = None
+        chemin_comac_pcm = self.params.get('chemin_comac', '')
+
+        if chemin_comac_pcm and sro:
+            try:
+                from .pcm_bdd_comparator import (
+                    comparer_batch_pcm_vs_bdd,
+                    valider_mecanique_etude,
+                )
+                from .pcm_parser import parse_repertoire_pcm as _parse_pcm_batch
+                from .comac_db_reader import (
+                    get_source as _get_comac_source,
+                    get_all_hypotheses,
+                    get_all_armements,
+                    get_all_cables,
+                    get_all_supports,
+                    get_all_communes,
+                )
+
+                self.emit_progress(96)
+                self.emit_message("Comparaison PCM vs BDD...", "grey")
+
+                # Reutiliser etudes_pcm si deja parsees par la section portees
+                if not etudes_pcm:
+                    etudes_pcm, _ = _parse_pcm_batch(
+                        chemin_comac_pcm,
+                        self.params.get('zone_climatique', 'ZVN')
+                    )
+
+                if etudes_pcm:
+                    if not appuis_data:
+                        appuis_data = _deserialize_appuis_wkb(self.qgis_data.get('appuis', []))
+
+                    if cables_all_for_cache is None:
+                        be_type = self.params.get('be_type', 'nge')
+                        gracethd_dir = self.params.get('gracethd_dir', '')
+                        if be_type == 'axione' and gracethd_dir:
+                            from .gracethd_reader import GraceTHDReader
+                            self.emit_message("PCM vs BDD: chargement cables GraceTHD...", "grey")
+                            reader_pcm = GraceTHDReader(gracethd_dir)
+                            cables_all_for_cache = reader_pcm.load_cables_as_segments('DI')
+                        else:
+                            from .db_connection import get_shared_connection as _get_pcm_connection
+                            self.emit_message(f"PCM vs BDD: chargement cables fddcpi2({sro})...", "grey")
+                            db_pcm = _get_pcm_connection()
+                            if db_pcm.connect():
+                                cables_all_for_cache = db_pcm.execute_fddcpi2(sro)
+
+                    if cables_all_for_cache is None:
+                        self.emit_message(
+                            "PCM vs BDD: chargement des cables reference impossible, comparaison cables ignoree",
+                            "orange"
+                        )
+
+                    if appuis_data:
+                        poteaux_bdd_dicts = []
+                        for appui in appuis_data:
+                            geom = appui.get('geom')
+                            ax, ay = 0.0, 0.0
+                            if geom and not geom.isNull():
+                                pt = geom.asPoint()
+                                ax, ay = pt.x(), pt.y()
+                            poteaux_bdd_dicts.append({
+                                'inf_num': appui.get('inf_num', '') or appui.get('num_appui', ''),
+                                'noe_codext': appui.get('inf_num', '') or appui.get('num_appui', ''),
+                                'inf_type': appui.get('inf_type', ''),
+                                'etat': appui.get('etat', ''),
+                                'x': ax,
+                                'y': ay,
+                            })
+
+                        cables_bdd_dicts = []
+                        skipped_segments = 0
+                        if cables_all_for_cache:
+                            for c in cables_all_for_cache:
+                                if c.cab_type != 'CDI' or c.posemode not in (1, 2):
+                                    continue
+                                start_x, start_y, end_x, end_y = _extract_wkt_endpoints(getattr(c, 'geom_wkt', ''))
+                                if start_x < 100000 or start_y < 6000000 or end_x < 100000 or end_y < 6000000:
+                                    skipped_segments += 1
+                                    continue
+                                cables_bdd_dicts.append({
+                                    'gid': getattr(c, 'gid_dc2', getattr(c, 'gid', 0)),
+                                    'length': c.length if hasattr(c, 'length') else 0.0,
+                                    'cab_capa': c.cab_capa,
+                                    'geom_start_x': start_x,
+                                    'geom_start_y': start_y,
+                                    'geom_end_x': end_x,
+                                    'geom_end_y': end_y,
+                                })
+
+                        if not cables_bdd_dicts:
+                            self.emit_message(
+                                "PCM vs BDD: aucun segment reference exploitable, comparaison cables ignoree",
+                                "orange" if cables_all_for_cache else "grey"
+                            )
+
+                        pcm_vs_bdd_result = comparer_batch_pcm_vs_bdd(
+                            etudes_pcm, poteaux_bdd_dicts, cables_bdd_dicts
+                        )
+
+                        if skipped_segments:
+                            self.emit_message(
+                                f"PCM vs BDD: {skipped_segments} segments reference sans geometrie exploitable ignores",
+                                "orange"
+                            )
+
+                        self.emit_message(
+                            f"PCM vs BDD: {pcm_vs_bdd_result.nb_supports_ok} supports OK, "
+                            f"{pcm_vs_bdd_result.nb_supports_absent} absents, "
+                            f"{pcm_vs_bdd_result.nb_supports_type_ko} type KO, "
+                            f"{pcm_vs_bdd_result.nb_supports_coord_ko} coord KO "
+                            f"| {pcm_vs_bdd_result.nb_cables_ok} cables OK, "
+                            f"{pcm_vs_bdd_result.nb_cables_absent} absents",
+                            "green" if (
+                                pcm_vs_bdd_result.nb_supports_absent == 0
+                                and pcm_vs_bdd_result.nb_supports_type_ko == 0
+                                and pcm_vs_bdd_result.nb_supports_coord_ko == 0
+                                and pcm_vs_bdd_result.nb_cables_absent == 0
+                                and pcm_vs_bdd_result.nb_cables_capacite_ko == 0
+                                and pcm_vs_bdd_result.nb_cables_portee_ko == 0
+                            ) else "orange"
+                        )
+                    else:
+                        self.emit_message(
+                            "PCM vs BDD: aucun appui QGIS disponible, comparaison supports/cables ignoree",
+                            "orange"
+                        )
+
+                    try:
+                        if _get_comac_source() != 'postgresql':
+                            self.emit_message(
+                                "Validation mecanique: referentiel COMAC indisponible, etape ignoree",
+                                "orange"
+                            )
+                        else:
+                            hyp_bdd = list(get_all_hypotheses().keys())
+                            arm_bdd = get_all_armements()
+                            cab_bdd = list(get_all_cables().keys())
+                            sup_bdd = [vars(s) for s in get_all_supports().values()]
+                            com_bdd = [vars(c) for c in get_all_communes().values()]
+
+                            if not hyp_bdd or not arm_bdd or not cab_bdd or not sup_bdd or not com_bdd:
+                                self.emit_message(
+                                    "Validation mecanique: referentiel COMAC incomplet, etape ignoree",
+                                    "orange"
+                                )
+                            else:
+                                validations = []
+                                for _ek, etude_p in etudes_pcm.items():
+                                    v = valider_mecanique_etude(
+                                        etude_p, hyp_bdd, arm_bdd, cab_bdd, sup_bdd, com_bdd
+                                    )
+                                    validations.append({'etude': etude_p.num_etude, 'validation': v})
+
+                                total_hyp_ko = sum(len(v['validation'].hypotheses_inconnues) for v in validations)
+                                total_arm_ko = sum(len(v['validation'].armements_inconnus) for v in validations)
+                                total_cab_ko = sum(len(v['validation'].cables_inconnus) for v in validations)
+                                total_cat_ko = sum(len(v['validation'].supports_catalogue_ko) for v in validations)
+                                if total_hyp_ko or total_arm_ko or total_cab_ko or total_cat_ko:
+                                    self.emit_message(
+                                        f"Validation mecanique: {total_hyp_ko} hypotheses inconnues, "
+                                        f"{total_arm_ko} armements inconnus, {total_cab_ko} cables inconnus, "
+                                        f"{total_cat_ko} supports hors catalogue",
+                                        "orange"
+                                    )
+                                else:
+                                    self.emit_message(
+                                        "Validation mecanique: referentiel COMAC coherent",
+                                        "green"
+                                    )
+                                pcm_vs_bdd_mecanique = validations
+                    except Exception as e_mec:
+                        self.emit_message(f"Validation mecanique: erreur referentiel comac ({e_mec})", "orange")
+                else:
+                    self.emit_message("PCM vs BDD: aucun fichier PCM trouve", "grey")
+            except Exception as e_pcm:
+                self.emit_message(f"PCM vs BDD: erreur {e_pcm}", "orange")
+        elif etudes_pcm and not sro:
+            self.emit_message("Verif portees: SRO non disponible, etape ignoree", "grey")
+
         self.emit_progress(97)
 
         self.result = {
@@ -1506,6 +1815,8 @@ class ComacTask(AsyncTaskBase):
             'dico_hors_perimetre': resultats[3] if len(resultats) > 3 else {},
 
             'dico_spatial_match': resultats[4] if len(resultats) > 4 else {},
+
+            'dico_non_resolu': resultats[5] if len(resultats) > 5 else {},
 
             'fichier_export': self.params['fichier_export'],
 
@@ -1525,6 +1836,10 @@ class ComacTask(AsyncTaskBase):
 
             'verif_portees': verif_portees,
 
+            'etudes_pcm': etudes_pcm,
+
+            'erreurs_pcm': erreurs_pcm,
+
             'hors_etude': hors_etude,
 
             'pending_export': True,
@@ -1538,6 +1853,10 @@ class ComacTask(AsyncTaskBase):
             'be_type': self.params.get('be_type', 'nge'),
 
             'coords_absents': self._filter_coords_absents(resultats[0], dico_coords),
+
+            'pcm_vs_bdd': pcm_vs_bdd_result,
+
+            'pcm_vs_bdd_mecanique': pcm_vs_bdd_mecanique,
 
         }
 
@@ -2775,12 +3094,83 @@ class PoliceC6Task(AsyncTaskBase):
 
         
 
-        wb.save(filename)
+        try:
+
+            wb.save(filename)
+
+        except (PermissionError, OSError) as _e:
+
+            QgsMessageLog.logMessage(
+
+                f"[POLICE_C6] Impossible d'ecrire le rapport: {filename} \u2014 {_e}",
+
+                "PoleAerien", Qgis.Critical
+
+            )
+
+            raise
 
         return filename
 
 
 
+
+
+class GespotC6Task(AsyncTaskBase):
+    """Async task for GESPOT vs C6 comparison.
+
+    Zero QGIS API calls — pur Python fichier-fichier.
+    Paramètres requis : gespot_dir, c6_dir, export_dir.
+    """
+
+    def __init__(self, params: dict):
+        super().__init__('GESPOT vs C6', params)
+
+    def execute(self) -> bool:
+        from .gespot_c6_comparator import run_comparison
+
+        gespot_dir = self.params['gespot_dir']
+        c6_dir = self.params['c6_dir']
+        export_dir = self.params['export_dir']
+
+        def _prog(pct, msg=''):
+            if self.isCanceled():
+                return
+            self.emit_progress(pct)
+            if msg:
+                self.emit_message(msg, 'grey')
+
+        result = run_comparison(gespot_dir, c6_dir, export_dir,
+                                progress_cb=_prog)
+
+        if self.isCanceled():
+            return False
+
+        nb_ok = sum(1 for c in result.comparisons if c.statut_global == 'OK')
+        nb_ecart = sum(1 for c in result.comparisons if c.statut_global == 'KO')
+        self.emit_message(
+            f"GESPOT vs C6 : {len(result.comparisons)} compares "
+            f"({nb_ok} OK, {nb_ecart} KO), "
+            f"{len(result.absent_c6)} absents C6, "
+            f"{len(result.absent_gespot)} absents GESPOT, "
+            f"{len(result.anomalies)} anomalies source",
+            'blue',
+        )
+
+        self.result = {
+            'success': True,
+            'nb_compares': len(result.comparisons),
+            'nb_ok': nb_ok,
+            'nb_ecart': nb_ecart,
+            'nb_absent_c6': len(result.absent_c6),
+            'nb_absent_gespot': len(result.absent_gespot),
+            'nb_anomalies': len(result.anomalies),
+            'comparisons': result.comparisons,
+            'absent_c6': result.absent_c6,
+            'absent_gespot': result.absent_gespot,
+            'anomalies': result.anomalies,
+        }
+        return True
 
 
 def run_async_task(task):

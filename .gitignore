@@ -5,3 +5,9 @@ __pycache__/
 *.pyc
 *_old.py
 GRACE_APD_DTR_*/
+
+# Test data / personal folders
+COMAC/
+exemple_gespot/
+.vscode/
+.pytest_cache/

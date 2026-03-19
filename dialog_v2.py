@@ -20,7 +20,7 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.PyQt.QtCore import Qt, QSize, QEvent, pyqtSignal, QStringListModel
 from qgis.PyQt.QtGui import QTextCursor, QFont, QPalette, QColor
-from qgis.core import QgsApplication, QgsProject, QgsMapLayerProxyModel
+from qgis.core import QgsApplication, QgsProject, QgsMapLayerProxyModel, QgsSettings
 from qgis.gui import QgsMapLayerComboBox, QgsCollapsibleGroupBox
 
 from .project_detector import detect_project, DetectionResult, analyse_livrable
@@ -396,9 +396,11 @@ class PoleAerienDialogV2(QDialog):
         self._is_running = False
         self._module_rows = {}
         self._project_mode = False
+        self._chk_comac_drawings = None
         self.smooth_progress = SmoothProgressController(interval_ms=25)
 
         self._build_ui()
+        self._restore_ui_state()
         self._connect_signals()
 
     # ==================================================================
@@ -741,12 +743,42 @@ class PoleAerienDialogV2(QDialog):
             ('c6c3a',     'C6-C3A-C7-BD - Croisement annexes',
              "Prerequis: dossier CAP FT + fichier C7 et/ou C3A\n"
              "Couches: infra_pt_pot, etude_cap_ft"),
+            ('gespot_c6', 'GESPOT vs C6 - Comparaison referentiel terrain',
+             "Prerequis: dossier GSPOT ou GESPOT (CSV) + dossier CAP FT (annexes C6)\n"
+             "Aucune couche QGIS requise"),
         ]
         for key, label, tooltip in modules_def:
             row = _ModuleRow(key, label, tooltip=tooltip)
             row.toggled.connect(self._on_module_toggled)
             self._module_rows[key] = row
             lay.addWidget(row)
+
+        sep_opts = QFrame()
+        sep_opts.setFrameShape(QFrame.HLine)
+        sep_opts.setFrameShadow(QFrame.Sunken)
+        lay.addWidget(sep_opts)
+
+        opts_row = QHBoxLayout()
+        opts_row.setSpacing(16)
+
+        self._chk_comac_drawings = QCheckBox("Schema poteau (COMAC, plus lent)")
+        self._chk_comac_drawings.setToolTip(
+            "Ajoute les feuilles COMAC_DESSIN au rapport Excel unifie.\n"
+            "Desactive par defaut car le rendu des schemas peut etre long."
+        )
+        self._chk_comac_drawings.setChecked(False)
+        opts_row.addWidget(self._chk_comac_drawings)
+
+        self._chk_data_dictionary = QCheckBox("Dictionnaire de donnees")
+        self._chk_data_dictionary.setToolTip(
+            "Ajoute les feuilles GLOSSAIRE et DICTIONNAIRE au rapport Excel unifie.\n"
+            "Decrit chaque colonne, chaque valeur et chaque code couleur du rapport."
+        )
+        self._chk_data_dictionary.setChecked(False)
+        opts_row.addWidget(self._chk_data_dictionary)
+
+        opts_row.addStretch()
+        lay.addLayout(opts_row)
 
         grp.setLayout(lay)
         parent.addWidget(grp)
@@ -876,6 +908,34 @@ class PoleAerienDialogV2(QDialog):
         self.diagButton.clicked.connect(self._run_diagnostic)
         self._mode_group.buttonClicked.connect(self._on_mode_changed)
         self.textBrowser.anchorClicked.connect(self._on_link_clicked)
+        self._chk_comac_drawings.toggled.connect(lambda _: self._save_ui_state())
+        self._chk_data_dictionary.toggled.connect(lambda _: self._save_ui_state())
+
+    def _save_ui_state(self):
+        settings = QgsSettings()
+        settings.setValue(
+            "PoleAerien/dialog_v2/include_comac_drawings",
+            self._chk_comac_drawings.isChecked()
+        )
+        settings.setValue(
+            "PoleAerien/dialog_v2/include_data_dictionary",
+            self._chk_data_dictionary.isChecked()
+        )
+
+    def _restore_ui_state(self):
+        settings = QgsSettings()
+        checked = settings.value(
+            "PoleAerien/dialog_v2/include_comac_drawings",
+            False,
+            type=bool
+        )
+        self._chk_comac_drawings.setChecked(bool(checked))
+        checked_dict = settings.value(
+            "PoleAerien/dialog_v2/include_data_dictionary",
+            False,
+            type=bool
+        )
+        self._chk_data_dictionary.setChecked(bool(checked_dict))
 
     # ==================================================================
     #  PROJECT DETECTION
@@ -997,6 +1057,8 @@ class PoleAerienDialogV2(QDialog):
             'police_c6': (d.has_c6,    d.c6_dir,      'C6 (via CAP FT)'),
             'c6c3a':     ((d.has_c6 or d.has_c6_annexe) and (d.has_c7 or d.has_c3a),
                           d.c6_annexe_file or d.c6_dir, 'C6 annexe'),
+            'gespot_c6': (d.has_gespot and d.has_c6,
+                          d.gespot_dir, 'GESPOT'),
         }
         for key, row in self._module_rows.items():
             found, mp, res_label = module_map.get(key, (False, '', ''))
@@ -1080,7 +1142,7 @@ class PoleAerienDialogV2(QDialog):
         self.startBtn.setEnabled(has_proj and has_mod and not self._is_running)
 
     def selected_modules(self):
-        order = ['maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a']
+        order = ['maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a', 'gespot_c6']
         return [k for k in order if k in self._module_rows and self._module_rows[k].is_selected]
 
     # ==================================================================
@@ -1104,6 +1166,7 @@ class PoleAerienDialogV2(QDialog):
         self.projectPathEdit.setReadOnly(running)
         self.selectAllBtn.setEnabled(not running)
         self.deselectAllBtn.setEnabled(not running)
+        self._chk_comac_drawings.setEnabled(not running)
 
         for row in self._module_rows.values():
             row.checkbox.setEnabled(not running and row._found)
@@ -1126,6 +1189,7 @@ class PoleAerienDialogV2(QDialog):
         self.projectPathEdit.setReadOnly(False)
         self.selectAllBtn.setEnabled(True)
         self.deselectAllBtn.setEnabled(True)
+        self._chk_comac_drawings.setEnabled(True)
         for row in self._module_rows.values():
             row.checkbox.setEnabled(row._found)
         self._validate_start()
@@ -1375,6 +1439,7 @@ class PoleAerienDialogV2(QDialog):
             ('c6bd',      'C6 vs BD',     self._diag_prereq_c6),
             ('police_c6', 'POLICE C6',    self._diag_prereq_c6),
             ('c6c3a',     'C6-C3A-C7-BD', self._diag_prereq_c6c3a),
+            ('gespot_c6', 'GESPOT vs C6',  self._diag_prereq_gespot_c6),
         ]
 
         n_ready = 0
@@ -1448,6 +1513,17 @@ class PoleAerienDialogV2(QDialog):
         if 'c3a' in analysis:
             parts.append('C3A')
         return f"C6 + {' + '.join(parts)}" if parts else 'detecte'
+
+    def _diag_prereq_gespot_c6(self, analysis, missing=False):
+        if missing:
+            return "dossier GSPOT/GESPOT et dossier CAP FT requis"
+        d = self._detection
+        csv_count = 0
+        import os
+        if d.gespot_dir and os.path.isdir(d.gespot_dir):
+            csv_count = sum(1 for f in os.listdir(d.gespot_dir)
+                            if f.lower().endswith('.csv'))
+        return f"GESPOT ({csv_count} CSV) + CAP FT"
 
     def _build_recommandations(self, d, detected, pg_ok):
         recos = []
@@ -1572,6 +1648,14 @@ class PoleAerienDialogV2(QDialog):
         return self._project_mode and self._chk_load_layers.isChecked()
 
     @property
+    def include_comac_drawings(self):
+        return self._chk_comac_drawings.isChecked()
+
+    @property
+    def include_data_dictionary(self):
+        return self._chk_data_dictionary.isChecked()
+
+    @property
     def spatial_tolerance(self):
         """Spatial matching tolerance in meters (from spinbox)."""
         return self._spin_spatial_tol.value()
@@ -1630,6 +1714,7 @@ class PoleAerienDialogV2(QDialog):
         _ThemeColors._widget_palette_ref = None
         if self._is_running:
             self.cancel_requested.emit()
+        self._save_ui_state()
         if self.smooth_progress:
             self.smooth_progress.reset()
         super().closeEvent(event)

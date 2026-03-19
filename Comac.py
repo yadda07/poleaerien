@@ -8,17 +8,9 @@ import os
 
 import openpyxl
 
-from .qgis_utils import (
+from .qgis_utils import extraire_poteaux_etude
 
-    extraire_poteaux_etude,
-
-    verifications_donnees_etude,
-
-    liste_poteaux_par_etude
-
-)
-
-from .core_utils import normalize_appui_num
+from .core_utils import normalize_appui_num, normaliser_boitier
 
 from .security_rules import (
 
@@ -187,34 +179,6 @@ class Comac:
 
 
 
-    def verificationsDonneesComac(self, table_poteau, table_etude_comac, colonne_comac):
-
-        """Vérifie doublons études + poteaux BT hors étude."""
-
-        return verifications_donnees_etude(
-
-            table_poteau, table_etude_comac, colonne_comac,
-
-            'POT-BT', 'COMAC'
-
-        )
-
-
-
-    def liste_poteau_comac(self, table_poteau, table_etude_comac, colonne_comac):
-
-        """Liste poteaux BT par étude avec détection terrains privés."""
-
-        return liste_poteaux_par_etude(
-
-            table_poteau, table_etude_comac, colonne_comac,
-
-            'POT-BT', 'COMAC'
-
-        )
-
-
-
     def LectureFichiersExcelsComac(self, repertoire, zone_climatique='ZVN'):
 
         """
@@ -352,6 +316,8 @@ class Comac:
 
                             impossibiliteDelireFichier[filepath] = f"Feuille illisible : {e}"
 
+                            document.close()
+
                             continue
 
 
@@ -401,7 +367,7 @@ class Comac:
                             listePoteauBt.append(nompot)
 
                             # Extraction coordonnees XY (col K=10, L=11) Lambert 93
-                            coord_x_raw = row[10] if len(row) > 11 and row[10] else None
+                            coord_x_raw = row[10] if len(row) > 10 and row[10] else None
                             coord_y_raw = row[11] if len(row) > 11 and row[11] else None
                             if coord_x_raw and coord_y_raw:
                                 try:
@@ -457,13 +423,13 @@ class Comac:
 
                             
 
-                            # Parse boîtier fibre optique (col AR): oui/non
+                            # Parse boîtier fibre optique (col AR): oui/non ou 0/1 (format PCM)
 
                             boitier_raw = row[EXCEL_COL_BOITIER] if len(row) > EXCEL_COL_BOITIER else None
 
-                            boitier_val = str(boitier_raw).strip() if boitier_raw else ''
+                            boitier_val = normaliser_boitier(boitier_raw)
 
-                            if boitier_val.lower() in ('oui', 'non'):
+                            if boitier_val in ('oui', 'non'):
 
                                 nompot_norm_b = normalize_appui_num(nompot, keep_commune=True)
 
@@ -595,34 +561,6 @@ class Comac:
             f"{len(dicoCoordsPoteaux)} poteaux avec coordonnees XY",
             "PoleAerien", Qgis.Info
         )
-        # Sample des noms de poteaux pour diagnostic normalisation
-        all_pot_names = []
-        for pots in dicoPoteauBt_SousTraitant.values():
-            all_pot_names.extend(pots[:3])
-            if len(all_pot_names) >= 10:
-                break
-        if all_pot_names:
-            QgsMessageLog.logMessage(
-                f"[COMAC] Noms poteaux Excel (sample): {all_pot_names[:10]}",
-                "PoleAerien", Qgis.Info
-            )
-        # Diagnostic: cles commune-aware dans dicts cables et boitiers
-        if dicoCablesParAppui:
-            cable_keys = sorted(dicoCablesParAppui.keys())[:10]
-            has_slash = sum(1 for k in dicoCablesParAppui if '/' in k)
-            QgsMessageLog.logMessage(
-                f"[COMAC] Cles cables (keep_commune): {has_slash}/{len(dicoCablesParAppui)} avec /commune, "
-                f"sample: {cable_keys}",
-                "PoleAerien", Qgis.Info
-            )
-        if dicoBoitierParAppui:
-            boit_keys = sorted(dicoBoitierParAppui.keys())[:10]
-            has_slash_b = sum(1 for k in dicoBoitierParAppui if '/' in k)
-            QgsMessageLog.logMessage(
-                f"[COMAC] Cles boitiers (keep_commune): {has_slash_b}/{len(dicoBoitierParAppui)} avec /commune, "
-                f"sample: {boit_keys}",
-                "PoleAerien", Qgis.Info
-            )
 
         return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui, dicoBoitierParAppui, dicoCoordsPoteaux
 
@@ -726,13 +664,6 @@ class Comac:
 
         total_qgis = sum(len(v) for v in dicoEtudeComacPoteauQgis.values())
         total_excel = sum(len(v) for v in dicoPoteauBt_SousTraitant.values())
-        QgsMessageLog.logMessage(
-            f"[COMAC] traitementResultatFinaux: {total_qgis} poteaux QGIS ({len(dicoEtudeComacPoteauQgis)} etudes), "
-            f"{total_excel} poteaux Excel ({len(dicoPoteauBt_SousTraitant)} fichiers), "
-            f"{len(all_inf_nums) if all_inf_nums else 0} inf_num dans couche complete",
-            "PoleAerien", Qgis.Info
-        )
-
         if all_inf_nums is None:
             all_inf_nums = set()
 
@@ -756,15 +687,27 @@ class Comac:
         dicoPotBt_Excel_Introuvable = {}
         dicoPotBt_HorsPerimetre = {}
 
+        dicoPotBt_AResoudre = {}
+
+        dicoPotBt_NonResolu = {}
+
         dicoPotBtExistants = {}
 
         comptabilite = 0
+
+        nb_match_exact = 0
+
+        nb_match_sans_commune = 0
+
+        ambiguous_samples = {}
 
 
 
         # Index rapide QGIS: clé normalisée -> liste (etude, inf_num_complet)
 
         index_qgis = {}
+
+        index_qgis_sans_commune = {}
 
         for etude_comac, listePoteauxQgis in dicoEtudeComacPoteauQgis.items():
 
@@ -774,24 +717,71 @@ class Comac:
 
                 index_qgis.setdefault(cle, []).append((etude_comac, inf_num_bt))
 
-        # Diagnostic: cles index_qgis commune-aware
-        qgis_keys = sorted(index_qgis.keys())[:15]
-        has_slash_q = sum(1 for k in index_qgis if '/' in k)
-        # Detecter les cles qui auraient collisionne sans commune
+                cle_sans_commune = cle.split('/')[0] if '/' in cle else cle
+
+                index_qgis_sans_commune.setdefault(cle_sans_commune, []).append((cle, etude_comac, inf_num_bt))
+
+        study_keys_initial = set(index_qgis_sans_commune.keys())
+
         from collections import Counter
         sans_commune = Counter(k.split('/')[0] for k in index_qgis)
         collisions = {num: cnt for num, cnt in sans_commune.items() if cnt > 1}
-        QgsMessageLog.logMessage(
-            f"[COMAC] index_qgis: {len(index_qgis)} cles, {has_slash_q} avec /commune, "
-            f"sample: {qgis_keys}",
-            "PoleAerien", Qgis.Info
-        )
         if collisions:
             QgsMessageLog.logMessage(
                 f"[COMAC] COMMUNES DISTINCTES: {len(collisions)} numeros identiques dans communes differentes "
                 f"(auraient collisionne sans keep_commune): {dict(list(collisions.items())[:10])}",
                 "PoleAerien", Qgis.Warning
             )
+
+        def _consume_match(cle_match, etude_comac, inf_num_bt, poteau_excel, fichier_excel):
+
+            nonlocal comptabilite
+
+            comptabilite += 1
+
+            dicoPotBtExistants[comptabilite] = [inf_num_bt, etude_comac, poteau_excel, fichier_excel]
+
+            if etude_comac in dicoEtudeComacPoteauQgis:
+
+                new_list = [x for x in dicoEtudeComacPoteauQgis[etude_comac] if x != inf_num_bt]
+
+                if new_list:
+
+                    dicoEtudeComacPoteauQgis[etude_comac] = new_list
+
+                else:
+
+                    del dicoEtudeComacPoteauQgis[etude_comac]
+
+            if cle_match in index_qgis:
+
+                index_qgis[cle_match] = [
+
+                    item for item in index_qgis[cle_match]
+
+                    if not (item[0] == etude_comac and item[1] == inf_num_bt)
+
+                ]
+
+                if not index_qgis[cle_match]:
+
+                    del index_qgis[cle_match]
+
+            cle_sans_commune = cle_match.split('/')[0] if '/' in cle_match else cle_match
+
+            if cle_sans_commune in index_qgis_sans_commune:
+
+                index_qgis_sans_commune[cle_sans_commune] = [
+
+                    item for item in index_qgis_sans_commune[cle_sans_commune]
+
+                    if not (item[0] == cle_match and item[1] == etude_comac and item[2] == inf_num_bt)
+
+                ]
+
+                if not index_qgis_sans_commune[cle_sans_commune]:
+
+                    del index_qgis_sans_commune[cle_sans_commune]
 
 
 
@@ -801,6 +791,8 @@ class Comac:
 
             PotBtintrouvableSt = []
             PotBtHorsPerimetreSt = []
+            PotBtAResoudreSt = []
+            PotBtNonResoluSt = []
 
             
 
@@ -812,42 +804,25 @@ class Comac:
 
                 if cle_excel in index_qgis and index_qgis[cle_excel]:
 
-                    # Correspondance trouvée - pop première occurrence
-
-                    etude_comac, inf_num_bt = index_qgis[cle_excel].pop(0)
-
-                    comptabilite += 1
-
-                    dicoPotBtExistants[comptabilite] = [inf_num_bt, etude_comac, poteauSt, excel]
-
-                    
-
-                    # Màj dict QGIS original (copie pour éviter modif pendant itération)
-
-                    if etude_comac in dicoEtudeComacPoteauQgis:
-
-                        new_list = [x for x in dicoEtudeComacPoteauQgis[etude_comac] if x != inf_num_bt]
-
-                        if new_list:
-
-                            dicoEtudeComacPoteauQgis[etude_comac] = new_list
-
-                        else:
-
-                            del dicoEtudeComacPoteauQgis[etude_comac]
-
-                    
-
-                    # Nettoyer index si vide
-
-                    if not index_qgis[cle_excel]:
-
-                        del index_qgis[cle_excel]
+                    etude_comac, inf_num_bt = index_qgis[cle_excel][0]
+                    _consume_match(cle_excel, etude_comac, inf_num_bt, poteauSt, excel)
+                    nb_match_exact += 1
 
                 else:
-                    # Poteau non trouve dans les zones etude: verifier s'il existe dans la couche
-                    # Chercher avec et sans commune (Excel NGE n'a pas /commune)
-                    if cle_excel and (cle_excel in all_inf_nums or cle_excel in all_inf_sans_commune):
+                    cle_sans_commune = cle_excel.split('/')[0] if '/' in cle_excel else cle_excel
+                    candidats_sans_commune = index_qgis_sans_commune.get(cle_sans_commune, []) if cle_sans_commune else []
+
+                    if len(candidats_sans_commune) == 1:
+                        cle_match, etude_comac, inf_num_bt = candidats_sans_commune[0]
+                        _consume_match(cle_match, etude_comac, inf_num_bt, poteauSt, excel)
+                        nb_match_sans_commune += 1
+                    elif len(candidats_sans_commune) > 1:
+                        PotBtAResoudreSt.append(poteauSt)
+                        if len(ambiguous_samples) < 10 and poteauSt not in ambiguous_samples:
+                            ambiguous_samples[poteauSt] = [cand[2] for cand in candidats_sans_commune[:4]]
+                    elif cle_sans_commune in study_keys_initial:
+                        PotBtNonResoluSt.append(poteauSt)
+                    elif cle_excel and (cle_excel in all_inf_nums or cle_sans_commune in all_inf_sans_commune):
                         PotBtHorsPerimetreSt.append(poteauSt)
                     else:
                         PotBtintrouvableSt.append(poteauSt)
@@ -861,15 +836,26 @@ class Comac:
             if PotBtHorsPerimetreSt:
 
                 dicoPotBt_HorsPerimetre[excel] = PotBtHorsPerimetreSt
+            if PotBtAResoudreSt:
+
+                dicoPotBt_AResoudre[excel] = PotBtAResoudreSt
+            if PotBtNonResoluSt:
+
+                dicoPotBt_NonResolu[excel] = PotBtNonResoluSt
+
+        if ambiguous_samples:
+            QgsMessageLog.logMessage(
+                f"[COMAC] Candidats ambigus (sample): {ambiguous_samples}",
+                "PoleAerien", Qgis.Warning
+            )
 
 
         # --- Spatial fallback: match unmatched poles by proximity (1.5m) ---
         dicoPotBt_SpatialMatch = {}
 
-        if coords_qgis and coords_excel:
+        if coords_qgis and coords_excel and dicoPotBt_AResoudre:
             from .core_utils import match_poles_spatial
 
-            # Collect unmatched QGIS poles with coordinates
             unmatched_qgis_coords = {}
             for etude, pots in dicoEtudeComacPoteauQgis.items():
                 for inf_num in pots:
@@ -877,31 +863,31 @@ class Comac:
                     if coord:
                         unmatched_qgis_coords[inf_num] = coord
 
-            # Collect unmatched Excel poles with coordinates
             unmatched_excel_coords = {}
-            for fichier, pots in dicoPotBt_Excel_Introuvable.items():
+            for fichier, pots in dicoPotBt_AResoudre.items():
                 for pot_name in pots:
                     coord = coords_excel.get(pot_name)
                     if coord:
                         unmatched_excel_coords[pot_name] = coord
 
-            spatial_matches = match_poles_spatial(
-                unmatched_qgis_coords, unmatched_excel_coords,
-                tolerance=spatial_tolerance
-            )
+
+            spatial_matches = []
+            if unmatched_qgis_coords and unmatched_excel_coords:
+                spatial_matches = match_poles_spatial(
+                    unmatched_qgis_coords, unmatched_excel_coords,
+                    tolerance=spatial_tolerance
+                )
 
             if spatial_matches:
-                # Index: excel_name -> (qgis_inf_num, distance)
                 excel_matched = {}
                 qgis_matched = {}
                 for qgis_name, excel_name, dist in spatial_matches:
                     excel_matched[excel_name] = (qgis_name, dist)
                     qgis_matched[qgis_name] = (excel_name, dist)
 
-                # Remove spatial-matched poles from introuvable lists
-                for fichier in list(dicoPotBt_Excel_Introuvable.keys()):
+                for fichier in list(dicoPotBt_AResoudre.keys()):
                     remaining = []
-                    for pot_name in dicoPotBt_Excel_Introuvable[fichier]:
+                    for pot_name in dicoPotBt_AResoudre[fichier]:
                         if pot_name in excel_matched:
                             qgis_name, dist = excel_matched[pot_name]
                             comptabilite += 1
@@ -914,11 +900,10 @@ class Comac:
                         else:
                             remaining.append(pot_name)
                     if remaining:
-                        dicoPotBt_Excel_Introuvable[fichier] = remaining
+                        dicoPotBt_AResoudre[fichier] = remaining
                     else:
-                        del dicoPotBt_Excel_Introuvable[fichier]
+                        del dicoPotBt_AResoudre[fichier]
 
-                # Remove spatial-matched QGIS poles from introuvable dict
                 for etude in list(dicoEtudeComacPoteauQgis.keys()):
                     remaining = [p for p in dicoEtudeComacPoteauQgis[etude]
                                  if p not in qgis_matched]
@@ -927,33 +912,34 @@ class Comac:
                     else:
                         del dicoEtudeComacPoteauQgis[etude]
 
-                QgsMessageLog.logMessage(
-                    f"[COMAC] Fallback spatial: {len(spatial_matches)} correspondances "
-                    f"dans un rayon de {spatial_tolerance}m",
-                    "PoleAerien", Qgis.Info
-                )
+
+        for fichier, appuis in dicoPotBt_AResoudre.items():
+            if appuis:
+                dicoPotBt_NonResolu[fichier] = appuis
 
         # Resume comparaison
         nb_match = len(dicoPotBtExistants)
         nb_spatial = len(dicoPotBt_SpatialMatch)
         nb_absent = sum(len(v) for v in dicoPotBt_Excel_Introuvable.values())
         nb_hors_p = sum(len(v) for v in dicoPotBt_HorsPerimetre.values())
+        nb_non_resolu = sum(len(v) for v in dicoPotBt_NonResolu.values())
         nb_restant_qgis = sum(len(v) for v in dicoEtudeComacPoteauQgis.values())
         QgsMessageLog.logMessage(
             f"[COMAC] Comparaison: {nb_match} correspondances par nom, "
             f"{nb_spatial} correspondances spatiales (<{spatial_tolerance}m), "
+            f"{nb_non_resolu} non resolus (commune/code ambigu), "
             f"{nb_hors_p} hors perimetre etude, "
             f"{nb_absent} absents couche SRO, "
             f"{nb_restant_qgis} restants QGIS non trouves dans Excel",
             "PoleAerien", Qgis.Info
         )
-        if dicoPotBt_HorsPerimetre:
-            sample_hp = []
-            for fichier, pots in list(dicoPotBt_HorsPerimetre.items())[:2]:
-                sample_hp.append(f"{fichier}: {pots[:5]}")
+        if dicoPotBt_NonResolu:
+            sample_nr = []
+            for fichier, pots in list(dicoPotBt_NonResolu.items())[:2]:
+                sample_nr.append(f"{fichier}: {pots[:5]}")
             QgsMessageLog.logMessage(
-                f"[COMAC] Hors perimetre etude (present dans couche SRO, hors zones etude_comac): {sample_hp}",
-                "PoleAerien", Qgis.Info
+                f"[COMAC] Non resolus commune/code: {sample_nr}",
+                "PoleAerien", Qgis.Warning
             )
         if dicoPotBt_Excel_Introuvable:
             sample_abs = []
@@ -964,7 +950,7 @@ class Comac:
                 "PoleAerien", Qgis.Warning
             )
 
-        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre, dicoPotBt_SpatialMatch
+        return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre, dicoPotBt_SpatialMatch, dicoPotBt_NonResolu
 
 
 
@@ -1030,6 +1016,8 @@ class Comac:
 
         dicoPotBt_HorsPerimetre = resultatsFinaux[3] if len(resultatsFinaux) > 3 else {}
         dicoPotBt_SpatialMatch = resultatsFinaux[4] if len(resultatsFinaux) > 4 else {}
+
+        dicoPotBt_NonResolu = resultatsFinaux[5] if len(resultatsFinaux) > 5 else {}
 
 
 
@@ -1122,6 +1110,8 @@ class Comac:
 
         blue_color = openpyxl.styles.colors.Color(rgb='6baed6')
 
+        amber_color = openpyxl.styles.colors.Color(rgb='ffd966')
+
         for fichierExcels, listesDesAppuis in dicoPotBt_HorsPerimetre.items():
 
             for inf_num_excel in listesDesAppuis:
@@ -1133,6 +1123,19 @@ class Comac:
                 feuille.cell(row=my_ligne, column=4, value=fichierExcels).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=blue_color)
 
                 feuille.cell(row=my_ligne, column=5, value="HORS PERIMETRE - existe dans la zone SRO mais hors zone etude COMAC").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=blue_color)
+
+
+        for fichierExcels, listesDesAppuis in dicoPotBt_NonResolu.items():
+
+            for inf_num_excel in listesDesAppuis:
+
+                my_ligne += 1
+
+                feuille.cell(row=my_ligne, column=3, value=inf_num_excel).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=amber_color)
+
+                feuille.cell(row=my_ligne, column=4, value=fichierExcels).fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=amber_color)
+
+                feuille.cell(row=my_ligne, column=5, value="NON RESOLU - code present mais ambigu entre plusieurs communes ou non leve par le spatial").fill = openpyxl.styles.PatternFill(fill_type='solid', fgColor=amber_color)
 
 
         ####################### QGIS INTROUVABLE #######################################
@@ -1518,7 +1521,23 @@ class Comac:
 
 
 
-        fichierXlsx.save(filename=nom)
+        try:
+
+            fichierXlsx.save(filename=nom)
+
+        except (PermissionError, OSError) as e:
+
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(
+
+                f"[COMAC] Impossible d'ecrire le rapport: {nom} — {e}",
+
+                "PoleAerien", Qgis.Critical
+
+            )
+
+            raise
 
 
 
@@ -1541,6 +1560,18 @@ class Comac:
             nom_fichier: Chemin du fichier Excel à créer
 
         """
+
+        if not etudes:
+
+            etudes = {}
+
+        if anomalies is None:
+
+            anomalies = []
+
+        if supports_pm is None:
+
+            supports_pm = []
 
         fichierXlsx = openpyxl.workbook.Workbook()
 
@@ -1592,7 +1623,7 @@ class Comac:
 
             feuille_resume.cell(row=ligne, column=5, value=nb_anomalies)
 
-            feuille_resume.cell(row=ligne, column=6, value=', '.join(etude.hypotheses))
+            feuille_resume.cell(row=ligne, column=6, value=', '.join(etude.hypotheses or []))
 
             
 
@@ -1756,7 +1787,7 @@ class Comac:
 
             for l in etude.lignes_tcf:
 
-                if l.capacite_fo == 0:
+                if not l.capacite_fo:
 
                     continue
 
@@ -1790,7 +1821,25 @@ class Comac:
 
         
 
-        fichierXlsx.save(filename=nom_fichier)
+        try:
+
+            fichierXlsx.save(filename=nom_fichier)
+
+        except (PermissionError, OSError) as e:
+
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(
+
+                f"[COMAC_PCM] Impossible d'ecrire le rapport: {nom_fichier} — {e}",
+
+                "PoleAerien", Qgis.Critical
+
+            )
+
+            raise
+
+
 
         return len(anomalies), len(supports_pm)
 

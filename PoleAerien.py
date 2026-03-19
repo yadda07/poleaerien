@@ -19,6 +19,7 @@ from .workflows.capft_workflow import CapFtWorkflow
 from .workflows.c6bd_workflow import C6BdWorkflow
 from .workflows.c6c3a_workflow import C6C3AWorkflow
 from .workflows.police_workflow import PoliceWorkflow
+from .workflows.gespot_workflow import GespotWorkflow
 from .dialog_v2 import PoleAerienDialogV2
 from .batch_runner import BatchRunner
 from .batch_orchestrator import BatchOrchestrator
@@ -51,6 +52,7 @@ class PoleAerien:
         self.c6bd_workflow = C6BdWorkflow()
         self.police_workflow = PoliceWorkflow()
         self.c6c3a_workflow = C6C3AWorkflow()
+        self.gespot_workflow = GespotWorkflow()
 
         # Dialog (lazy init in run())
         self._dlg = None
@@ -124,7 +126,8 @@ class PoleAerien:
                 self.maj_workflow, self.capft_workflow,
                 self.comac_workflow, self.c6bd_workflow,
                 self.police_workflow, self.c6c3a_workflow,
-                self.iface
+                self.iface,
+                gespot_wf=self.gespot_workflow,
             )
             self._dlg.help_requested.connect(self.openDocumentation)
         self._dlg.init_default_layers()

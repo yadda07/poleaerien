@@ -27,6 +27,7 @@ class BatchRunner(QObject):
         module_started(str, int, int): module_key, current_index, total
         module_finished(str, bool, str): module_key, success, message
         batch_progress(int): overall percent 0-100
+        modules_finished(dict): {module_key: {'success': bool, 'message': str}}
         batch_finished(dict): {module_key: {'success': bool, 'message': str}}
         batch_cancelled(): emitted on user cancel
         log_message(str, str): message, level ('info'|'success'|'warning'|'error')
@@ -35,6 +36,7 @@ class BatchRunner(QObject):
     module_started = pyqtSignal(str, int, int)
     module_finished = pyqtSignal(str, bool, str)
     batch_progress = pyqtSignal(int)
+    modules_finished = pyqtSignal(dict)
     batch_finished = pyqtSignal(dict)
     batch_cancelled = pyqtSignal()
     log_message = pyqtSignal(str, str)
@@ -56,6 +58,9 @@ class BatchRunner(QObject):
     @property
     def is_running(self) -> bool:
         return self._running
+
+    def finalize_batch(self):
+        self.batch_finished.emit(dict(self._results))
 
     def set_launcher(self, module_key: str, launcher_fn):
         """Register a launcher function for a module.
@@ -188,4 +193,4 @@ class BatchRunner(QObject):
             )
 
         self.batch_progress.emit(100)
-        self.batch_finished.emit(dict(self._results))
+        self.modules_finished.emit(dict(self._results))

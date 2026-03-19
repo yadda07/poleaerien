@@ -138,8 +138,14 @@ class C6_vs_Bd:
         Returns:
             tuple: (df_in, df_out)
         """
-        infra_pt_pot = QgsProject.instance().mapLayersByName(table_poteau)[0]
-        etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
+        _lyrs_pot = QgsProject.instance().mapLayersByName(table_poteau)
+        if not _lyrs_pot:
+            raise ValueError(f"[C6_vs_Bd] Couche '{table_poteau}' introuvable dans le projet QGIS")
+        infra_pt_pot = _lyrs_pot[0]
+        _lyrs_cap = QgsProject.instance().mapLayersByName(table_etude_cap_ft)
+        if not _lyrs_cap:
+            raise ValueError(f"[C6_vs_Bd] Couche '{table_etude_cap_ft}' introuvable dans le projet QGIS")
+        etude_cap_ft = _lyrs_cap[0]
 
         # Index spatial des polygones CAP FT (une seule construction)
         cap_ft_index = QgsSpatialIndex(etude_cap_ft.getFeatures())
@@ -213,43 +219,6 @@ class C6_vs_Bd:
         )
         return df_in, df_out
 
-    def liste_poteau_cap_ft(self, table_poteau, table_etude_cap_ft, colonne_cap_ft):
-        """DEPRECATED: Utiliser extraire_poteaux_in_out() pour eviter double extraction."""
-        df_in, _ = self.extraire_poteaux_in_out(table_poteau, table_etude_cap_ft, colonne_cap_ft)
-        return df_in
-
-    def liste_poteaux_ft_out(self, table_poteau, table_etude_cap_ft):
-        """DEPRECATED: Utiliser extraire_poteaux_in_out() pour eviter double extraction."""
-        QgsMessageLog.logMessage(
-            "[C6_vs_Bd] liste_poteaux_ft_out() appelée seule - utiliser extraire_poteaux_in_out()",
-            "PoleAerien", Qgis.Warning
-        )
-        # Cannot call unified without colonne_cap_ft, fallback to basic OUT detection
-        infra_pt_pot = QgsProject.instance().mapLayersByName(table_poteau)[0]
-        etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
-
-        cap_ft_index = QgsSpatialIndex(etude_cap_ft.getFeatures())
-        cap_ft_geoms = {f.id(): f.geometry() for f in etude_cap_ft.getFeatures()}
-
-        poteaux_out = []
-        requete = QgsExpression("inf_type LIKE 'POT-FT'")
-        request = QgsFeatureRequest(requete)
-
-        for feat_pot in infra_pt_pot.getFeatures(request):
-            pt_geom = feat_pot.geometry()
-            if not pt_geom or pt_geom.isEmpty():
-                continue
-            candidate_ids = cap_ft_index.intersects(pt_geom.boundingBox())
-            is_covered = any(cap_ft_geoms[cid].contains(pt_geom) for cid in candidate_ids)
-            if not is_covered:
-                inf_num = feat_pot["inf_num"]
-                etat = "" if feat_pot["etat"] == NULL else str(feat_pot["etat"])
-                num_appui = normalize_appui_num(inf_num)
-                if num_appui:
-                    poteaux_out.append({'N° appui': num_appui, 'inf_num': inf_num, 'etat': etat})
-
-        return pd.DataFrame(poteaux_out)
-
     def verifier_etudes_c6(self, table_etude_cap_ft, colonne_cap_ft, repertoire_c6):
         """
         Vérifie que chaque nom d'étude dans CAP FT a un fichier Excel correspondant.
@@ -267,7 +236,10 @@ class C6_vs_Bd:
                 'c6_sans_etude': list des fichiers C6 sans étude correspondante
             }
         """
-        etude_cap_ft = QgsProject.instance().mapLayersByName(table_etude_cap_ft)[0]
+        _lyrs_cap2 = QgsProject.instance().mapLayersByName(table_etude_cap_ft)
+        if not _lyrs_cap2:
+            raise ValueError(f"[C6_vs_Bd] Couche '{table_etude_cap_ft}' introuvable dans le projet QGIS")
+        etude_cap_ft = _lyrs_cap2[0]
 
         # Récupérer les noms d'études uniques dans CAP FT
         etudes_capft = set()

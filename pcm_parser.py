@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
 try:
-    from .core_utils import safe_float, parse_bool, get_xml_text, get_xml_float
+    from .core_utils import safe_float, safe_int, parse_bool, get_xml_text, get_xml_float
 except ImportError:
-    from core_utils import safe_float, parse_bool, get_xml_text, get_xml_float
+    from core_utils import safe_float, safe_int, parse_bool, get_xml_text, get_xml_float
 
 try:
     from qgis.core import QgsMessageLog, Qgis
@@ -46,7 +46,7 @@ except ImportError as e:
         raise ImportError(f"security_rules module not found: {e}") from e
 
 
-def _log_message(msg: str, tag: str = "PCM_PARSER", level: int = 0):
+def _log_message(msg: str, tag: str = "PoleAerien", level: int = 0):
     """Log avec fallback print si hors QGIS"""
     if HAS_QGIS:
         qgis_level = Qgis.Info if level == 0 else (Qgis.Warning if level == 1 else Qgis.Critical)
@@ -75,6 +75,27 @@ class Support:
     x: float = 0.0
     y: float = 0.0
     etat: str = ""
+    orientation: float = 0.0
+    facade: bool = False
+    surimplantation: bool = False
+    a_poser: bool = False
+    commentaire: str = ""
+    annee: str = ""
+    destination_desserte: int = 0
+    branchements_bt: int = 0
+    opt_boitier_fibre: bool = False
+    opt_boitier_cuivre: bool = False
+    opt_boitier_coaxial: bool = False
+    ras_bt: bool = False
+    ras_ft: bool = False
+    ras_fo: bool = False
+    opt_malt_bt: bool = False
+    reservation_ep: bool = False
+    presence_ep: bool = False
+    hauteur_ep: float = 0.0
+    nb_raccordements_fibre: int = 0
+    nb_raccordements_cuivre: int = 0
+    nb_raccordements_coaxial: int = 0
 
 
 @dataclass
@@ -84,9 +105,22 @@ class LigneTCF:
     capacite_fo: int = 0
     a_poser: bool = False
     supports: List[str] = field(default_factory=list)
-    traverses: List[int] = field(default_factory=list)  # 1=existante, 2=à poser
+    traverses: List[int] = field(default_factory=list)  # 1=existante, 2=à poser, 3=reutilisee
     portees: List[float] = field(default_factory=list)
     portee_max: float = 0.0
+    tension: float = 0.0
+    porteq: float = 0.0
+    gis_uid: int = 0
+    parallele_bt: bool = False
+
+
+@dataclass
+class ArmementBT:
+    """Armement sur un support pour une ligne BT."""
+    support: str = ""
+    armement: int = 0
+    nom_armement: str = ""
+    decal_accro: int = 0
 
 
 @dataclass 
@@ -95,6 +129,12 @@ class LigneBT:
     conducteur: str = ""
     supports: List[str] = field(default_factory=list)
     portees: List[float] = field(default_factory=list)
+    type_conducteur: str = ""
+    parametre: int = 0
+    porteq: float = 0.0
+    a_poser: bool = False
+    gis_uid: int = 0
+    armements: List[ArmementBT] = field(default_factory=list)
 
 
 @dataclass
@@ -141,6 +181,12 @@ class EtudePCM:
     num_etude: str = ""
     version: str = ""
     commune: str = ""
+    insee: str = ""
+    rue: str = ""
+    operateur: str = ""
+    dist_energie: str = ""
+    date_enregistrement: str = ""
+    description: str = ""
     hypotheses: List[str] = field(default_factory=list)
     supports: Dict[str, Support] = field(default_factory=dict)
     lignes_tcf: List[LigneTCF] = field(default_factory=list)
@@ -174,7 +220,7 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
         EtudePCM ou None si erreur
     """
     if not os.path.exists(filepath):
-        _log_message(f"Fichier introuvable: {filepath}", "PCM_PARSER", 1)
+        _log_message(f"Fichier introuvable: {filepath}", "PoleAerien", 1)
         return None
     
     etude = EtudePCM()
@@ -188,6 +234,12 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
         etude.num_etude = get_xml_text(root, 'NumEtude')
         etude.version = get_xml_text(root, 'Version')
         etude.commune = get_xml_text(root, 'Commune')
+        etude.insee = get_xml_text(root, 'Insee')
+        etude.rue = get_xml_text(root, 'Rue')
+        etude.operateur = get_xml_text(root, 'Operateur')
+        etude.dist_energie = get_xml_text(root, 'DistEnergie')
+        etude.date_enregistrement = get_xml_text(root, 'DateEnregistrement')
+        etude.description = get_xml_text(root, 'Description')
         
         # Hypothèses climatiques
         hypotheses_elem = root.find('Hypotheses')
@@ -210,10 +262,10 @@ def parse_pcm_file(filepath: str) -> Optional[EtudePCM]:
 
     except ET.ParseError as e:
         etude.erreurs_parse.append(f"Erreur XML: {e}")
-        _log_message(f"Erreur parse {filepath}: {e}", "PCM_PARSER", 2)
+        _log_message(f"Erreur parse {filepath}: {e}", "PoleAerien", 2)
     except Exception as e:
         etude.erreurs_parse.append(f"Erreur: {e}")
-        _log_message(f"Erreur {filepath}: {e}", "PCM_PARSER", 2)
+        _log_message(f"Erreur {filepath}: {e}", "PoleAerien", 2)
     
     return etude
 
@@ -242,7 +294,28 @@ def _parse_supports(root: ET.Element, etude: EtudePCM):
             illisible=_get_bool(supp_elem, 'Illisible'),
             x=get_xml_float(supp_elem, 'X'),
             y=get_xml_float(supp_elem, 'Y'),
-            etat=get_xml_text(supp_elem, 'Etat')
+            etat=get_xml_text(supp_elem, 'Etat'),
+            orientation=get_xml_float(supp_elem, 'Orientation'),
+            facade=_get_bool(supp_elem, 'Facade'),
+            surimplantation=_get_bool(supp_elem, 'Surimplantation'),
+            a_poser=_get_bool(supp_elem, 'APoser'),
+            commentaire=get_xml_text(supp_elem, 'Commentaire'),
+            annee=get_xml_text(supp_elem, 'Annee'),
+            destination_desserte=safe_int(get_xml_text(supp_elem, 'DestinationDesserte')),
+            branchements_bt=safe_int(get_xml_text(supp_elem, 'BranchementsBT')),
+            opt_boitier_fibre=_get_bool(supp_elem, 'optBoitierFibre'),
+            opt_boitier_cuivre=_get_bool(supp_elem, 'optBoitierCuivre'),
+            opt_boitier_coaxial=_get_bool(supp_elem, 'optBoitierCoaxial'),
+            ras_bt=_get_bool(supp_elem, 'RASBT'),
+            ras_ft=_get_bool(supp_elem, 'RASFT'),
+            ras_fo=_get_bool(supp_elem, 'RASFO'),
+            opt_malt_bt=_get_bool(supp_elem, 'optMALTBT'),
+            reservation_ep=_get_bool(supp_elem, 'ReservationEP'),
+            presence_ep=_get_bool(supp_elem, 'PresenceEP'),
+            hauteur_ep=get_xml_float(supp_elem, 'HauteurEP'),
+            nb_raccordements_fibre=safe_int(get_xml_text(supp_elem, 'NbRaccordementsFibre')),
+            nb_raccordements_cuivre=safe_int(get_xml_text(supp_elem, 'NbRaccordementsCuivre')),
+            nb_raccordements_coaxial=safe_int(get_xml_text(supp_elem, 'NbRaccordementsCoaxial')),
         )
         etude.supports[nom] = support
 
@@ -272,19 +345,21 @@ def _parse_lignes_tcf(root: ET.Element, etude: EtudePCM):
         ligne = LigneTCF(
             cable=cable,
             capacite_fo=capacite,
-            a_poser=_get_bool(ligne_elem, 'APoser')
+            a_poser=_get_bool(ligne_elem, 'APoser'),
+            tension=get_xml_float(ligne_elem, 'Tension'),
+            porteq=get_xml_float(ligne_elem, 'Porteq'),
+            gis_uid=safe_int(get_xml_text(ligne_elem, 'GIS_UID')),
+            parallele_bt=_get_bool(ligne_elem, 'optParalleleBT'),
         )
         
         # Supports et traverses
         supports_elem = ligne_elem.find('Supports')
         if supports_elem is not None:
-            current_support = None
             for child in supports_elem:
                 if child.tag == 'Support' and child.text:
-                    current_support = child.text.strip()
-                    ligne.supports.append(current_support)
+                    ligne.supports.append(child.text.strip())
                 elif child.tag == 'Traverse' and child.text:
-                    ligne.traverses.append(int(child.text.strip()))
+                    ligne.traverses.append(safe_int(child.text))
         
         # Portées
         portees_elem = ligne_elem.find('Portees')
@@ -308,15 +383,30 @@ def _parse_lignes_bt(root: ET.Element, etude: EtudePCM):
     
     for ligne_elem in bt_elem.findall('LigneBT'):
         ligne = LigneBT(
-            conducteur=get_xml_text(ligne_elem, 'Conducteur')
+            conducteur=get_xml_text(ligne_elem, 'Conducteur'),
+            type_conducteur=get_xml_text(ligne_elem, 'TypeConducteur'),
+            parametre=safe_int(get_xml_text(ligne_elem, 'Parametre')),
+            porteq=get_xml_float(ligne_elem, 'Porteq'),
+            a_poser=_get_bool(ligne_elem, 'APoser'),
+            gis_uid=safe_int(get_xml_text(ligne_elem, 'GIS_UID')),
         )
         
-        # Supports
+        # Supports + armements (entrelaces: Support, Armement, NomArmement, DecalAccro)
         supports_elem = ligne_elem.find('Supports')
         if supports_elem is not None:
+            current_arm = None
             for child in supports_elem:
                 if child.tag == 'Support' and child.text:
-                    ligne.supports.append(child.text.strip())
+                    support_name = child.text.strip()
+                    ligne.supports.append(support_name)
+                    current_arm = ArmementBT(support=support_name)
+                    ligne.armements.append(current_arm)
+                elif current_arm is not None and child.tag == 'Armement' and child.text:
+                    current_arm.armement = safe_int(child.text)
+                elif current_arm is not None and child.tag == 'NomArmement' and child.text:
+                    current_arm.nom_armement = child.text.strip()
+                elif current_arm is not None and child.tag == 'DecalAccro' and child.text:
+                    current_arm.decal_accro = safe_int(child.text)
         
         # Portées
         portees_elem = ligne_elem.find('Portees')
@@ -374,7 +464,7 @@ def extraire_portees_par_cable(
                 _log_message(
                     f"Etude {nom_etude}: cable {ligne.cable} avec {len(ligne.supports)} "
                     f"support(s) et {len(ligne.portees)} portee(s) -- ignore",
-                    "PCM_PARSER", 1
+                    "PoleAerien", 1
                 )
                 continue
             nb_portees = min(len(ligne.portees), len(ligne.supports) - 1)

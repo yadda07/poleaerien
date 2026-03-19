@@ -104,6 +104,9 @@ class DetectionResult:
     # SRO extracted from t_zsro.shp (zs_refpm field) inside GraceTHD directory
     gracethd_sro: str = ''
 
+    # GESPOT directory (CSV files for GESPOT vs C6 comparison)
+    gespot_dir: str = ''
+
     # Diagnostics: hints for missing resources
     # List of (resource_label, hint_message) for resources NOT found
     diagnostics: List[tuple] = field(default_factory=list)
@@ -140,6 +143,10 @@ class DetectionResult:
     def has_c3a(self) -> bool:
         return bool(self.c3a_file) and os.path.isfile(self.c3a_file)
 
+    @property
+    def has_gespot(self) -> bool:
+        return bool(self.gespot_dir) and os.path.isdir(self.gespot_dir)
+
     def detected_modules(self) -> List[str]:
         """Return list of detected module keys."""
         modules = []
@@ -154,6 +161,8 @@ class DetectionResult:
             modules.append('police_c6')
         if (self.has_c6 or self.has_c6_annexe) and (self.has_c7 or self.has_c3a):
             modules.append('c6c3a')
+        if self.has_gespot and self.has_c6:
+            modules.append('gespot_c6')
         return modules
 
     def summary_lines(self) -> List[tuple]:
@@ -167,6 +176,7 @@ class DetectionResult:
             ('C7', self.c7_file, self.has_c7),
             ('C3A', self.c3a_file, self.has_c3a),
             ('GraceTHD', self.gracethd_dir, self.has_gracethd),
+            ('GESPOT', self.gespot_dir, self.has_gespot),
         ]
 
     def get_diagnostic(self, resource_label: str) -> str:
@@ -204,6 +214,11 @@ _COMAC_DIR_PATTERNS = [
 _C6_DIR_PATTERNS = [
     r'^C6$',
     r'^Annexe[\s_-]*C6$',
+]
+
+_GESPOT_DIR_PATTERNS = [
+    r'^GSPOT$',
+    r'^GESPOT$',
 ]
 
 # GraceTHD signature files: any directory containing these IS a GraceTHD dir
@@ -686,6 +701,11 @@ def detect_project(project_root: str) -> DetectionResult:
             c3a_f = _find_excel_in_dir(c3a_dir)
             if c3a_f:
                 result.c3a_file = c3a_f
+
+    # GESPOT directory — name-based detection
+    gespot = _find_dir(project_root, _GESPOT_DIR_PATTERNS)
+    if gespot:
+        result.gespot_dir = gespot
 
     # GraceTHD directory (for Axione SROs) — content-based detection
     gracethd = _find_gracethd_dir(project_root)

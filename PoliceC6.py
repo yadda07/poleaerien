@@ -20,33 +20,19 @@ from qgis.core import (
     QgsExpression,
     QgsFeatureRequest,
     QgsVectorLayer,
-    QgsFeature,
-    QgsGeometry,
-    QgsPointXY,
-    QgsCoordinateReferenceSystem,
     QgsMessageLog,
-    QgsSpatialIndex,
-    QgsWkbTypes,
     NULL,
-    QgsRectangle
 )
 from qgis.PyQt.QtWidgets import QApplication
 
 from .qgis_utils import (
     remove_group,
     layer_group_error,
-    insert_layer_in_group,
-    get_layer_safe,
-    validate_same_crs,
     normalize_appui_num,
 )
-from .dataclasses_results import (
-    PoliceC6Result, CableCapaciteResult, BoitierValidationResult,
-    EtudeC6Result, ParcourAutoC6Result
-)
-from .db_connection import DatabaseConnection, CableSegment, extract_sro_from_layer, get_shared_connection
+from .db_connection import extract_sro_from_layer, get_shared_connection
 from .cable_analyzer import CableAnalyzer, AppuiChargeResult, extraire_appuis_from_layer
-from .security_rules import get_capacite_fo_from_code, get_capacites_possibles
+from .security_rules import get_capacites_possibles
 
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
@@ -54,7 +40,6 @@ import os
 import re
 import warnings
 import openpyxl
-import pandas as pd
 
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
@@ -205,7 +190,7 @@ class PoliceC6:
             # 1. Charger les câbles découpés depuis PostgreSQL
             QgsMessageLog.logMessage(
                 f"Chargement câbles découpés pour SRO: {sro}",
-                "POLICE_C6", Qgis.Info
+                "PoleAerien", Qgis.Info
             )
             
             if not self.db_connection.connection:
@@ -258,7 +243,7 @@ class PoliceC6:
             
             QgsMessageLog.logMessage(
                 f"Analyse terminée: {result.appuis_ok} OK, {result.appuis_anomalie} anomalies",
-                "POLICE_C6", Qgis.Info
+                "PoleAerien", Qgis.Info
             )
             
             return result
@@ -270,7 +255,7 @@ class PoliceC6:
             result.erreur = str(e)
             QgsMessageLog.logMessage(
                 f"Erreur analyse charge: {e}",
-                "POLICE_C6", Qgis.Warning
+                "PoleAerien", Qgis.Warning
             )
             return result
 
@@ -302,7 +287,7 @@ class PoliceC6:
         if not os.path.exists(chemin_c6):
             QgsMessageLog.logMessage(
                 f"Fichier C6 introuvable: {chemin_c6}",
-                "POLICE_C6", Qgis.Warning
+                "PoleAerien", Qgis.Warning
             )
             return donnees_par_appui, liste_brute, boitier_par_appui
         
@@ -377,7 +362,7 @@ class PoliceC6:
                         debug_rows.append(f"  Row{r_idx}: {[str(c or '')[:30] for c in r[:5]]}")
                 QgsMessageLog.logMessage(
                     f"En-têtes C6 non trouvées. Premières lignes:\n" + "\n".join(debug_rows),
-                    "POLICE_C6", Qgis.Warning
+                    "PoleAerien", Qgis.Warning
                 )
                 wb.close()
                 return donnees_par_appui, liste_brute, boitier_par_appui
@@ -451,7 +436,7 @@ class PoliceC6:
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur lecture C6: {e}",
-                "POLICE_C6", Qgis.Warning
+                "PoleAerien", Qgis.Warning
             )
             return donnees_par_appui, liste_brute, boitier_par_appui
 

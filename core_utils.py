@@ -5,7 +5,6 @@ Fonctions utilitaires pures (sans dépendance QGIS) pour le plugin PoleAerien.
 Sécurisées pour l'utilisation dans les threads workers.
 """
 
-import re
 import xml.etree.ElementTree as ET
 
 
@@ -95,6 +94,40 @@ def parse_bool(value: str) -> bool:
     return str(value).strip() == '1'
 
 
+def normaliser_boitier(raw) -> str:
+    """Normalise valeur boîtier PCM/COMAC vers 'oui' ou 'non'.
+
+    Accepte: 'oui', 'non', 1, 0, 1.0, 0.0, True, False,
+             '1', '0', 'true', 'false', 'yes', 'no', 'o', 'n'.
+
+    Args:
+        raw: Valeur brute depuis Excel (str, int, float, bool) ou None.
+
+    Returns:
+        'oui', 'non', ou '' si non reconnu.
+    """
+    if raw is None:
+        return ''
+    if isinstance(raw, bool):
+        return 'oui' if raw else 'non'
+    if isinstance(raw, (int, float)):
+        try:
+            val_int = int(raw)
+            if val_int == 1:
+                return 'oui'
+            if val_int == 0:
+                return 'non'
+        except (ValueError, TypeError):
+            pass
+        return ''
+    s = str(raw).strip().lower()
+    if s in ('oui', '1', 'true', 'yes', 'o'):
+        return 'oui'
+    if s in ('non', '0', 'false', 'no', 'n'):
+        return 'non'
+    return ''
+
+
 # =============================================================================
 # EXPORT PATH HELPER
 # =============================================================================
@@ -176,28 +209,8 @@ def normalize_appui_num(inf_num, strip_e_prefix=False, strip_bt_prefix=False,
             return (s_clean.lstrip("0") or "0") + commune_suffix
         
         return s + commune_suffix
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return ""
-
-
-def temps_ecoule(seconde):
-    """Formate une durée en secondes en format lisible.
-    
-    Args:
-        seconde: Nombre de secondes
-        
-    Returns:
-        Chaîne formatée (ex: "2mn : 30sec")
-    """
-    seconds = seconde % (24 * 3600)
-    hour = int(seconds // 3600)
-    seconds %= 3600
-    minutes = int(seconds // 60)
-    seconds %= 60
-
-    if hour > 0:
-        return f"{hour}h: {int(minutes)}mn : {int(seconds)}sec"
-    return f"{minutes}mn : {int(seconds)}sec"
 
 
 # =============================================================================
@@ -230,23 +243,6 @@ def is_plugin_output_file(filename):
     if any(kw in name for kw in _OUTPUT_KEYWORDS):
         return True
     return False
-
-
-def find_default_layer_index(layer_list, pattern):
-    """Trouve l'index d'une couche par défaut selon un pattern regex.
-    
-    Args:
-        layer_list: Liste des noms de couches
-        pattern: Pattern regex à rechercher
-        
-    Returns:
-        Index de la couche correspondante ou 0
-    """
-    regexp = re.compile(pattern, re.IGNORECASE)
-    for i, valeur in enumerate(layer_list):
-        if valeur and regexp.search(valeur):
-            return i
-    return 0
 
 
 # =============================================================================

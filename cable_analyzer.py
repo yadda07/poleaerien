@@ -8,10 +8,20 @@ from typing import List, Dict, Optional, Tuple
 import re
 from qgis.core import (
     QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY,
-    QgsMessageLog, Qgis, QgsSpatialIndex, QgsFeatureRequest
+    QgsMessageLog, Qgis, QgsSpatialIndex, QgsRectangle
 )
 
 from .db_connection import CableSegment
+
+
+def _safe_attr_text(feature, idx):
+    if idx < 0:
+        return ''
+    value = feature[idx]
+    if value is None:
+        return ''
+    text = str(value).strip()
+    return '' if not text or text.upper() == 'NULL' else text
 
 
 @dataclass
@@ -19,12 +29,10 @@ class AppuiChargeResult:
     """Résultat de l'analyse de charge pour un appui"""
     num_appui: str
     geom: QgsGeometry
-    
     # Données BDD (câbles découpés)
     nb_cables_bdd: int = 0
     capacite_totale_bdd: int = 0
     cables_details: List[CableSegment] = field(default_factory=list)
-    
     # Données C6 (Annexe C6)
     nb_cables_c6: int = 0
     capacite_totale_c6: int = 0
@@ -307,27 +315,27 @@ def extraire_appuis_from_layer(layer: QgsVectorLayer, field_num_appui: str = 'nu
         return appuis
     
     from .core_utils import normalize_appui_num
+    idx_inf_num = layer.fields().indexFromName('inf_num')
+    idx_inf_type = layer.fields().indexFromName('inf_type')
+    idx_etat = layer.fields().indexFromName('etat')
+    idx_noe_codext = layer.fields().indexFromName('noe_codext')
     
     for feature in layer.getFeatures():
         num_appui = feature[actual_field]
         if num_appui:
             num_norm = normalize_appui_num(num_appui, keep_commune=keep_commune)
+            inf_num_norm = normalize_appui_num(_safe_attr_text(feature, idx_inf_num), keep_commune=keep_commune)
             if num_norm:
                 appuis.append({
                     'num_appui': num_norm,
+                    'inf_num': inf_num_norm or num_norm,
                     'geom': feature.geometry(),
-                    'feature_id': feature.id()
+                    'feature_id': feature.id(),
+                    'inf_type': _safe_attr_text(feature, idx_inf_type),
+                    'etat': _safe_attr_text(feature, idx_etat),
+                    'noe_codext': _safe_attr_text(feature, idx_noe_codext),
                 })
     
-    if appuis and keep_commune:
-        sample_keys = [a['num_appui'] for a in appuis[:10]]
-        has_slash = sum(1 for a in appuis if '/' in a['num_appui'])
-        QgsMessageLog.logMessage(
-            f"extraire_appuis_from_layer (keep_commune=True): {len(appuis)} appuis, "
-            f"{has_slash} avec /commune, sample: {sample_keys}",
-            "PoleAerien", Qgis.Info
-        )
-
     return appuis
 
 
@@ -352,8 +360,12 @@ def extraire_appuis_wkb(layer: QgsVectorLayer, field_num_appui: str = 'num_appui
         geom = appui.get('geom')
         appuis_wkb.append({
             'num_appui': appui.get('num_appui', ''),
+            'inf_num': appui.get('inf_num', ''),
             'feature_id': appui.get('feature_id'),
-            'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None
+            'geom_wkb': geom.asWkb().data() if geom and not geom.isNull() else None,
+            'inf_type': appui.get('inf_type', ''),
+            'etat': appui.get('etat', ''),
+            'noe_codext': appui.get('noe_codext', ''),
         })
     return appuis_wkb
 
@@ -426,7 +438,8 @@ def compter_cables_par_appui(
     tolerance: float = 0.5,
     group_by_gid: bool = False,
     attaches_parsed: Optional[List[Dict]] = None,
-    match_mode: str = 'endpoint'
+    match_mode: str = 'endpoint',
+    cab_types: Optional[set] = None
 ) -> Dict[str, Dict]:
     """
     Compte les câbles qui touchent chaque appui.
@@ -445,6 +458,8 @@ def compter_cables_par_appui(
         match_mode: 'endpoint' = match extremites seulement (fddcpi2: segments
             decoupes aux appuis). 'line' = match distance appui-to-ligne entiere
             (GraceTHD: cables non decoupes, route complete BPE-BPE).
+        cab_types: Set de cab_type acceptes (ex: {'CDI'} ou {'CDI','TRA','RAC'}).
+            Si None, accepte tous les types passes (pas de filtre interne).
     
     Returns:
         Dict[num_appui, {'count': int, 'capacites': List[int], 'cables': List}]
@@ -460,11 +475,6 @@ def compter_cables_par_appui(
     
     use_line_distance = (match_mode == 'line')
     
-    QgsMessageLog.logMessage(
-        f"compter_cables_par_appui: {len(cables)} cables, {len(appuis)} appuis, "
-        f"tolerance={tolerance}m, mode={match_mode}, group_by_gid={group_by_gid}",
-        "PoleAerien", Qgis.Info
-    )
     
     # Creer index spatial des appuis + extensions via attaches
     appuis_by_id = {}
@@ -492,9 +502,28 @@ def compter_cables_par_appui(
             f"compter_cables_par_appui: {nb_appuis_no_geom}/{len(appuis_by_id)} appuis SANS geometrie",
             "PoleAerien", Qgis.Warning
         )
-    
+
+    # Index spatial O(log n): appuis + points d'extension via attaches
+    _appuis_idx = QgsSpatialIndex()
+    _pos_id_to_num: Dict[int, str] = {}
+    _pos_counter = 0
+    for _num, _appui_data in appuis_by_id.items():
+        _geom = _appui_data.get('geom')
+        if _geom and not _geom.isNull():
+            _feat = QgsFeature(_pos_counter)
+            _feat.setGeometry(_geom)
+            _appuis_idx.addFeature(_feat)
+            _pos_id_to_num[_pos_counter] = _num
+            _pos_counter += 1
+        for _ext_pt in extensions_by_appui.get(_num, []):
+            _feat = QgsFeature(_pos_counter)
+            _feat.setGeometry(_ext_pt)
+            _appuis_idx.addFeature(_feat)
+            _pos_id_to_num[_pos_counter] = _num
+            _pos_counter += 1
+
     # Pour chaque câble, trouver les appuis aux extrémités
-    # Garder câbles de distribution aériens + façade (cab_type='CDI' + posemode 1 ou 2)
+    # Filtre type + posemode aerien/facade
     nb_cables_skipped_type = 0
     nb_cables_skipped_geom = 0
     nb_cables_tested = 0
@@ -502,7 +531,10 @@ def compter_cables_par_appui(
     nb_endpoint_matches = 0
     nb_midline_matches = 0
     for cable in cables:
-        if getattr(cable, 'cab_type', '') != 'CDI' or getattr(cable, 'posemode', 0) not in (1, 2):
+        if cab_types is not None and getattr(cable, 'cab_type', '') not in cab_types:
+            nb_cables_skipped_type += 1
+            continue
+        if getattr(cable, 'posemode', 0) not in (1, 2):
             nb_cables_skipped_type += 1
             continue
         
@@ -529,13 +561,30 @@ def compter_cables_par_appui(
             
             start_point = QgsGeometry.fromPointXY(line[0])
             end_point = QgsGeometry.fromPointXY(line[-1])
-            
-            # Chercher l'appui le plus proche de chaque extrémité
-            for appui_num, appui_data in appuis_by_id.items():
+
+            # Candidats via index spatial: O(log n) au lieu de O(n)
+            if use_line_distance:
+                _search_bbox = cable_geom.boundingBox()
+                _search_bbox.grow(tolerance)
+            else:
+                _sx, _sy = line[0].x(), line[0].y()
+                _ex, _ey = line[-1].x(), line[-1].y()
+                _search_bbox = QgsRectangle(
+                    min(_sx, _ex) - tolerance, min(_sy, _ey) - tolerance,
+                    max(_sx, _ex) + tolerance, max(_sy, _ey) + tolerance
+                )
+            candidate_nums = {
+                _pos_id_to_num[_fid]
+                for _fid in _appuis_idx.intersects(_search_bbox)
+                if _fid in _pos_id_to_num
+            }
+
+            for appui_num in candidate_nums:
+                appui_data = appuis_by_id[appui_num]
                 appui_geom = appui_data.get('geom')
                 if not appui_geom:
                     continue
-                
+
                 if use_line_distance:
                     # GraceTHD: cable = route complete (non decoupe),
                     # verifier distance appui-to-ligne entiere
@@ -552,10 +601,10 @@ def compter_cables_par_appui(
                     # fddcpi2: cable = segment decoupe, extremites aux appuis
                     dist_start = appui_geom.distance(start_point)
                     dist_end = appui_geom.distance(end_point)
-                    
+
                     touches = (dist_start <= tolerance or dist_end <= tolerance)
                     at_endpoint = True  # fddcpi2: toujours par extremite
-                    
+
                     if not touches and appui_num in extensions_by_appui:
                         for ext_pt in extensions_by_appui[appui_num]:
                             if (ext_pt.distance(start_point) <= tolerance or
@@ -586,7 +635,9 @@ def compter_cables_par_appui(
                         'id': cable.gid_dc2,
                         'gid': getattr(cable, 'gid', 0),
                         'capacite': cable.cab_capa,
-                        'posemode': cable.posemode
+                        'posemode': cable.posemode,
+                        'cb_etiquet': getattr(cable, 'cb_etiquet', '') or '',
+                        'cab_type': getattr(cable, 'cab_type', '') or '',
                     }
                     for _ in range(n_efforts):
                         if cable.cab_capa:
@@ -608,7 +659,18 @@ def compter_cables_par_appui(
         f"{nb_with_cables}/{len(result)} appuis avec cables",
         "PoleAerien", Qgis.Info
     )
-    
+
+    if group_by_gid:
+        nb_gid_dedup = sum(
+            max(0, len(data.get('cables', [])) - len(data.get('_gids_seen', set())))
+            for data in result.values()
+        )
+        if nb_gid_dedup > 0:
+            QgsMessageLog.logMessage(
+                f"compter_cables_par_appui: {nb_gid_dedup} segments fusionnes par dedup GID",
+                "PoleAerien", Qgis.Info
+            )
+
     # Nettoyer les sets internes
     for data in result.values():
         data.pop('_gids_seen', None)
@@ -674,14 +736,16 @@ def comparer_source_cables(
             )
         if other_missing:
             QgsMessageLog.logMessage(
-                f"  {len(other_missing)} appui(s) NON-BT absents du {ref_label} (sample): {other_missing[:10]}",
+                f"  {len(other_missing)} appui(s) COMAC sans poteau dans {ref_label}: {other_missing[:5]}",
                 "PoleAerien", Qgis.Warning
             )
 
+    nb_logged_ecarts = 0
     for num_appui, refs_source in dico_cables_source.items():
         bdd_data = cables_par_appui.get(num_appui, {})
         nb_cables_bdd = bdd_data.get('count', 0)
 
+        refs_before_dedup = list(refs_source)
         if dedup_refs:
             seen = set()
             refs_unique = []
@@ -719,7 +783,10 @@ def comparer_source_cables(
 
             statut = "ECART" if (ecart_count or ecart_capa) else "OK"
 
-        comparaison.append({
+            if statut == 'ECART':
+                nb_logged_ecarts += 1
+
+        entry = {
             'num_appui': num_appui,
             f'nb_cables_{label_lower}': nb_cables_source,
             f'cables_{label_lower}': '; '.join(refs_source),
@@ -727,8 +794,14 @@ def comparer_source_cables(
             'nb_cables_bdd': nb_cables_bdd,
             'capas_bdd': capas_bdd,
             'statut': statut,
-            'message': ' | '.join(messages)
-        })
+            'message': ' | '.join(messages),
+        }
+        if statut == 'ECART':
+            entry['_refs_brut'] = list(refs_before_dedup)
+            entry['_refs_dedup'] = list(refs_source)
+            entry['_capas_possibles'] = capas_possibles
+            entry['_bdd_cables_raw'] = bdd_data.get('cables', [])
+        comparaison.append(entry)
 
     return comparaison
 
@@ -813,45 +886,64 @@ def verifier_boitiers(
         num = appui.get('num_appui', '')
         if num and appui.get('geom'):
             appuis_by_num[num] = appui['geom']
-    
+
+    # Index spatial sur les BPE: O(log n) matching au lieu de O(appuis × bpes)
+    _bpe_idx = QgsSpatialIndex()
+    _bpe_id_to_bpe: Dict[int, Dict] = {}
+    for _bi, _bpe in enumerate(bpe_geoms):
+        _bpe_geom = _bpe.get('geom')
+        if _bpe_geom and not _bpe_geom.isNull():
+            _bfeat = QgsFeature(_bi)
+            _bfeat.setGeometry(_bpe_geom)
+            _bpe_idx.addFeature(_bfeat)
+            _bpe_id_to_bpe[_bi] = _bpe
+
     for num_appui, type_boitier in boitier_source.items():
         appui_geom = appuis_by_num.get(num_appui)
-        
+
         entry = {
             'boitier_source': type_boitier,
             'bpe_trouve': False,
             'bpe_noe_type': '',
             'statut': ''
         }
-        
+
         if not appui_geom:
             entry['statut'] = 'ERREUR'
             entry['bpe_noe_type'] = 'appui non localisé'
             result[num_appui] = entry
             continue
-        
+
         bpe_proche = None
         dist_min = 999999
-        for bpe in bpe_geoms:
-            dist = appui_geom.distance(bpe['geom'])
+        _abbox = appui_geom.boundingBox()
+        _abbox.grow(tolerance)
+        for _bid in _bpe_idx.intersects(_abbox):
+            _bpe = _bpe_id_to_bpe[_bid]
+            dist = appui_geom.distance(_bpe['geom'])
             if dist < tolerance and dist < dist_min:
                 dist_min = dist
-                bpe_proche = bpe
-        
+                bpe_proche = _bpe
+
         if not bpe_proche and attaches_parsed:
             ext_points = _get_attache_extensions(appui_geom, attaches_parsed, tolerance)
             for ext_pt in ext_points:
-                for bpe in bpe_geoms:
-                    dist = ext_pt.distance(bpe['geom'])
+                _ebbox = ext_pt.boundingBox()
+                _ebbox.grow(tolerance)
+                for _bid in _bpe_idx.intersects(_ebbox):
+                    _bpe = _bpe_id_to_bpe[_bid]
+                    dist = ext_pt.distance(_bpe['geom'])
                     if dist < tolerance and dist < dist_min:
                         dist_min = dist
-                        bpe_proche = bpe
-        
+                        bpe_proche = _bpe
+
         if bpe_proche:
             entry['bpe_trouve'] = True
             entry['bpe_noe_type'] = bpe_proche['noe_type']
             types_attendus = _BOITIER_TYPE_COMPAT.get(type_boitier.upper())
-            if types_attendus and bpe_proche['noe_type'].upper() not in types_attendus:
+            if types_attendus is None:
+                entry['statut'] = 'OK'
+            elif bpe_proche['noe_type'].upper() not in types_attendus:
                 entry['statut'] = 'ECART'
             else:
                 entry['statut'] = 'OK'
@@ -991,6 +1083,16 @@ def extraire_portees_gracethd(
     appuis_by_num = {a['num_appui']: a['geom'] for a in appuis
                      if a.get('num_appui') and a.get('geom')}
 
+    # Index spatial O(log n): evite O(cables x appuis) dans la boucle principale
+    _gt_idx = QgsSpatialIndex()
+    _gt_id_to_num: Dict[int, str] = {}
+    for _gi, (_gnum, _ggeom) in enumerate(appuis_by_num.items()):
+        if not _ggeom.isNull():
+            _gfeat = QgsFeature(_gi)
+            _gfeat.setGeometry(_ggeom)
+            _gt_idx.addFeature(_gfeat)
+            _gt_id_to_num[_gi] = _gnum
+
     # Index inverse : nd_code -> num_appui (pour ancrer nd1/nd2 a un appui)
     # Construit en comparant les geometries nd1/nd2 avec les appuis
     nd_to_appui = {}
@@ -1022,9 +1124,13 @@ def extraire_portees_gracethd(
             cb_nd2, nd2_geom, appuis_by_num, nd_to_appui, tolerance
         )
 
-        # --- Projections de tous les poteaux proches ---
+        # --- Projections des poteaux proches via index spatial ---
         projections = []
-        for num_appui, appui_geom in appuis_by_num.items():
+        _cable_bbox = cable_geom.boundingBox()
+        _cable_bbox.grow(tolerance)
+        for _gid in _gt_idx.intersects(_cable_bbox):
+            num_appui = _gt_id_to_num[_gid]
+            appui_geom = appuis_by_num[num_appui]
             dist = appui_geom.distance(cable_geom)
             if dist <= tolerance:
                 frac = cable_geom.lineLocatePoint(appui_geom)
@@ -1386,3 +1492,165 @@ def collect_anomaly_cables(
             })
 
     return anomaly_cables
+
+
+def write_ecart_log(
+    verif_cables: List[Dict],
+    export_dir: str,
+    sro: str = '',
+    source_label: str = 'COMAC'
+) -> str:
+    """Écrit un fichier .log détaillé des écarts câbles dans le dossier export.
+
+    Pour chaque ECART, journalise:
+    - Les références source brutes et déduplicuées
+    - Les capacités possibles COMAC
+    - Les câbles BDD avec leur code (cb_etiquet), capacité, GID
+    - Un diagnostic automatique (code BDD = code COMAC ? capacité BDD dans plage ?)
+
+    Après la liste individuelle, analyse les patterns systématiques:
+    - Même GID BDD apparaissant sur N appuis → même câble physique
+    - Même code BDD vs même COMAC ref → mapping capacité suspect ou BDD erronée
+
+    Returns:
+        Chemin du fichier log créé, ou '' en cas d'échec.
+    """
+    import os
+    import datetime
+    from collections import defaultdict
+
+    if not export_dir or not os.path.isdir(export_dir):
+        return ''
+
+    ecarts = [e for e in verif_cables if e.get('statut') == 'ECART']
+    if not ecarts:
+        return ''
+
+    sro_safe = (sro or 'inconnu').replace('/', '_')
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(export_dir, f'comac_ecarts_{sro_safe}_{ts}.log')
+
+    lines = []
+    lines.append('=' * 80)
+    lines.append(f'RAPPORT ECARTS CABLES {source_label} vs BDD')
+    lines.append(f'SRO  : {sro or "inconnu"}')
+    lines.append(f'Date : {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    lines.append(f'Total: {len(ecarts)} écarts sur {len(verif_cables)} appuis analysés')
+    lines.append('=' * 80)
+    lines.append('')
+
+    # --- Analyse systématique par GID BDD ---
+    # Pour chaque GID BDD: liste (appui, capa_bdd, ref_comac, code_bdd)
+    gid_occurrences: dict = defaultdict(list)
+    for entry in ecarts:
+        for cable in entry.get('_bdd_cables_raw', []):
+            gid = cable.get('gid', 0)
+            if gid:
+                gid_occurrences[gid].append({
+                    'appui': entry['num_appui'],
+                    'capa_bdd': cable.get('capacite', 0),
+                    'code_bdd': cable.get('cb_etiquet', '') or '?',
+                    'refs_comac': entry.get('_refs_dedup', []),
+                })
+
+    # GIDs présents dans 3+ appuis : pattern systématique
+    systemic_gids = {gid: occ for gid, occ in gid_occurrences.items() if len(occ) >= 3}
+
+    # --- Détail par appui ---
+    lines.append('DETAIL PAR APPUI')
+    lines.append('-' * 80)
+    for entry in sorted(ecarts, key=lambda e: e['num_appui']):
+        appui = entry['num_appui']
+        refs_brut = entry.get('_refs_brut', [])
+        refs_dedup = entry.get('_refs_dedup', [])
+        capas_poss = entry.get('_capas_possibles', [])
+        bdd_cables = entry.get('_bdd_cables_raw', [])
+        bdd_count = entry.get('nb_cables_bdd', 0)
+        src_count = len(refs_dedup)
+        message = entry.get('message', '')
+
+        lines.append(f'APPUI: {appui}')
+        lines.append(f'  Statut : {message}')
+        lines.append(f'  {source_label} refs brut : {refs_brut}')
+        if refs_brut != refs_dedup:
+            lines.append(f'  {source_label} refs dedup: {refs_dedup}')
+        for ref, capas in zip(refs_dedup, capas_poss):
+            lines.append(f'    {ref} -> capacites possibles: {capas}')
+        lines.append(f'  BDD count={bdd_count}  {source_label} count={src_count}')
+
+        for cable in bdd_cables:
+            gid = cable.get('gid', 0)
+            capa = cable.get('capacite', 0)
+            code = cable.get('cb_etiquet', '') or '?'
+            cab_type = cable.get('cab_type', '') or '?'
+            dc2 = cable.get('id', 0)
+
+            # Diagnostic: le code BDD est-il une des refs COMAC ?
+            code_in_comac = code in refs_dedup
+            # La capa BDD est-elle dans une des plages COMAC ?
+            capa_in_range = any(capa in cp for cp in capas_poss) if capas_poss else False
+            # GID systématique ?
+            is_systemic = gid in systemic_gids
+
+            diag_parts = []
+            if code_in_comac:
+                diag_parts.append('code BDD=ref COMAC (meme cable)')
+            else:
+                diag_parts.append(f'code BDD "{code}" != refs COMAC {refs_dedup}')
+            if capa_in_range:
+                diag_parts.append('capa dans plage COMAC OK')
+            else:
+                diag_parts.append(f'capa {capa} HORS plage {["/".join(str(x) for x in cp) for cp in capas_poss]}')
+            if is_systemic:
+                n = len(systemic_gids[gid])
+                diag_parts.append(f'GID {gid} = pattern systematique ({n} appuis)')
+
+            lines.append(f'  BDD: gid={gid} dc2={dc2} capa={capa} type={cab_type} code="{code}"')
+            lines.append(f'       DIAG: {" | ".join(diag_parts)}')
+        lines.append('')
+
+    # --- Patterns systématiques ---
+    if systemic_gids:
+        lines.append('')
+        lines.append('PATTERNS SYSTEMATIQUES (meme GID BDD >= 3 appuis)')
+        lines.append('-' * 80)
+        for gid, occ in sorted(systemic_gids.items(), key=lambda x: -len(x[1])):
+            code_bdd = occ[0]['code_bdd']
+            capa_bdd = occ[0]['capa_bdd']
+            comac_refs = list({r for o in occ for r in o['refs_comac']})
+            appuis_sample = [o['appui'] for o in occ[:10]]
+            lines.append(f'GID {gid}: {len(occ)} appuis | code_bdd="{code_bdd}" | capa_bdd={capa_bdd}')
+            lines.append(f'  COMAC refs associees: {sorted(comac_refs)}')
+            lines.append(f'  Appuis (sample): {appuis_sample}')
+            # Diagnostic
+            if code_bdd != '?':
+                from .security_rules import get_capacites_possibles
+                capas_for_code = get_capacites_possibles(code_bdd) or []
+                code_connu = bool(capas_for_code)
+                if not code_connu:
+                    lines.append(f'  DIAGNOSTIC: code BDD "{code_bdd}" non reconnu par get_capacites_possibles')
+                    lines.append(f'  => Code troncon NGE (pas code cable Prysmian) - verification manuelle requise')
+                    lines.append(f'  => Question: le cable GID {gid} (capa={capa_bdd}) correspond-il a la ref COMAC {comac_refs} ?')
+                elif capa_bdd in capas_for_code:
+                    lines.append(f'  DIAGNOSTIC: capa BDD {capa_bdd} COHERENTE avec code "{code_bdd}" ({capas_for_code})')
+                    lines.append(f'  => Mapping COMAC->capa incorrect pour {comac_refs}? (ou mauvaise ref COMAC dans Excel)')
+                else:
+                    lines.append(f'  DIAGNOSTIC: capa BDD {capa_bdd} INCOHERENTE avec code "{code_bdd}" ({capas_for_code})')
+                    lines.append(f'  => Capacite saisie incorrectement en BDD pour GID {gid}')
+            lines.append('')
+
+    # --- Résumé ---
+    lines.append('RESUME')
+    lines.append('-' * 80)
+    lines.append(f'Ecarts COUNT seuls     : {sum(1 for e in ecarts if "Écart nombre" in e.get("message","") and "Écart capacité" not in e.get("message",""))}')
+    lines.append(f'Ecarts CAPA seuls      : {sum(1 for e in ecarts if "Écart capacité" in e.get("message","") and "Écart nombre" not in e.get("message",""))}')
+    lines.append(f'Ecarts COUNT+CAPA      : {sum(1 for e in ecarts if "Écart nombre" in e.get("message","") and "Écart capacité" in e.get("message",""))}')
+    lines.append(f'GIDs systematiques (>=3): {len(systemic_gids)} GIDs BDD ({sum(len(v) for v in systemic_gids.values())} appuis)')
+    lines.append('=' * 80)
+
+    try:
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        return log_path
+    except OSError:
+        return ''
