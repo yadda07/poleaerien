@@ -6,11 +6,13 @@ Orchestre l'extraction des données, l'analyse asynchrone et l'export Excel.
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog
+from ..compat import MSG_CRITICAL
 from ..CapFt import CapFt
 from ..async_tasks import CapFtTask, ExcelExportTask, run_async_task
 from ..core_utils import build_export_path
+from ..perf_logger import PerfLogger
 import os
-import copy
+import time
 
 class CapFtWorkflow(QObject):
     """
@@ -34,6 +36,10 @@ class CapFtWorkflow(QObject):
         self.cap_logic = CapFt()
         self.current_task = None
 
+    def cancel(self):
+        if self.current_task:
+            self.current_task.cancel()
+
     def start_analysis(self, lyr_pot, lyr_cap, col_cap, chemin_cap, chemin_export):
         """
         Lance l'analyse CAP_FT.
@@ -56,6 +62,7 @@ class CapFtWorkflow(QObject):
         fichier_export = build_export_path(chemin_export, "analyse_cap_ft.xlsx")
 
         # 1. Extraction des données (Main Thread) - passe unique
+        _t0 = time.perf_counter()
         try:
             doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums, coords_qgis = (
                 self.cap_logic.extraire_donnees_capft(
@@ -66,9 +73,16 @@ class CapFtWorkflow(QObject):
             self.error_occurred.emit(str(e))
             return
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur extraction CAP_FT: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur extraction CAP_FT: {e}", "PoleAerien", MSG_CRITICAL)
             self.error_occurred.emit(f"Erreur technique extraction: {e}")
             return
+        _n_pot = sum(len(v) for v in dico_qgis.values())
+        PerfLogger.record('capft', 'extraction_qgis',
+                          (time.perf_counter() - _t0) * 1000, feature_count=_n_pot)
+        self.message_received.emit(
+            f"[PERF] CAP_FT extraction_qgis: {int((time.perf_counter()-_t0)*1000)}ms "
+            f"({_n_pot} poteaux)", "grey"
+        )
 
         # 2. Préparation des données pour la Task
         params = {
@@ -76,12 +90,11 @@ class CapFtWorkflow(QObject):
             'fichier_export': fichier_export
         }
         
-        # Deep copy pour éviter mutation
         qgis_data = {
             'doublons': list(doublons),
             'hors_etude': list(hors_etude),
-            'dico_qgis': copy.deepcopy(dico_qgis),
-            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
+            'dico_qgis': dico_qgis,
+            'dico_poteaux_prives': dico_poteaux_prives,
             'all_inf_nums': all_inf_nums,
             'coords_qgis': coords_qgis,
         }

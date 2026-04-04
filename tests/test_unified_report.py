@@ -87,7 +87,7 @@ class TestUnifiedReport(unittest.TestCase):
                 self.assertIn('COMAC_ANALYSE', workbook.sheetnames)
                 drawing_sheets = [s for s in workbook.sheetnames if s.startswith('DESSIN_')]
                 self.assertTrue(drawing_sheets, f"No drawing sheet found in {workbook.sheetnames}")
-                self.assertIn('DESSIN_ETUDE-1', workbook.sheetnames)
+                self.assertIn('DESSIN_01', workbook.sheetnames)
             finally:
                 workbook.close()
 

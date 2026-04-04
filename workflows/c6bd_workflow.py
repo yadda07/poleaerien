@@ -15,6 +15,7 @@ Fonctionnalités:
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
 from qgis.core import Qgis, QgsMessageLog
+from ..compat import MSG_WARNING, MSG_CRITICAL
 from ..C6_vs_Bd import C6_vs_Bd
 from ..async_tasks import C6BdTask, ExcelExportTask, run_async_task
 from ..core_utils import build_export_path
@@ -120,7 +121,7 @@ class C6BdWorkflow(QObject):
             state['df_qgis'] = df_qgis
             state['df_poteaux_out'] = df_out
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur extraction poteaux: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur extraction poteaux: {e}", "PoleAerien", MSG_CRITICAL)
             self.error_occurred.emit(f"Erreur extraction: {e}")
             return
 
@@ -142,7 +143,7 @@ class C6BdWorkflow(QObject):
             )
             state['verif_etudes'] = verif
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur vérification études: {e}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"Erreur vérification études: {e}", "PoleAerien", MSG_WARNING)
             state['verif_etudes'] = None
 
         self.progress_changed.emit(50)

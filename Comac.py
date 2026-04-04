@@ -11,6 +11,7 @@ import openpyxl
 from .qgis_utils import extraire_poteaux_etude
 
 from .core_utils import normalize_appui_num, normaliser_boitier
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
 
 from .security_rules import (
 
@@ -152,6 +153,54 @@ class Comac:
 
 
 
+    @staticmethod
+
+    def _normalize_insee_code(value):
+
+        if value is None:
+
+            return ''
+
+        s = str(value).strip().replace(' ', '')
+
+        if not s:
+
+            return ''
+
+        if s.endswith('.0'):
+
+            s = s[:-2]
+
+        if not s.isdigit() or len(s) > 5:
+
+            return ''
+
+        return s.zfill(5)
+
+
+
+    @staticmethod
+
+    def _build_support_key(nompot, code_insee):
+
+        if nompot is None:
+
+            return ''
+
+        nom = str(nompot).strip()
+
+        if not nom:
+
+            return ''
+
+        if '/' in nom or not code_insee:
+
+            return nom
+
+        return f"{nom}/{code_insee}"
+
+
+
     def extraire_donnees_comac(self, table_poteau, table_etude_comac, colonne_comac,
                                be_type='nge'):
 
@@ -231,7 +280,7 @@ class Comac:
 
         dicoCoordsPoteaux = {}  # {nompot → (x, y)} coordonnees Lambert 93 depuis Excel
 
-        fichiersComacExistants = []
+        fichiersComacExistants = {}
 
         fichiersComacEnDoublons = []
 
@@ -312,6 +361,12 @@ class Comac:
 
                             feuille_1 = document.worksheets[0]
 
+                            code_insee_fichier = self._normalize_insee_code(
+
+                                feuille_1.cell(row=1, column=9).value
+
+                            )
+
                         except Exception as e:
 
                             impossibiliteDelireFichier[filepath] = f"Feuille illisible : {e}"
@@ -364,7 +419,14 @@ class Comac:
 
                             nompot = nompot_raw.replace("BT ", "BT-")
 
-                            listePoteauBt.append(nompot)
+                            nompot_cle = self._build_support_key(nompot, code_insee_fichier)
+
+                            if not nompot_cle:
+
+                                continue
+
+
+                            listePoteauBt.append(nompot_cle)
 
                             # Extraction coordonnees XY (col K=10, L=11) Lambert 93
                             coord_x_raw = row[10] if len(row) > 10 and row[10] else None
@@ -374,7 +436,7 @@ class Comac:
                                     cx = float(str(coord_x_raw).replace(',', '.').replace(' ', ''))
                                     cy = float(str(coord_y_raw).replace(',', '.').replace(' ', ''))
                                     if cx > 100000 and cy > 6000000:
-                                        dicoCoordsPoteaux[nompot] = (cx, cy)
+                                        dicoCoordsPoteaux[nompot_cle] = (cx, cy)
                                 except (ValueError, TypeError):
                                     pass
 
@@ -431,7 +493,7 @@ class Comac:
 
                             if boitier_val in ('oui', 'non'):
 
-                                nompot_norm_b = normalize_appui_num(nompot, keep_commune=True)
+                                nompot_norm_b = normalize_appui_num(nompot_cle, keep_commune=True)
 
                                 if nompot_norm_b:
 
@@ -449,7 +511,7 @@ class Comac:
 
                             if refs_cables:
 
-                                nompot_norm = normalize_appui_num(nompot, keep_commune=True)
+                                nompot_norm = normalize_appui_num(nompot_cle, keep_commune=True)
 
                                 if nompot_norm:
 
@@ -487,7 +549,7 @@ class Comac:
 
                             listeVerifSecu.append({
 
-                                'poteau': nompot,
+                                'poteau': nompot_cle,
 
                                 'portee': portee,
 
@@ -545,11 +607,11 @@ class Comac:
 
                             if name in fichiersComacExistants:
 
-                                fichiersComacEnDoublons.append(name)
+                                fichiersComacEnDoublons.append((name, fichiersComacExistants[name], rel_path))
 
 
 
-                            fichiersComacExistants.append(name)
+                            fichiersComacExistants[name] = rel_path
 
         
 
@@ -559,7 +621,7 @@ class Comac:
             f"{total_poteaux} poteaux total, "
             f"{len(dicoCablesParAppui)} appuis avec cables, {len(dicoBoitierParAppui)} appuis avec boitier, "
             f"{len(dicoCoordsPoteaux)} poteaux avec coordonnees XY",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
 
         return fichiersComacEnDoublons, impossibiliteDelireFichier, dicoPoteauBt_SousTraitant, dicoVerifSecu, dicoCablesParAppui, dicoBoitierParAppui, dicoCoordsPoteaux
@@ -600,7 +662,7 @@ class Comac:
 
                 f"[COMAC_PCM] {len(erreurs)} erreur(s) lecture PCM",
 
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
 
             )
 
@@ -632,7 +694,7 @@ class Comac:
 
             f"{len(supports_pm)} portees molles, {len(dico_poteaux)} avec poteaux",
 
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
 
         )
 
@@ -681,7 +743,7 @@ class Comac:
             QgsMessageLog.logMessage(
                 f"[COMAC] Aucune zone etude_comac: {len(coords_qgis)} poteaux QGIS "
                 "utilises sans filtre geographique pour le matching",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
 
         dicoPotBt_Excel_Introuvable = {}
@@ -730,7 +792,7 @@ class Comac:
             QgsMessageLog.logMessage(
                 f"[COMAC] COMMUNES DISTINCTES: {len(collisions)} numeros identiques dans communes differentes "
                 f"(auraient collisionne sans keep_commune): {dict(list(collisions.items())[:10])}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         def _consume_match(cle_match, etude_comac, inf_num_bt, poteau_excel, fichier_excel):
@@ -846,7 +908,7 @@ class Comac:
         if ambiguous_samples:
             QgsMessageLog.logMessage(
                 f"[COMAC] Candidats ambigus (sample): {ambiguous_samples}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
 
@@ -931,7 +993,7 @@ class Comac:
             f"{nb_hors_p} hors perimetre etude, "
             f"{nb_absent} absents couche SRO, "
             f"{nb_restant_qgis} restants QGIS non trouves dans Excel",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         if dicoPotBt_NonResolu:
             sample_nr = []
@@ -939,7 +1001,7 @@ class Comac:
                 sample_nr.append(f"{fichier}: {pots[:5]}")
             QgsMessageLog.logMessage(
                 f"[COMAC] Non resolus commune/code: {sample_nr}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
         if dicoPotBt_Excel_Introuvable:
             sample_abs = []
@@ -947,7 +1009,7 @@ class Comac:
                 sample_abs.append(f"{fichier}: {pots[:5]}")
             QgsMessageLog.logMessage(
                 f"[COMAC] Absents couche SRO (inexistants dans infra_pt_pot filtre SRO): {sample_abs}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         return dicoPotBt_Excel_Introuvable, dicoEtudeComacPoteauQgis, dicoPotBtExistants, dicoPotBt_HorsPerimetre, dicoPotBt_SpatialMatch, dicoPotBt_NonResolu
@@ -1531,9 +1593,9 @@ class Comac:
 
             QgsMessageLog.logMessage(
 
-                f"[COMAC] Impossible d'ecrire le rapport: {nom} — {e}",
+                f"[COMAC] Impossible d'ecrire le rapport: {nom} - {e}",
 
-                "PoleAerien", Qgis.Critical
+                "PoleAerien", MSG_CRITICAL
 
             )
 
@@ -1831,9 +1893,9 @@ class Comac:
 
             QgsMessageLog.logMessage(
 
-                f"[COMAC_PCM] Impossible d'ecrire le rapport: {nom_fichier} — {e}",
+                f"[COMAC_PCM] Impossible d'ecrire le rapport: {nom_fichier} - {e}",
 
-                "PoleAerien", Qgis.Critical
+                "PoleAerien", MSG_CRITICAL
 
             )
 

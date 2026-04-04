@@ -25,6 +25,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtWidgets import QApplication
 
+from .compat import MSG_INFO, MSG_WARNING
 from .qgis_utils import (
     remove_group,
     layer_group_error,
@@ -190,7 +191,7 @@ class PoliceC6:
             # 1. Charger les câbles découpés depuis PostgreSQL
             QgsMessageLog.logMessage(
                 f"Chargement câbles découpés pour SRO: {sro}",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             
             if not self.db_connection.connection:
@@ -243,7 +244,7 @@ class PoliceC6:
             
             QgsMessageLog.logMessage(
                 f"Analyse terminée: {result.appuis_ok} OK, {result.appuis_anomalie} anomalies",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             
             return result
@@ -255,7 +256,7 @@ class PoliceC6:
             result.erreur = str(e)
             QgsMessageLog.logMessage(
                 f"Erreur analyse charge: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return result
 
@@ -287,7 +288,7 @@ class PoliceC6:
         if not os.path.exists(chemin_c6):
             QgsMessageLog.logMessage(
                 f"Fichier C6 introuvable: {chemin_c6}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return donnees_par_appui, liste_brute, boitier_par_appui
         
@@ -362,7 +363,7 @@ class PoliceC6:
                         debug_rows.append(f"  Row{r_idx}: {[str(c or '')[:30] for c in r[:5]]}")
                 QgsMessageLog.logMessage(
                     f"En-têtes C6 non trouvées. Premières lignes:\n" + "\n".join(debug_rows),
-                    "PoleAerien", Qgis.Warning
+                    "PoleAerien", MSG_WARNING
                 )
                 wb.close()
                 return donnees_par_appui, liste_brute, boitier_par_appui
@@ -436,7 +437,7 @@ class PoliceC6:
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur lecture C6: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return donnees_par_appui, liste_brute, boitier_par_appui
 

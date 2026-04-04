@@ -4,10 +4,12 @@ Connexion automatique via les credentials QGIS existants
 """
 
 import psycopg2
+import time
 from psycopg2 import sql
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from qgis.core import QgsSettings, QgsMessageLog, Qgis, QgsDataSourceUri
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
 
 
 # Configuration cible
@@ -49,6 +51,9 @@ class DatabaseConnection:
     Récupère automatiquement les credentials depuis QGIS.
     """
     
+    _RETRY_DELAYS = (1.0, 2.0)
+    _CIRCUIT_OPEN_SECONDS = 60
+
     def __init__(self):
         self.connection = None
         self.host = None
@@ -57,6 +62,7 @@ class DatabaseConnection:
         self.user = None
         self.password = None
         self._connection_name = None
+        self._circuit_open_until = 0.0
     
     def find_auvergne_connection(self) -> Optional[str]:
         """
@@ -126,57 +132,75 @@ class DatabaseConnection:
             return True
         except Exception as e:
             QgsMessageLog.logMessage(
-                f"is_connected check echoue: {e}", "PoleAerien", Qgis.Warning
+                f"is_connected check echoue: {e}", "PoleAerien", MSG_WARNING
             )
             self.connection = None
             return False
 
     def connect(self) -> bool:
         """
-        Établit la connexion à la base de données.
+        Etablit la connexion a la base de donnees.
         Si deja connecte, retourne True sans ouvrir une nouvelle connexion.
-        Retourne True si succès, False sinon.
+        Retry avec backoff exponentiel (3 tentatives : immediate, 1s, 2s).
+        Circuit breaker : apres 3 echecs consecutifs, skip pendant 60s.
         """
         if self.is_connected():
             return True
 
-        try:
-            # Trouver la connexion Auvergne
-            conn_name = self.find_auvergne_connection()
-            if not conn_name:
-                QgsMessageLog.logMessage(
-                    f"Connexion PostgreSQL 'Auvergne' non trouvée. "
-                    f"Veuillez configurer une connexion vers {TARGET_HOST}",
-                    "PoleAerien", Qgis.Warning
-                )
-                return False
-            
-            self._connection_name = conn_name
-            params = self.get_connection_params(conn_name)
-            
-            self.host = params['host']
-            self.port = params['port']
-            self.database = params['database']
-            self.user = params['user']
-            self.password = params['password']
-            
-            # Établir la connexion
-            self.connection = psycopg2.connect(
-                host=self.host,
-                port=self.port,
-                database=self.database,
-                user=self.user,
-                password=self.password
-            )
-            
-            return True
-            
-        except Exception as e:
+        if time.time() < self._circuit_open_until:
+            remaining = int(self._circuit_open_until - time.time())
             QgsMessageLog.logMessage(
-                f"Erreur connexion PostgreSQL: {e}",
-                "PoleAerien", Qgis.Critical
+                f"PG circuit ouvert - connexion desactivee pendant {remaining}s",
+                "PoleAerien", MSG_WARNING
             )
             return False
+
+        conn_name = self.find_auvergne_connection()
+        if not conn_name:
+            QgsMessageLog.logMessage(
+                f"Connexion PostgreSQL 'Auvergne' non trouvee. "
+                f"Veuillez configurer une connexion vers {TARGET_HOST}",
+                "PoleAerien", MSG_WARNING
+            )
+            return False
+
+        self._connection_name = conn_name
+        params = self.get_connection_params(conn_name)
+        self.host = params['host']
+        self.port = params['port']
+        self.database = params['database']
+        self.user = params['user']
+        self.password = params['password']
+
+        delays = (0.0,) + self._RETRY_DELAYS
+        for attempt, delay in enumerate(delays):
+            if delay > 0:
+                QgsMessageLog.logMessage(
+                    f"PG tentative {attempt + 1}/{len(delays)} dans {delay:.0f}s...",
+                    "PoleAerien", MSG_INFO
+                )
+                time.sleep(delay)
+            try:
+                self.connection = psycopg2.connect(
+                    host=self.host,
+                    port=self.port,
+                    database=self.database,
+                    user=self.user,
+                    password=self.password
+                )
+                return True
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"PG echec tentative {attempt + 1}/{len(delays)}: {e}",
+                    "PoleAerien", MSG_WARNING
+                )
+
+        self._circuit_open_until = time.time() + self._CIRCUIT_OPEN_SECONDS
+        QgsMessageLog.logMessage(
+            f"PG circuit ouvert pour {self._CIRCUIT_OPEN_SECONDS}s apres 3 echecs consecutifs",
+            "PoleAerien", MSG_CRITICAL
+        )
+        return False
     
     def ensure_connected(self) -> bool:
         """Reconnecte si la connexion a ete perdue. Alias de connect()."""
@@ -189,7 +213,7 @@ class DatabaseConnection:
                 self.connection.close()
             except Exception as e:
                 QgsMessageLog.logMessage(
-                    f"disconnect echoue: {e}", "PoleAerien", Qgis.Warning
+                    f"disconnect echoue: {e}", "PoleAerien", MSG_WARNING
                 )
             self.connection = None
     
@@ -248,14 +272,14 @@ class DatabaseConnection:
             
             QgsMessageLog.logMessage(
                 f"fddcpi2({sro}): {len(segments)} segments de câbles récupérés",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             return segments
             
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur exécution fddcpi2: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             try:
                 self.connection.rollback()
@@ -293,7 +317,7 @@ class DatabaseConnection:
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur requete za_sro: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             try:
                 self.connection.rollback()
@@ -350,14 +374,14 @@ class DatabaseConnection:
             
             QgsMessageLog.logMessage(
                 f"BPE({sro}): {len(results)} boîtiers récupérés",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             return results
             
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur requête BPE: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             try:
                 self.connection.rollback()
@@ -410,14 +434,14 @@ class DatabaseConnection:
             
             QgsMessageLog.logMessage(
                 f"Attaches({sro}): {len(results)} attaches recuperees",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             return results
             
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur requete attaches: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             try:
                 self.connection.rollback()
@@ -460,14 +484,14 @@ class DatabaseConnection:
             be = row[0] if row else None
             QgsMessageLog.logMessage(
                 f"SRO BE({sro}): {be or 'non trouve'}",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             return be
             
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur requete sro_nge_axione: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             try:
                 self.connection.rollback()
@@ -532,9 +556,10 @@ def extract_sro_from_layer(layer) -> Optional[str]:
     for sro_field in sro_fields:
         if sro_field in field_names:
             from qgis.core import QgsFeatureRequest
+            from .compat import FR_NO_GEOMETRY
             req = QgsFeatureRequest().setFilterExpression(
                 f'"{sro_field}" IS NOT NULL AND "{sro_field}" != \'\''
-            ).setLimit(1).setFlags(QgsFeatureRequest.NoGeometry)
+            ).setLimit(1).setFlags(FR_NO_GEOMETRY)
             for feature in layer.getFeatures(req):
                 value = feature[sro_field]
                 if value and str(value).strip():

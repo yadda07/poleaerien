@@ -210,9 +210,10 @@ class CapFt:
         try:
             fichierXlsx.save(filename=nom)
         except (PermissionError, OSError) as e:
-            from qgis.core import QgsMessageLog, Qgis
+            from qgis.core import QgsMessageLog
+            from .compat import MSG_CRITICAL
             QgsMessageLog.logMessage(
-                f"[CAP_FT] Impossible d'ecrire le rapport: {nom} — {e}",
-                "PoleAerien", Qgis.Critical
+                f"[CAP_FT] Impossible d'ecrire le rapport: {nom} - {e}",
+                "PoleAerien", MSG_CRITICAL
             )
             raise

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Preflight Data Quality Checks — Vérifications qualité données.
+Preflight Data Quality Checks - Vérifications qualité données.
 
 Module autonome appelable depuis:
 - batch_orchestrator._preflight_data_quality() (auto au démarrage)
@@ -61,8 +61,7 @@ def run_data_quality_checks(
         if not field_name:
             results.append({
                 'id': 'PF-01', 'level': 'WARN',
-                'message': f'{label}: champ etude non detecte — verification doublons ignoree. '
-                           f'Champs disponibles: {[f.name() for f in lyr.fields()][:8]}'
+                'message': f'{label} : champ nom d\'etude non identifie, verification des doublons ignoree.'
             })
             continue
         names = {}
@@ -76,8 +75,8 @@ def run_data_quality_checks(
             for name, count in doublons.items():
                 results.append({
                     'id': 'PF-01', 'level': 'WARN',
-                    'message': f'{label}: nom d\'etude "{name}" present sur {count} polygones '
-                               f'(normal si etude multi-communes).'
+                    'message': f'{label} : nom d\'etude "{name}" present {count} fois '
+                               f'(normal si l\'etude couvre plusieurs communes).'
                 })
         else:
             results.append({
@@ -124,8 +123,8 @@ def run_data_quality_checks(
         if nb_null > 0:
             results.append({
                 'id': 'PF-03', 'level': 'WARN',
-                'message': f'infra_pt_pot: {nb_null}/{total_pot} poteaux sans inf_num '
-                           f'(seront ignores dans la comparaison).'
+                'message': f'infra_pt_pot : {nb_null}/{total_pot} appuis sans numero '
+                           f'(exclus de l\'analyse).'
             })
         else:
             results.append({
@@ -137,8 +136,8 @@ def run_data_quality_checks(
         if nb_no_geom > 0:
             results.append({
                 'id': 'PF-04', 'level': 'WARN',
-                'message': f'infra_pt_pot: {nb_no_geom}/{total_pot} poteaux sans geometrie '
-                           f'(matching spatial cables impossible pour ceux-ci).'
+                'message': f'infra_pt_pot : {nb_no_geom}/{total_pot} appuis sans coordonnees GPS '
+                           f'(comparaison spatiale des cables impossible pour ceux-ci).'
             })
         else:
             results.append({
@@ -158,8 +157,8 @@ def run_data_quality_checks(
         if no_geom > 0:
             results.append({
                 'id': 'PF-02', 'level': 'WARN',
-                'message': f'{label}: {no_geom}/{total} polygones sans geometrie '
-                           f'(poteaux dans ces zones non detectes).'
+                'message': f'{label} : {no_geom}/{total} zones d\'etude sans contour '
+                           f'(les appuis dans ces zones ne seront pas detectes).'
             })
         else:
             results.append({
@@ -177,8 +176,8 @@ def run_data_quality_checks(
         details = ', '.join(f'{k}={v}' for k, v in crs_map.items())
         results.append({
             'id': 'PF-05', 'level': 'BLOCKER',
-            'message': f'CRS incoherent entre couches: {details}. '
-                       f'Toutes les couches doivent avoir le meme CRS (EPSG:2154 attendu).'
+            'message': f'Systeme de coordonnees different entre les couches : {details}. '
+                       f'Toutes les couches doivent etre en Lambert-93 (EPSG:2154).'
         })
     elif len(unique_crs) == 1 and len(crs_map) >= 2:
         results.append({
@@ -283,8 +282,8 @@ def _check_gracethd_mcd(gdir: str) -> List[Dict]:
                     if missing_join:
                         results.append({
                             'id': 'PF-10b', 'level': 'WARN',
-                            'message': f'GraceTHD jointure: {len(missing_join)}/{nb_di} cables DI '
-                                       f'sans geometrie (cb_code absent de t_cableline.shp).'
+                            'message': f'GraceTHD jointure : {len(missing_join)}/{nb_di} cables distribution '
+                                       f'sans trace geometrique (cb_code absent de t_cableline).'
                         })
                     else:
                         results.append({
@@ -336,8 +335,8 @@ def _check_gracethd_mcd(gdir: str) -> List[Dict]:
             if nb_broken > 0:
                 results.append({
                     'id': 'PF-10c', 'level': 'WARN',
-                    'message': f'GraceTHD jointure BPE: {nb_broken}/{len(ebp_rows)} BPE '
-                               f'sans geometrie (jointure t_ebp->t_ptech->t_noeud cassee).'
+                    'message': f'GraceTHD jointure BPE : {nb_broken}/{len(ebp_rows)} boitiers (BPE) '
+                               f'sans localisation (lien entre les tables GraceTHD rompu).'
                 })
             else:
                 results.append({

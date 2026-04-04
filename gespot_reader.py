@@ -6,7 +6,7 @@ Responsabilité unique : parser les CSV GESPOT et appliquer les règles
 métier BR-01 à BR-06 (+ BR-03bis/ter, BR-04bis) pour produire des
 enregistrements comparables aux champs C6.
 
-Zéro dépendance QGIS — thread-safe.
+Zéro dépendance QGIS - thread-safe.
 """
 
 import csv
@@ -20,7 +20,7 @@ _GESPOT_HEADER_MARKERS = {'NUM', 'CARAC1', 'CENTRE'}
 
 
 # ===========================================================================
-#  CONSTANTES — indices de colonnes CSV GESPOT (0-bases)
+#  CONSTANTES - indices de colonnes CSV GESPOT (0-bases)
 # ===========================================================================
 
 _COL_NUM = 1
@@ -43,7 +43,6 @@ _COL_ETAT_PT3 = 53
 _COL_DECLASS_PT3 = 54
 _COL_DIST_ELEC = 67
 
-_PLACEHOLDERS_NUM_VOIE = {'9999', '99999'}
 _CODES_DECLASSE = {'00', '01'}
 _CODES_INACC_ENV = {'IN8', 'IN9'}
 
@@ -71,8 +70,6 @@ class GespotRecord:
     etat_no_yellow: str
     etat_usable: str
     ctrl_visuel: str
-
-    num_voie_needs_check: bool = False
 
 
 @dataclass
@@ -233,9 +230,6 @@ def _build_record(row: List[str], source: str,
         etat_no_yellow=etat_no_yellow,
         etat_usable=etat_usable,
         ctrl_visuel=ctrl_visuel,
-        num_voie_needs_check=(
-            bool(num_voie_raw) and num_voie_raw not in _PLACEHOLDERS_NUM_VOIE
-        ),
     )
 
 
@@ -266,8 +260,14 @@ def load_gespot_dir(gespot_dir: str,
         result.anomalies.append({
             'source': 'GESPOT', 'fichier': '', 'num': '',
             'type': 'FICHIER_IGNORE',
-            'detail': f"Impossible de lire le dossier: {e}",
-            'action': 'Verifier que le dossier GESPOT existe et est accessible',
+            'detail': (
+                f"Le dossier GESPOT '{gespot_dir}' n'a pas pu etre lu "
+                f"({e})"
+            ),
+            'action': (
+                "Verifier que le chemin du dossier GESPOT est correct, que le dossier "
+                "existe et que vous avez les droits d'acces, puis relancer"
+            ),
         })
         return result
 
@@ -276,8 +276,13 @@ def load_gespot_dir(gespot_dir: str,
         result.anomalies.append({
             'source': 'GESPOT', 'fichier': '', 'num': '',
             'type': 'FICHIER_IGNORE',
-            'detail': 'Aucun fichier CSV trouve dans le dossier GESPOT',
-            'action': 'Placer les fichiers GESPOT (CSV ; delimiter) dans le dossier',
+            'detail': (
+                f"Aucun fichier CSV n'a ete trouve dans le dossier GESPOT '{gespot_dir}'. "
+                "Le controle ne peut pas lire la source GESPOT"
+            ),
+            'action': (
+                "Placer dans ce dossier les exports GESPOT au format CSV, puis relancer"
+            ),
         })
         return result
 
@@ -290,8 +295,15 @@ def load_gespot_dir(gespot_dir: str,
         except Exception as e:
             result.anomalies.append({
                 'source': 'GESPOT', 'fichier': fname, 'num': '',
-                'type': 'FICHIER_IGNORE', 'detail': str(e),
-                'action': 'Verifier encodage et format CSV',
+                'type': 'FICHIER_IGNORE',
+                'detail': (
+                    f"Le fichier GESPOT '{fname}' n'a pas pu etre lu comme CSV exploitable "
+                    f"({e})"
+                ),
+                'action': (
+                    f"Verifier le separateur ';', l'encodage et la structure du fichier '{fname}', "
+                    "puis relancer"
+                ),
             })
             continue
 
@@ -320,13 +332,6 @@ def _resolve_duplicates(raw_by_num: Dict[str, List[dict]],
         if len(entries) == 1:
             rec = _build_record(entries[0]['row'], entries[0]['file'], whitelist_upper)
             result.records[num] = rec
-            if rec.num_voie_needs_check:
-                result.anomalies.append({
-                    'source': 'GESPOT', 'fichier': entries[0]['file'], 'num': num,
-                    'type': 'ADRESSE_A_VALIDER',
-                    'detail': f"num_voie={rec.num_voie}",
-                    'action': 'Verifier si num_voie doit etre concatene a VOIE',
-                })
             continue
 
         payloads = [str(e['row']) for e in entries]
@@ -336,14 +341,26 @@ def _resolve_duplicates(raw_by_num: Dict[str, List[dict]],
             result.anomalies.append({
                 'source': 'GESPOT', 'fichier': entries[0]['file'], 'num': num,
                 'type': 'DOUBLON_IDENTIQUE',
-                'detail': f"Apparu {len(entries)} fois, consolide",
-                'action': 'Aucune (consolide automatiquement)',
+                'detail': (
+                    f"L'appui {num} apparait {len(entries)} fois dans la source GESPOT "
+                    f"avec exactement les memes valeurs. Une seule version a ete conservee automatiquement"
+                ),
+                'action': (
+                    "Aucune correction bloquante. Vous pouvez nettoyer les doublons GESPOT "
+                    "si vous voulez fiabiliser la source"
+                ),
             })
         else:
             files = ', '.join(sorted({e['file'] for e in entries}))
             result.anomalies.append({
                 'source': 'GESPOT', 'fichier': files, 'num': num,
                 'type': 'DOUBLON_CONFLICTUEL',
-                'detail': f"Valeurs differentes sur {len(entries)} lignes",
-                'action': 'Corriger la source GESPOT avant de relancer',
+                'detail': (
+                    f"L'appui {num} apparait {len(entries)} fois dans GESPOT avec des valeurs "
+                    f"differentes. Le plugin ne peut pas choisir automatiquement la bonne ligne"
+                ),
+                'action': (
+                    f"Comparer les fichiers GESPOT cites pour l'appui {num}, corriger la "
+                    f"source pour ne garder qu'une version coherente, puis relancer"
+                ),
             })

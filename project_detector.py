@@ -702,12 +702,12 @@ def detect_project(project_root: str) -> DetectionResult:
             if c3a_f:
                 result.c3a_file = c3a_f
 
-    # GESPOT directory — name-based detection
+    # GESPOT directory - name-based detection
     gespot = _find_dir(project_root, _GESPOT_DIR_PATTERNS)
     if gespot:
         result.gespot_dir = gespot
 
-    # GraceTHD directory (for Axione SROs) — content-based detection
+    # GraceTHD directory (for Axione SROs) - content-based detection
     gracethd = _find_gracethd_dir(project_root)
     if gracethd:
         result.gracethd_dir = gracethd

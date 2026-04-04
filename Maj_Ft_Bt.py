@@ -7,6 +7,7 @@ from qgis.core import (
     QgsTask, QgsApplication, QgsSpatialIndex, NULL,
     QgsMessageLog
 )
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
 import pandas as pd
 import os
 import re
@@ -123,7 +124,7 @@ class MajFtBtTask(QgsTask):
 
         except Exception as e:
             self.exception = str(e)
-            QgsMessageLog.logMessage(f"[MAJ] ERREUR Task: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"[MAJ] ERREUR Task: {e}", "PoleAerien", MSG_CRITICAL)
             return False
 
     def _point_in_polygon(self, x, y, vertices):
@@ -176,19 +177,19 @@ class MajFtBtTask(QgsTask):
         QgsMessageLog.logMessage(
             f"[MAJ_BD] Spatial FT: {len(poteaux_ft)} poteaux, {len(etudes_cap_ft)} polygones "
             f"-> {len(data_ft)} correspondances",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         if data_ft:
             sample = data_ft[0]
             QgsMessageLog.logMessage(
                 f"[MAJ_BD] Exemple BD FT: appui='{sample['N° appui']}', etude='{sample['Nom Etudes']}'",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
         elif poteaux_ft and etudes_cap_ft:
             QgsMessageLog.logMessage(
                 "[MAJ_BD] ATTENTION: poteaux et polygones existent mais aucune correspondance spatiale. "
                 "Verifier que les poteaux sont geometriquement DANS les polygones etude_cap_ft.",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         if self.isCanceled():
@@ -218,7 +219,7 @@ class MajFtBtTask(QgsTask):
         QgsMessageLog.logMessage(
             f"[MAJ_BD] Spatial BT: {len(poteaux_bt)} poteaux, {len(etudes_comac)} polygones "
             f"-> {len(data_bt)} correspondances",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
 
         # Créer DataFrames
@@ -452,7 +453,7 @@ class MajFtBt:
         if colonne_nom_etude not in df_excel.columns:
             QgsMessageLog.logMessage(
                 f"[MAJ_BD] Colonne '{colonne_nom_etude}' absente du DataFrame",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return result
         
@@ -587,7 +588,7 @@ class MajFtBt:
             colonnes_warnings.extend(warns_ft)
             if manquantes_ft:
                 raise ValueError(
-                    f"Onglet FT — colonnes manquantes (aucune correspondance trouvée) :\n"
+                    f"Onglet FT - colonnes manquantes (aucune correspondance trouvée) :\n"
                     f"  {manquantes_ft}\n"
                     f"Colonnes présentes dans le fichier :\n  {list(df_ft.columns)}"
                 )
@@ -599,7 +600,7 @@ class MajFtBt:
             colonnes_warnings.extend(warns_bt)
             if manquantes_bt:
                 raise ValueError(
-                    f"Onglet BT — colonnes manquantes (aucune correspondance trouvée) :\n"
+                    f"Onglet BT - colonnes manquantes (aucune correspondance trouvée) :\n"
                     f"  {manquantes_bt}\n"
                     f"Colonnes présentes dans le fichier :\n  {list(df_bt.columns)}"
                 )
@@ -663,12 +664,12 @@ class MajFtBt:
             raise
 
         except AttributeError as lettre:
-            QgsMessageLog.logMessage(f"FICHIER : {fichier_Excel} - {lettre}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"FICHIER : {fichier_Excel} - {lettre}", "PoleAerien", MSG_WARNING)
             df_ft = pd.DataFrame({})
             df_bt = pd.DataFrame({})
 
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur fichier {fichier_Excel}: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur fichier {fichier_Excel}: {e}", "PoleAerien", MSG_CRITICAL)
             df_ft = pd.DataFrame({})
             df_bt = pd.DataFrame({})
 
@@ -704,27 +705,27 @@ class MajFtBt:
         # Diagnostic: afficher tailles et echantillons avant merge
         QgsMessageLog.logMessage(
             f"[MAJ_BD] Pre-merge FT: Excel={len(excel_df_ft_valid)} lignes, BD={len(bd_df_ft_valid)} lignes",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         if not excel_df_ft_valid.empty:
             etudes_xls = sorted(excel_df_ft_valid["Nom Etudes"].unique())[:5]
             appuis_xls = sorted(excel_df_ft_valid["N° appui"].unique())[:5]
             QgsMessageLog.logMessage(
-                f"[MAJ_BD] Excel FT etudes: {etudes_xls}", "PoleAerien", Qgis.Info)
+                f"[MAJ_BD] Excel FT etudes: {etudes_xls}", "PoleAerien", MSG_INFO)
             QgsMessageLog.logMessage(
-                f"[MAJ_BD] Excel FT appuis: {appuis_xls}", "PoleAerien", Qgis.Info)
+                f"[MAJ_BD] Excel FT appuis: {appuis_xls}", "PoleAerien", MSG_INFO)
         if not bd_df_ft_valid.empty:
             etudes_bd = sorted(bd_df_ft_valid["Nom Etudes"].unique())[:5]
             appuis_bd = sorted(bd_df_ft_valid["N° appui"].unique())[:5]
             QgsMessageLog.logMessage(
-                f"[MAJ_BD] BD FT etudes: {etudes_bd}", "PoleAerien", Qgis.Info)
+                f"[MAJ_BD] BD FT etudes: {etudes_bd}", "PoleAerien", MSG_INFO)
             QgsMessageLog.logMessage(
-                f"[MAJ_BD] BD FT appuis: {appuis_bd}", "PoleAerien", Qgis.Info)
+                f"[MAJ_BD] BD FT appuis: {appuis_bd}", "PoleAerien", MSG_INFO)
         else:
             QgsMessageLog.logMessage(
                 "[MAJ_BD] BD FT VIDE: aucun poteau FT dans polygones etude_cap_ft. "
                 "Verifier couches et zone geographique.",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         df_ft = pd.merge(excel_df_ft_valid, bd_df_ft_valid, how="left", on=["N° appui", "Nom Etudes"], indicator=True)
@@ -795,13 +796,13 @@ class MajFtBt:
         # Diagnostic: afficher tailles et echantillons avant merge BT
         QgsMessageLog.logMessage(
             f"[MAJ_BD] Pre-merge BT: Excel={len(excel_df_bt_valid)} lignes, BD={len(bd_df_bt_valid)} lignes",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         if bd_df_bt_valid.empty and not excel_df_bt_valid.empty:
             QgsMessageLog.logMessage(
                 "[MAJ_BD] BD BT VIDE: aucun poteau BT dans polygones etude_comac. "
                 "Verifier couches et zone geographique.",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         df_bt = pd.merge(excel_df_bt_valid, bd_df_bt_valid, how="left", on=["N° appui", "Nom Etudes"], indicator=True)

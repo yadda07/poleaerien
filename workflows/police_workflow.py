@@ -14,14 +14,17 @@ Plus de GraceTHD - tout vient de la fonction PostgreSQL fddcpi2.
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsVectorLayer, NULL
+from ..compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL, FIELD_TYPE_STRING, FIELD_TYPE_INT, FIELD_TYPE_DOUBLE, FIELD_TYPE_LONGLONG
 from ..PoliceC6 import PoliceC6, PoliceC6Cancelled
 from ..db_connection import extract_sro_from_layer
 from ..cable_analyzer import extraire_appuis_wkb
 from ..qgis_utils import get_layer_safe, detect_etude_field as _detect_etude_field, show_feature_count
 from ..async_tasks import PoliceC6Task, run_async_task
 from ..core_utils import is_plugin_output_file
+from ..perf_logger import PerfLogger
 import os
 import glob
+import time
 from datetime import datetime
 
 
@@ -50,7 +53,9 @@ class PoliceWorkflow(QObject):
         """Annule le traitement en cours"""
         self._cancelled = True
         self.police_logic.request_cancel()
-        QgsMessageLog.logMessage("Annulation demandée...", "PoleAerien", Qgis.Info)
+        if self.current_task:
+            self.current_task.cancel()
+        QgsMessageLog.logMessage("Annulation demandée...", "PoleAerien", MSG_INFO)
 
     def _emit_report_to_ui(self, report):
         """Diffuse le rapport détaillé vers l'UI avec code couleur."""
@@ -149,7 +154,7 @@ class PoliceWorkflow(QObject):
         try:
             layer = get_layer_safe(table_etude, "Police_C6")
         except ValueError as e:
-            QgsMessageLog.logMessage(f"get_etudes_from_layer: {e}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"get_etudes_from_layer: {e}", "PoleAerien", MSG_WARNING)
             return []
         
         etudes = set()
@@ -180,52 +185,55 @@ class PoliceWorkflow(QObject):
         table_etude = params.get('table_etude', '')
         colonne_etude = params.get('colonne_etude', '')
         export_path = params.get('export_path', repertoire_c6)
-        
+        single_c6_file = params.get('single_c6_file', '')
+
         self.message_received.emit("Mode auto-browse: préparation...", "blue")
         self.progress_changed.emit(2)
-        
+
         # === MAIN THREAD: Extraction données QGIS ===
-        
+
         # 1. Récupérer liste des études
-        etudes = []
-        if table_etude and colonne_etude:
-            etudes = self.get_etudes_from_layer(table_etude, colonne_etude)
-        
-        if not etudes:
-            # Fallback: scanner les dossiers d'etude + fichiers C6
-            self.message_received.emit("Scan des fichiers C6...", "grey")
-            etudes_set = set()
-            # 1. Chercher les dossiers d'etude (FTTH-*-ETUDE-*, NGE-*, etc.)
-            import re as _re
-            _etude_dir_re = _re.compile(
-                r'(FTTH.*ETUDE|NGE-\d)', _re.IGNORECASE
-            )
-            for dirpath, dirnames, filenames in os.walk(repertoire_c6):
-                for d in dirnames:
-                    if _etude_dir_re.search(d):
-                        etudes_set.add(d)
-            # 2. Aussi chercher les fichiers *C6*.xlsx (pattern classique NGE)
-            c6_files = glob.glob(os.path.join(repertoire_c6, "**", "*C6*.xlsx"), recursive=True)
-            c6_files = [f for f in c6_files if not is_plugin_output_file(os.path.basename(f))]
-            for f in c6_files:
-                etudes_set.add(os.path.splitext(os.path.basename(f))[0])
-            etudes = sorted(etudes_set)
-        
-        if not etudes:
-            self.error_occurred.emit("Aucune étude trouvée")
-            return
-        
-        # 2. Construire liste (etude_name, c6_file)
         c6_files_list = []
-        etudes_sans_c6 = []
-        
-        for etude in etudes:
-            c6_file = self.find_c6_file(repertoire_c6, etude)
-            if c6_file:
-                c6_files_list.append((etude, c6_file))
-            else:
-                etudes_sans_c6.append(etude)
-        
+        if single_c6_file:
+            etude_name = params.get('single_etude_name') or os.path.splitext(os.path.basename(single_c6_file))[0]
+            c6_files_list.append((etude_name, single_c6_file))
+        else:
+            etudes = []
+            if table_etude and colonne_etude:
+                etudes = self.get_etudes_from_layer(table_etude, colonne_etude)
+
+            if not etudes:
+                # Fallback: scanner les dossiers d'etude + fichiers C6
+                self.message_received.emit("Scan des fichiers C6...", "grey")
+                etudes_set = set()
+                # 1. Chercher les dossiers d'etude (FTTH-*-ETUDE-*, NGE-*, etc.)
+                import re as _re
+                _etude_dir_re = _re.compile(
+                    r'(FTTH.*ETUDE|NGE-\d)', _re.IGNORECASE
+                )
+                for dirpath, dirnames, filenames in os.walk(repertoire_c6):
+                    for d in dirnames:
+                        if _etude_dir_re.search(d):
+                            etudes_set.add(d)
+                # 2. Aussi chercher les fichiers *C6*.xlsx (pattern classique NGE)
+                c6_files = glob.glob(os.path.join(repertoire_c6, "**", "*C6*.xlsx"), recursive=True)
+                c6_files = [f for f in c6_files if not is_plugin_output_file(os.path.basename(f))]
+                for f in c6_files:
+                    etudes_set.add(os.path.splitext(os.path.basename(f))[0])
+                etudes = sorted(etudes_set)
+
+            if not etudes:
+                self.error_occurred.emit("Aucune étude trouvée")
+                return
+
+            etudes_sans_c6 = []
+            for etude in etudes:
+                c6_file = self.find_c6_file(repertoire_c6, etude)
+                if c6_file:
+                    c6_files_list.append((etude, c6_file))
+                else:
+                    etudes_sans_c6.append(etude)
+
         if not c6_files_list:
             self.error_occurred.emit("Aucun fichier C6 trouvé")
             return
@@ -264,8 +272,15 @@ class PoliceWorkflow(QObject):
         # Ne pas reutiliser le cache COMAC qui est avec commune.
         appuis_data = []
         if layer_appuis:
+            _t_appuis = time.perf_counter()
             appuis_data = extraire_appuis_wkb(layer_appuis[0])
-            self.message_received.emit(f"Appuis QGIS: {len(appuis_data)}", "grey")
+            PerfLogger.record('police_c6', 'appuis_wkb_extract',
+                              (time.perf_counter() - _t_appuis) * 1000,
+                              sro=sro or '', feature_count=len(appuis_data))
+            self.message_received.emit(
+                f"[PERF] Police C6 appuis_wkb_extract: "
+                f"{int((time.perf_counter()-_t_appuis)*1000)}ms ({len(appuis_data)} appuis)", "grey"
+            )
         
         # === WORKER THREAD: Lancer tâche async ===
         
@@ -274,6 +289,9 @@ class PoliceWorkflow(QObject):
             'sro': sro,
             'export_path': export_path,
             'fddcpi_cables_cache': params.get('fddcpi_cables_cache'),
+            'bpe_list_cache': params.get('bpe_list_cache'),
+            'attaches_cache': params.get('attaches_cache'),
+            'skip_individual_export': params.get('skip_individual_export', False),
             'be_type': params.get('be_type', 'nge'),
             'gracethd_dir': params.get('gracethd_dir', ''),
         }
@@ -341,7 +359,6 @@ class PoliceWorkflow(QObject):
         from qgis.core import (
             QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject
         )
-        from qgis.PyQt.QtCore import QVariant
         
         # Nom de couche selon la source
         sro_safe = sro.replace('/', '_')
@@ -361,13 +378,13 @@ class PoliceWorkflow(QObject):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             provider.addAttributes([
-                QgsField("gid_dc2", QVariant.LongLong),
-                QgsField("gid_dc", QVariant.LongLong),
-                QgsField("cab_capa", QVariant.Int),
-                QgsField("cab_type", QVariant.String),
-                QgsField("cb_etiquet", QVariant.String),
-                QgsField("posemode", QVariant.Int),
-                QgsField("length", QVariant.Double),
+                QgsField("gid_dc2", FIELD_TYPE_LONGLONG),
+                QgsField("gid_dc", FIELD_TYPE_LONGLONG),
+                QgsField("cab_capa", FIELD_TYPE_INT),
+                QgsField("cab_type", FIELD_TYPE_STRING),
+                QgsField("cb_etiquet", FIELD_TYPE_STRING),
+                QgsField("posemode", FIELD_TYPE_INT),
+                QgsField("length", FIELD_TYPE_DOUBLE),
             ])
         layer.updateFields()
         
@@ -425,7 +442,6 @@ class PoliceWorkflow(QObject):
             QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject,
             QgsRuleBasedRenderer, QgsSymbol,
         )
-        from qgis.PyQt.QtCore import QVariant
         from qgis.PyQt.QtGui import QColor
 
         layer = QgsVectorLayer(
@@ -438,16 +454,16 @@ class PoliceWorkflow(QObject):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             provider.addAttributes([
-                QgsField("gid_dc2", QVariant.LongLong),
-                QgsField("etude", QVariant.String),
-                QgsField("num_appui", QVariant.String),
-                QgsField("type_anomalie", QVariant.String),
-                QgsField("nb_cables_c6", QVariant.Int),
-                QgsField("nb_cables_bdd", QVariant.Int),
-                QgsField("cab_capa", QVariant.Int),
-                QgsField("cb_etiquet", QVariant.String),
-                QgsField("length", QVariant.Double),
-                QgsField("message", QVariant.String),
+                QgsField("gid_dc2", FIELD_TYPE_LONGLONG),
+                QgsField("etude", FIELD_TYPE_STRING),
+                QgsField("num_appui", FIELD_TYPE_STRING),
+                QgsField("type_anomalie", FIELD_TYPE_STRING),
+                QgsField("nb_cables_c6", FIELD_TYPE_INT),
+                QgsField("nb_cables_bdd", FIELD_TYPE_INT),
+                QgsField("cab_capa", FIELD_TYPE_INT),
+                QgsField("cb_etiquet", FIELD_TYPE_STRING),
+                QgsField("length", FIELD_TYPE_DOUBLE),
+                QgsField("message", FIELD_TYPE_STRING),
             ])
         layer.updateFields()
 
@@ -656,7 +672,7 @@ class PoliceWorkflow(QObject):
             self.message_received.emit("Traitement annulé par l'utilisateur", "orange")
             self.analysis_finished.emit({'success': False, 'cancelled': True})
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur PoliceWorkflow: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur PoliceWorkflow: {e}", "PoleAerien", MSG_CRITICAL)
             self.error_occurred.emit(str(e))
 
     def _export_to_excel(self, export_path, stats_globales, totaux):
@@ -891,10 +907,10 @@ class PoliceWorkflow(QObject):
             
             # Sauvegarder
             wb.save(filepath)
-            QgsMessageLog.logMessage(f"Export Excel créé: {filepath}", "PoleAerien", Qgis.Info)
+            QgsMessageLog.logMessage(f"Export Excel créé: {filepath}", "PoleAerien", MSG_INFO)
             return filepath
             
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur export Excel: {e}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"Erreur export Excel: {e}", "PoleAerien", MSG_WARNING)
             self.message_received.emit(f"Erreur export Excel: {e}", "red")
             return None

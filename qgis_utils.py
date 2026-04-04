@@ -9,11 +9,14 @@ from qgis.core import (
     QgsProject, QgsLayerTreeLayer, QgsMessageLog, Qgis, 
     QgsSpatialIndex, QgsFeatureRequest, NULL
 )
+from .compat import MSG_INFO, MSG_WARNING
 import re
 from .core_utils import normalize_appui_num
 
 
 # Patterns pour auto-detection du champ etude dans une couche
+_ETUDE_POLYGON_BUFFER_M = 0.5
+
 _ETUDE_FIELD_PATTERNS = [
     r'^nom[_\s]?etude[s]?$',
     r'^etude[s]?$',
@@ -50,7 +53,7 @@ def detect_etude_field(layer, context=""):
     
     QgsMessageLog.logMessage(
         f"[{context or 'detect_etude_field'}] Aucun champ etude detecte. Champs: {field_names}",
-        "PoleAerien", Qgis.Warning
+        "PoleAerien", MSG_WARNING
     )
     return None
 
@@ -244,7 +247,7 @@ def extraire_poteaux_etude(
     
     QgsMessageLog.logMessage(
         f"[{context}] {len(poteaux_dict)}/{total_couche} poteaux {pot_type_filter} dans {len(list(etude.getFeatures()))} zones etude",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     
     # Index champ commentaire pour detection terrain prive
@@ -263,11 +266,12 @@ def extraire_poteaux_etude(
         liste_pot = []
         liste_priv = []
         nom_etude = feat_etude[colonne_etude]
-        bbox = feat_etude.geometry().boundingBox()
+        geom_etude = feat_etude.geometry().buffer(_ETUDE_POLYGON_BUFFER_M, 5)
+        bbox = geom_etude.boundingBox()
         
         for fid in idx_pot.intersects(bbox):
             feat_pot = poteaux_dict[fid]
-            if feat_etude.geometry().contains(feat_pot.geometry()):
+            if geom_etude.contains(feat_pot.geometry()):
                 raw_inf = feat_pot["inf_num"]
                 if raw_inf and raw_inf != NULL:
                     liste_pot.append(raw_inf)
@@ -322,7 +326,7 @@ def extraire_poteaux_etude(
         f"{len(all_inf_nums)} inf_num uniques dans couche, "
         f"{len(coords_qgis)} poteaux avec coordonnees, "
         f"{len(dico_prives)} etudes avec terrains prives, {len(doublons)} doublons",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     
     return doublons, hors_etude, dico_etude, dico_prives, all_inf_nums, coords_qgis

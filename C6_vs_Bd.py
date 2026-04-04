@@ -12,6 +12,7 @@ Fonctionnalités:
 """
 
 from qgis.core import Qgis, QgsProject, QgsFeatureRequest, QgsExpression, NULL, QgsMessageLog, QgsSpatialIndex
+from .compat import MSG_INFO, MSG_WARNING
 import os
 import warnings
 import numpy as np
@@ -120,7 +121,7 @@ class C6_vs_Bd:
                     if "index" not in str(err) and "Colonne" not in str(err):
                         QgsMessageLog.logMessage(
                             f"[C6_vs_Bd.LectureFichiersExcelsC6] {name}: {err}",
-                            "PoleAerien", Qgis.Warning
+                            "PoleAerien", MSG_WARNING
                         )
                     continue
 
@@ -215,7 +216,7 @@ class C6_vs_Bd:
         df_out = pd.DataFrame(poteaux_out)
         QgsMessageLog.logMessage(
             f"[C6_vs_Bd] Poteaux FT: {len(df_in)} IN, {len(df_out)} OUT",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         return df_in, df_out
 
@@ -272,7 +273,7 @@ class C6_vs_Bd:
         QgsMessageLog.logMessage(
             f"[C6_vs_Bd] Études CAP FT: {len(etudes_capft)}, Fichiers C6: {len(fichiers_c6)}, "
             f"Études sans C6: {len(etudes_sans_c6)}, C6 sans étude: {len(c6_sans_etude)}",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
 
         return result

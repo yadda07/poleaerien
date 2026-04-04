@@ -15,6 +15,7 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from .core_utils import safe_float, safe_int
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
 
 try:
     import psycopg2
@@ -176,7 +177,7 @@ def _get_pg_connection():
     except Exception as e:
         try:
             from qgis.core import QgsMessageLog, Qgis
-            QgsMessageLog.logMessage(f"[COMAC_DB] PostgreSQL non disponible: {e}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"[COMAC_DB] PostgreSQL non disponible: {e}", "PoleAerien", MSG_WARNING)
         except Exception:
             pass
     
@@ -194,7 +195,7 @@ def _query_with_conn(conn, sql: str, params: tuple = ()) -> List[dict]:
     except Exception as e:
         try:
             from qgis.core import QgsMessageLog, Qgis
-            QgsMessageLog.logMessage(f"[COMAC_DB] Erreur requete PG: {e}", "PoleAerien", Qgis.Warning)
+            QgsMessageLog.logMessage(f"[COMAC_DB] Erreur requete PG: {e}", "PoleAerien", MSG_WARNING)
         except Exception:
             pass
         try:
@@ -370,7 +371,7 @@ def _ensure_loaded():
         if not pg_conn:
             try:
                 from qgis.core import QgsMessageLog, Qgis
-                QgsMessageLog.logMessage("[COMAC_DB] PostgreSQL non disponible (schema comac)", "PoleAerien", Qgis.Warning)
+                QgsMessageLog.logMessage("[COMAC_DB] PostgreSQL non disponible (schema comac)", "PoleAerien", MSG_WARNING)
             except Exception:
                 pass
             _cache_loaded = True
@@ -391,14 +392,14 @@ def _ensure_loaded():
                     f"{len(_cache_supports)} supports, {len(_cache_communes)} communes, "
                     f"{len(_cache_armements)} armements, "
                     f"{len(_cache_capacites_possibles)} refs multi-capa",
-                    "PoleAerien", Qgis.Info
+                    "PoleAerien", MSG_INFO
                 )
             except Exception:
                 pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog, Qgis
-                QgsMessageLog.logMessage(f"[COMAC_DB] ERR: Chargement BD echoue: {e}", "PoleAerien", Qgis.Critical)
+                QgsMessageLog.logMessage(f"[COMAC_DB] ERR: Chargement BD echoue: {e}", "PoleAerien", MSG_CRITICAL)
             except Exception:
                 pass
         finally:

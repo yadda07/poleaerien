@@ -32,7 +32,7 @@ except ImportError:
 
 NATURE_TO_INF_TYPE = {
     'BE': 'POT-BT',
-    'BO': 'POT-AC',
+    'BO': 'POT-BT',
     'FT': 'POT-FT',
 }
 

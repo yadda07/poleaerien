@@ -1,11 +1,11 @@
 {
   "metadata": {
-    "standard": "ISO/IEC 11179 — Information technology — Metadata registries",
+    "standard": "ISO/IEC 11179 - Information technology - Metadata registries",
     "title": "Dictionnaire de donnees - Plugin Pole Aerien",
     "description": "Registre ISO/IEC 11179. 7 modules + tableau de bord.",
     "version": "1.1.0",
     "language": "fr",
-    "organization": "NGE — Pole Aerien",
+    "organization": "NGE - Pole Aerien",
     "creation_date": "2026-03-18",
     "scope": "Rapport de diagnostic unifie et rapports individuels"
   },
@@ -398,27 +398,27 @@
     {
       "hex": "#C6EFCE",
       "usage": "Fond cellule",
-      "meaning": "Vert — conforme, OK"
+      "meaning": "Vert - conforme, OK"
     },
     {
       "hex": "#FFEB9C",
       "usage": "Fond cellule",
-      "meaning": "Orange — avertissement, absent secondaire"
+      "meaning": "Orange - avertissement, absent secondaire"
     },
     {
       "hex": "#FFC7CE",
       "usage": "Fond cellule",
-      "meaning": "Rouge — non conforme, erreur"
+      "meaning": "Rouge - non conforme, erreur"
     },
     {
       "hex": "#FF6B6B",
       "usage": "Fond cellule",
-      "meaning": "Rouge fonce — critique, depassement securite"
+      "meaning": "Rouge fonce - critique, depassement securite"
     },
     {
       "hex": "#D6E4F0",
       "usage": "Fond cellule",
-      "meaning": "Bleu clair — information, hors perimetre normal"
+      "meaning": "Bleu clair - information, hors perimetre normal"
     }
   ],
   "modules": [
@@ -1299,7 +1299,7 @@
                   },
                   {
                     "value": "AMBIGU COMMUNE",
-                    "definition": "Code poteau dans plusieurs communes, non resolu par spatial",
+                    "definition": "Meme numero d'appui dans plusieurs communes, localisation GPS non concluante",
                     "color": "#FFEB9C"
                   },
                   {
@@ -1588,8 +1588,8 @@
                     "definition": "Point Eclatement Principal"
                   },
                   {
-                    "value": "appui non localise",
-                    "definition": "Appui non localise en BDD"
+                    "value": "coordonnees GPS absentes",
+                    "definition": "Appui sans coordonnees GPS en base de donnees"
                   }
                 ]
               }
@@ -1610,7 +1610,7 @@
                   },
                   {
                     "value": "ERREUR",
-                    "definition": "Aucun BPE ou appui non localise",
+                    "definition": "Aucun boitier (BPE) a proximite, ou appui sans coordonnees GPS",
                     "color": "#FF6B6B"
                   },
                   {
@@ -2407,7 +2407,7 @@
                   },
                   {
                     "value": "ERREUR",
-                    "definition": "Boitier declare mais aucun BPE trouve, ou appui non localise",
+                    "definition": "Boitier declare dans COMAC mais aucun BPE trouve a proximite, ou appui sans coordonnees GPS",
                     "color": "#FF6B6B"
                   }
                 ]
@@ -2722,19 +2722,19 @@
                 "type": "description",
                 "rules": [
                   {
-                    "condition": "= 100%",
+                    "condition": "100%",
                     "color": "#C6EFCE",
                     "meaning": "Parfaitement conforme"
                   },
                   {
                     "condition": ">= 80%",
                     "color": "#FFEB9C",
-                    "meaning": "Avertissement — quelques anomalies"
+                    "meaning": "Avertissement - quelques anomalies"
                   },
                   {
                     "condition": "< 80%",
                     "color": "#FFC7CE",
-                    "meaning": "Non conforme — anomalies significatives"
+                    "meaning": "Non conforme - anomalies significatives"
                   }
                 ]
               }

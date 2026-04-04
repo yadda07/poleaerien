@@ -60,14 +60,18 @@ _AL_CV = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
 _F_MOD = Font(name='Calibri', size=10, bold=True, color='1F4E79')
 
-_DRAWING_COLUMNS = 13
-_DRAWING_IMAGE_WIDTH = 980
-_DRAWING_IMAGE_HEIGHT = 715
-_DRAWING_SLOT_ROWS = (4, 36)
-_DRAWING_IMAGE_ANCHORS = ('A5', 'A37')
-_DRAWING_ROW_HEIGHT = 18
-_DRAWING_SLOTS_PER_PAGE = 2
-_DRAWING_SHEET_NAME_MAX = 31
+_DRAWING_COL_WIDTH = 13
+_DRAWING_GAP_COL = 14
+_DRAWING_RIGHT_COL_START = 15
+_DRAWING_TOTAL_COLS = 27
+_DRAWING_IMAGE_W = 460
+_DRAWING_IMAGE_H = 335
+_DRAWING_IMG_ROWS = 14
+_DRAWING_ROW_H = 18
+_DRAWING_PAGE_HEADER_ROWS = 3
+_DRAWING_PAGE_USABLE_ROWS = 62
+_DRAWING_MAX_PAGES = 5
+_DRAWING_DPI = 100
 
 
 # ======================================================================
@@ -88,10 +92,17 @@ def _init_sheet(ws, key, headers, widths):
     ws.auto_filter.ref = f'A1:{get_column_letter(len(headers))}1'
 
 
+def _safe_val(v):
+    """Prevent accidental formula interpretation by Excel."""
+    if isinstance(v, str) and v and v[0] == '=':
+        return ' ' + v
+    return v
+
+
 def _row(ws, r, vals, font=None, fill=None, align=None):
     """Write one data row with consistent styling."""
     for c, v in enumerate(vals, 1):
-        cell = ws.cell(row=r, column=c, value=v)
+        cell = ws.cell(row=r, column=c, value=_safe_val(v))
         cell.font = font or _F_DATA
         cell.alignment = align or _AL_L
         cell.border = _BRD
@@ -120,7 +131,7 @@ def _df_sheet(wb, name, df, key):
     for ri, row_data in enumerate(df.itertuples(index=False), 2):
         for ci, val in enumerate(row_data, 1):
             safe_val = val if pd.notna(val) else ''
-            cell = ws.cell(row=ri, column=ci, value=safe_val)
+            cell = ws.cell(row=ri, column=ci, value=_safe_val(safe_val))
             cell.font = _F_DATA
             cell.border = _BRD
     ws.freeze_panes = 'A2'
@@ -138,7 +149,7 @@ def _write_comac_drawing_sheets(wb, result, report_options):
         except ImportError:
             from pcm_drawing import PcmDrawingRenderer
         stop_fn = lambda: _report_cancelled(report_options)
-        renderer = PcmDrawingRenderer()
+        renderer = PcmDrawingRenderer(dpi=_DRAWING_DPI)
         entries = renderer.build_support_entries(etudes_pcm, stop_fn)
     except Exception as exc:
         _report_message(report_options, f"[REPORT] Erreur rendu dessins COMAC: {exc}", 'orange')
@@ -150,97 +161,153 @@ def _write_comac_drawing_sheets(wb, result, report_options):
     entries_by_etude = {}
     for entry in entries:
         entries_by_etude.setdefault(entry['etude'], []).append(entry)
+    blocks = _build_drawing_blocks(entries_by_etude)
+    pages = _pack_drawing_pages(blocks)
     error_count = len(result.get('erreurs_pcm') or {})
-    total_sheets = sum(
-        (len(grp) + _DRAWING_SLOTS_PER_PAGE - 1) // _DRAWING_SLOTS_PER_PAGE
-        for grp in entries_by_etude.values()
-    )
-    sheet_counter = 0
-    for etude_name, etude_entries in entries_by_etude.items():
+    total_pages = len(pages)
+    all_entries_flat = [e for b in blocks for e in b['entries']]
+    diagrams_iter = renderer.render_entries(all_entries_flat, stop_fn)
+    diagram_map = {}
+    for diagram in diagrams_iter:
+        if diagram is None:
+            break
         if _report_cancelled(report_options):
             return False
-        pages = (len(etude_entries) + _DRAWING_SLOTS_PER_PAGE - 1) // _DRAWING_SLOTS_PER_PAGE
-        diagrams = renderer.render_entries(etude_entries, stop_fn)
-        for page_idx in range(pages):
-            if _report_cancelled(report_options):
-                return False
-            sheet_name = _drawing_sheet_name(etude_name, page_idx if pages > 1 else -1)
-            ws = wb.create_sheet(sheet_name)
-            _init_comac_drawing_sheet(
-                ws, etude_name, page_idx + 1, pages,
-                len(etude_entries), len(entries), error_count,
-            )
-            for slot_idx in range(_DRAWING_SLOTS_PER_PAGE):
-                diagram = next(diagrams, None)
-                if diagram is None:
-                    break
-                _place_comac_drawing(ws, slot_idx, diagram)
-            sheet_counter += 1
-            _report_drawings_progress(report_options, sheet_counter, total_sheets)
+        key = (diagram.get('etude', ''), diagram.get('support', ''))
+        diagram_map[key] = diagram
+    for page_idx, page in enumerate(pages):
+        if _report_cancelled(report_options):
+            return False
+        sheet_name = f"DESSIN_{page_idx + 1:02d}"
+        ws = wb.create_sheet(sheet_name)
+        _init_drawing_page(ws, page_idx + 1, total_pages, len(all_entries_flat), error_count)
+        for placement in page:
+            _place_study_block(ws, placement, diagram_map)
+        _report_drawings_progress(report_options, page_idx + 1, total_pages)
     return True
 
 
-def _drawing_sheet_name(etude_name, page_idx):
-    """Build Excel sheet name (max 31 chars) for a drawing page."""
-    safe = (etude_name or 'COMAC').replace('/', '_').replace('\\', '_').replace(':', '_')
-    prefix = 'DESSIN_'
-    if page_idx >= 0:
-        suffix = f'_{page_idx + 1:02d}'
-    else:
-        suffix = ''
-    max_name = _DRAWING_SHEET_NAME_MAX - len(prefix) - len(suffix)
-    if len(safe) > max_name:
-        safe = safe[:max_name]
-    return f"{prefix}{safe}{suffix}"
+def _study_block_height(n_poles):
+    return 1 + n_poles * (1 + _DRAWING_IMG_ROWS)
 
 
-def _init_comac_drawing_sheet(
-    ws, etude_name, page_idx, total_pages,
-    etude_count, global_count, error_count,
-):
+def _build_drawing_blocks(entries_by_etude):
+    blocks = []
+    for etude_name, etude_entries in entries_by_etude.items():
+        blocks.append({
+            'etude': etude_name,
+            'entries': etude_entries,
+            'height': _study_block_height(len(etude_entries)),
+        })
+    return blocks
+
+
+def _pack_drawing_pages(blocks):
+    pages = []
+    page = []
+    left_y = _DRAWING_PAGE_HEADER_ROWS + 1
+    right_y = _DRAWING_PAGE_HEADER_ROWS + 1
+    for block in blocks:
+        h = block['height']
+        placed = False
+        if left_y + h <= _DRAWING_PAGE_HEADER_ROWS + 1 + _DRAWING_PAGE_USABLE_ROWS:
+            page.append({'block': block, 'col': 'left', 'start_row': left_y})
+            left_y += h + 1
+            placed = True
+        elif right_y + h <= _DRAWING_PAGE_HEADER_ROWS + 1 + _DRAWING_PAGE_USABLE_ROWS:
+            page.append({'block': block, 'col': 'right', 'start_row': right_y})
+            right_y += h + 1
+            placed = True
+        if not placed:
+            if page:
+                pages.append(page)
+            if len(pages) >= _DRAWING_MAX_PAGES:
+                break
+            page = []
+            left_y = _DRAWING_PAGE_HEADER_ROWS + 1
+            right_y = _DRAWING_PAGE_HEADER_ROWS + 1
+            page.append({'block': block, 'col': 'left', 'start_row': left_y})
+            left_y += h + 1
+    if page and len(pages) < _DRAWING_MAX_PAGES:
+        pages.append(page)
+    return pages
+
+
+def _init_drawing_page(ws, page_num, total_pages, global_count, error_count):
     ws.sheet_properties.tabColor = _TAB.get('comac', 'EA580C')
     ws.sheet_view.showGridLines = False
     ws.page_setup.orientation = 'landscape'
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
-    for col_idx in range(1, _DRAWING_COLUMNS + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 11
-    for row_idx in range(1, 69):
-        ws.row_dimensions[row_idx].height = _DRAWING_ROW_HEIGHT
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=_DRAWING_COLUMNS)
-    title_text = f"COMAC - {etude_name}"
-    if total_pages > 1:
-        title_text += f" ({page_idx}/{total_pages})"
-    title = ws.cell(row=1, column=1, value=title_text)
+    for col_idx in range(1, _DRAWING_TOTAL_COLS + 1):
+        if col_idx == _DRAWING_GAP_COL:
+            ws.column_dimensions[get_column_letter(col_idx)].width = 2
+        else:
+            ws.column_dimensions[get_column_letter(col_idx)].width = 11
+    for row_idx in range(1, _DRAWING_PAGE_HEADER_ROWS + 1 + _DRAWING_PAGE_USABLE_ROWS + 2):
+        ws.row_dimensions[row_idx].height = _DRAWING_ROW_H
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=_DRAWING_TOTAL_COLS)
+    title = ws.cell(
+        row=1, column=1,
+        value=f"DESSINS COMAC - Page {page_num}/{total_pages}",
+    )
     title.font = _F_TITLE
     title.alignment = _AL_C
-    subtitle = f"{etude_count} appuis zone | {global_count} total"
+    subtitle = f"{global_count} appuis total"
     if error_count:
         subtitle += f" | {error_count} erreur(s) PCM"
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=_DRAWING_COLUMNS)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=_DRAWING_TOTAL_COLS)
     sub = ws.cell(row=2, column=1, value=subtitle)
     sub.font = _F_MOD
     sub.alignment = _AL_C
 
 
-def _place_comac_drawing(ws, slot_idx, diagram):
-    top_row = _DRAWING_SLOT_ROWS[slot_idx]
-    ws.merge_cells(start_row=top_row, start_column=1, end_row=top_row, end_column=_DRAWING_COLUMNS)
-    header = ws.cell(
-        row=top_row,
-        column=1,
-        value=f"{diagram.get('support', '')} | {diagram.get('connections', 0)} liaison(s)"
+def _place_study_block(ws, placement, diagram_map):
+    block = placement['block']
+    col = placement['col']
+    row_cursor = placement['start_row']
+    if col == 'left':
+        col_start = 1
+        col_end = _DRAWING_COL_WIDTH
+    else:
+        col_start = _DRAWING_RIGHT_COL_START
+        col_end = _DRAWING_RIGHT_COL_START + _DRAWING_COL_WIDTH - 1
+    ws.merge_cells(
+        start_row=row_cursor, start_column=col_start,
+        end_row=row_cursor, end_column=col_end,
     )
-    header.font = _F_BOLD
-    header.fill = _P_INFO
-    header.alignment = _AL_C
-    header.border = _BRD
-    stream = BytesIO(diagram.get('image_bytes', b''))
-    image = ExcelImage(stream)
-    image.width = _DRAWING_IMAGE_WIDTH
-    image.height = _DRAWING_IMAGE_HEIGHT
-    image._poleaerien_stream = stream
-    ws.add_image(image, _DRAWING_IMAGE_ANCHORS[slot_idx])
+    etude_cell = ws.cell(row=row_cursor, column=col_start, value=block['etude'])
+    etude_cell.font = Font(name='Calibri', size=10, bold=True, color='FFFFFF')
+    etude_cell.fill = _P_HEAD
+    etude_cell.alignment = _AL_C
+    etude_cell.border = _BRD
+    row_cursor += 1
+    for entry in block['entries']:
+        key = (entry['etude'], entry['support_name'])
+        diagram = diagram_map.get(key, {})
+        ws.merge_cells(
+            start_row=row_cursor, start_column=col_start,
+            end_row=row_cursor, end_column=col_end,
+        )
+        header = ws.cell(
+            row=row_cursor, column=col_start,
+            value=f"{entry['support_name']} | {entry['connections']} liaison(s)",
+        )
+        header.font = _F_BOLD
+        header.fill = _P_INFO
+        header.alignment = _AL_C
+        header.border = _BRD
+        row_cursor += 1
+        image_bytes = diagram.get('image_bytes', b'')
+        if image_bytes:
+            stream = BytesIO(image_bytes)
+            img = ExcelImage(stream)
+            img.width = _DRAWING_IMAGE_W
+            img.height = _DRAWING_IMAGE_H
+            img._poleaerien_stream = stream
+            anchor = f"{get_column_letter(col_start)}{row_cursor}"
+            ws.add_image(img, anchor)
+        row_cursor += _DRAWING_IMG_ROWS
 
 
 # ======================================================================
@@ -389,7 +456,7 @@ def _checks_comac(r):
                         f"{detail_match}, {ne} absents couche SRO"))
         if nr:
             checks.append(("Appuis non resolus commune/code", 0, nr,
-                            f"{nr} presents dans la couche SRO mais ambigu entre plusieurs communes ou non leves par le spatial"))
+                            f"{nr} presents dans le SRO mais ambigus entre plusieurs communes (localisation GPS non concluante)"))
         if hp:
             checks.append(("Appuis hors perimetre etude", hp, 0,
                             f"{hp} existent dans couche SRO mais hors zones etude COMAC"))
@@ -442,8 +509,8 @@ def _checks_comac(r):
         if verif_boitiers:
             ok_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'OK')
             ecart_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ECART')
-            err_loc_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR' and v.get('bpe_noe_type') == 'appui non localisé')
-            err_abs_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR' and v.get('bpe_noe_type') != 'appui non localisé')
+            err_loc_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR' and v.get('bpe_noe_type') == 'coordonnees GPS absentes')
+            err_abs_b = sum(1 for v in verif_boitiers.values() if v.get('statut') == 'ERREUR' and v.get('bpe_noe_type') != 'coordonnees GPS absentes')
             nok_b = ecart_b + err_loc_b + err_abs_b
             checks.append(("Verif boitiers COMAC vs BPE", ok_b, nok_b,
                             f"{ok_b} OK, {ecart_b} ecarts type, {err_abs_b} absents BPE, {err_loc_b} appuis non resolus ({nb_non} Non)"))
@@ -580,7 +647,7 @@ def _write_dashboard(wb, batch_results):
     ws.cell(row=3, column=1, value="Modules :").font = _F_BOLD
     ws.cell(row=3, column=2, value=str(len(batch_results))).font = _F_DATA
 
-    # QP-04: Resume executif — detect be_type and propagate to all results
+    # QP-04: Resume executif - detect be_type and propagate to all results
     sro = ''
     be_label = ''
     summary_parts = []
@@ -606,7 +673,7 @@ def _write_dashboard(wb, batch_results):
                 name = _NAMES.get(key, key)
                 summary_parts.append(f"{name}: {ok} OK/{ok+nok}")
     ws.merge_cells('A4:H4')
-    c4 = ws.cell(row=4, column=1, value=' — '.join(summary_parts))
+    c4 = ws.cell(row=4, column=1, value=' - '.join(summary_parts))
     c4.font = Font(name='Calibri', size=9, italic=True, color='555555')
     c4.alignment = _AL_C
 
@@ -783,7 +850,7 @@ def write_capft(wb, result):
     hors_perimetre = resultats[3] if len(resultats) > 3 else result.get('dico_hors_perimetre', {})
     if hors_perimetre and ws_analyse:
         sro_val = result.get('fddcpi_sro', '')
-        hp_label = f"HORS PERIMETRE - existe dans la zone {sro_val} mais hors zone etude CAP_FT" if sro_val else "HORS PERIMETRE - existe dans la zone SRO mais hors zone etude CAP_FT"
+        hp_label = f"HORS PERIMETRE - appui present dans le SRO {sro_val} mais hors zone d'etude CAP FT" if sro_val else "HORS PERIMETRE - appui present dans le SRO mais hors zone d'etude CAP FT"
         r = ws_analyse.max_row + 1
         for fichier, appuis in hors_perimetre.items():
             for inf_num in appuis:
@@ -825,7 +892,7 @@ def write_comac(wb, result, report_options):
         v = list(values)[:4]
         _row6(r, v + [
             "OK (nom)",
-            "Correspondance directe par numero de poteau."
+            "Numero d'appui identique entre le fichier COMAC et la base de donnees."
         ], fill=_P_OK)
         r += 1
 
@@ -835,7 +902,7 @@ def write_comac(wb, result, report_options):
             m.get('inf_num_qgis', ''), '',
             m.get('inf_num_excel', ''), m.get('fichier', ''),
             f"OK (spatial {dist}m)",
-            f"Ambiguite commune levee par proximite geographique ({dist}m, tolerance 7.5m)."
+            f"Meme numero d'appui dans plusieurs communes ; identifie par proximite GPS ({dist}m, seuil 7.5m)."
         ], fill=_P_OK)
         r += 1
 
@@ -843,9 +910,9 @@ def write_comac(wb, result, report_options):
         for inf_num in appuis:
             _row6(r, ["", "", inf_num, fichier,
                 "AMBIGU COMMUNE",
-                "Le code poteau est present dans plusieurs communes de la couche QGIS. "
-                "Le matching spatial n'a pas leve l'ambiguite (coordonnees manquantes ou distance > 7.5m). "
-                "Verifier la commune du poteau dans infra_pt_pot."
+                "Meme numero d'appui dans plusieurs communes en base de donnees. "
+                "La localisation GPS n'a pas permis de departager "
+                "(coordonnees absentes ou ecart > 7.5m). Verifier le code INSEE rattache a cet appui."
             ], fill=_P_WARN)
             r += 1
 
@@ -853,8 +920,8 @@ def write_comac(wb, result, report_options):
         for inf_num in appuis:
             _row6(r, ["", "", inf_num, fichier,
                 "ABSENT SRO",
-                "Ce poteau est present dans le fichier COMAC mais absent de la couche infra_pt_pot du SRO. "
-                "Verifier si le poteau a bien ete cree en base de donnees."
+                "Appui declare dans le fichier COMAC mais introuvable en base de donnees pour ce SRO. "
+                "Verifier que l'appui a bien ete cree ou que le SRO est correct."
             ], fill=_P_ERR)
             r += 1
 
@@ -862,8 +929,8 @@ def write_comac(wb, result, report_options):
         for inf_num in appuis:
             _row6(r, [inf_num, etude, "", "",
                 "NON COUVERT",
-                "Ce poteau BT est present dans la couche QGIS mais n'est reference dans aucun fichier COMAC. "
-                "Verifier si une etude couvrant ce poteau est manquante ou si ce poteau est hors perimetre d'intervention."
+                "Appui BT present en base de donnees mais absent de tous les fichiers COMAC. "
+                "Verifier si une etude couvre cet appui ou s'il est hors perimetre d'intervention."
             ], fill=_P_WARN)
             r += 1
 
@@ -871,8 +938,8 @@ def write_comac(wb, result, report_options):
         for inf_num in appuis:
             _row6(r, ["", "", inf_num, fichier,
                 "HORS ZONE ETUDE",
-                "Ce poteau existe dans la couche SRO mais se situe hors des polygones etude_comac. "
-                "Normal si le perimetre d'etude ne couvre pas ce secteur geographique."
+                "Appui present dans le SRO mais situe hors des zones d'etude COMAC. "
+                "Normal si le perimetre d'etude ne couvre pas ce secteur."
             ], fill=_P_INFO)
             r += 1
 
@@ -1000,127 +1067,44 @@ def write_comac(wb, result, report_options):
 
 
 def _write_pcm_vs_bdd_sheet(wb, result):
-    """Write PCM vs BDD comparison sheet if data available."""
+    """Write PCM vs BDD comparison sheet (supports POT-BT uniquement)."""
     pcm_data = result.get('pcm_vs_bdd')
-    mecanique = result.get('pcm_vs_bdd_mecanique')
-    if not pcm_data and not mecanique:
+    if not pcm_data:
         return
     key = 'comac'
 
-    # Feuille SUPPORTS
-    if pcm_data:
-        ws = wb.create_sheet("PCM_SUPPORTS")
-        hdrs = ["ETUDE", "NOM PCM", "INF_NUM BDD", "NOE_CODEXT BDD",
-                "METHODE", "TYPE PCM", "TYPE BDD", "TYPE OK",
-                "ECART COORD (m)", "ETAT PCM", "ETAT BDD", "STATUT"]
-        widths = [25, 18, 22, 22, 14, 10, 10, 10, 16, 16, 16, 18]
-        _init_sheet(ws, key, hdrs, widths)
-        r = 2
-        for comp in pcm_data.etudes:
-            for m in comp.supports_ok:
-                _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
-                             m.match_method, m.type_pcm, m.type_bdd, 'OK',
-                             round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
-                             m.etat_pcm, m.etat_bdd, 'OK'], fill=_P_OK)
-                r += 1
-            for m in comp.supports_type_ko:
-                _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
-                             m.match_method, m.type_pcm, m.type_bdd, 'KO',
-                             round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
-                             m.etat_pcm, m.etat_bdd, 'TYPE_KO'], fill=_P_CRIT)
-                r += 1
-            for m in comp.supports_coord_ko:
-                _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
-                             m.match_method, m.type_pcm, m.type_bdd,
-                             'OK' if m.type_coherent else 'KO',
-                             round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
-                             m.etat_pcm, m.etat_bdd, 'COORD_KO'], fill=_P_WARN)
-                r += 1
-            for m in comp.supports_absents_bdd:
-                _row(ws, r, [comp.num_etude, m.nom_pcm, '', '',
-                             '', m.type_pcm, '', '',
-                             '', m.etat_pcm, '', 'ABSENT_BDD'], fill=_P_ERR)
-                r += 1
-
-    # Feuille CABLES
-    has_cables = bool(pcm_data) and any(
-        comp.cables_ok or comp.cables_absents_bdd
-        or comp.cables_capacite_ko or comp.cables_portee_ko
-        for comp in pcm_data.etudes
-    )
-    if has_cables:
-        ws_c = wb.create_sheet("PCM_CABLES")
-        hdrs_c = ["ETUDE", "CABLE PCM", "CAPA PCM", "CAPA BDD", "CAPA OK",
-                   "NB SEG PCM", "NB SEG BDD", "ECARTS PORTEES", "STATUT"]
-        widths_c = [25, 18, 10, 10, 10, 12, 12, 45, 18]
-        _init_sheet(ws_c, key, hdrs_c, widths_c)
-        r_c = 2
-        for comp in pcm_data.etudes:
-            for cm in comp.cables_ok:
-                _row(ws_c, r_c, [comp.num_etude, cm.cable_pcm, cm.capacite_pcm,
-                                  cm.capacite_bdd, 'OK', cm.nb_segments_pcm,
-                                  cm.nb_segments_bdd, '', 'OK'], fill=_P_OK)
-                r_c += 1
-            for cm in comp.cables_capacite_ko:
-                _row(ws_c, r_c, [comp.num_etude, cm.cable_pcm, cm.capacite_pcm,
-                                  cm.capacite_bdd, 'KO', cm.nb_segments_pcm,
-                                  cm.nb_segments_bdd, '', 'CAPA_KO'], fill=_P_CRIT)
-                r_c += 1
-            for cm in comp.cables_portee_ko:
-                ecarts_str = '; '.join(
-                    f"{e['portee_pcm']}m vs {e['portee_bdd']}m ({e['ecart_pct']}%)"
-                    for e in cm.ecarts_portees
-                )
-                _row(ws_c, r_c, [comp.num_etude, cm.cable_pcm, cm.capacite_pcm,
-                                  cm.capacite_bdd,
-                                  'OK' if cm.capacite_coherente else 'KO',
-                                  cm.nb_segments_pcm, cm.nb_segments_bdd,
-                                  ecarts_str, 'PORTEE_KO'], fill=_P_WARN)
-                r_c += 1
-            for cm in comp.cables_absents_bdd:
-                _row(ws_c, r_c, [comp.num_etude, cm.cable_pcm, cm.capacite_pcm,
-                                  '', '', cm.nb_segments_pcm, 0,
-                                  '', 'ABSENT_BDD'], fill=_P_ERR)
-                r_c += 1
-
-    # Feuille MECANIQUE
-    if mecanique:
-        has_any = any(
-            v['validation'].hypotheses_inconnues
-            or v['validation'].armements_inconnus
-            or v['validation'].cables_inconnus
-            or v['validation'].supports_catalogue_ko
-            for v in mecanique
-        )
-        if has_any:
-            ws_m = wb.create_sheet("PCM_MECANIQUE")
-            hdrs_m = ["ETUDE", "TYPE", "DETAIL", "VALEUR"]
-            widths_m = [25, 20, 40, 30]
-            _init_sheet(ws_m, key, hdrs_m, widths_m)
-            r_m = 2
-            for v in mecanique:
-                etude_name = v['etude']
-                val = v['validation']
-                for h in val.hypotheses_inconnues:
-                    _row(ws_m, r_m, [etude_name, 'HYPOTHESE INCONNUE', h, ''],
-                         fill=_P_WARN)
-                    r_m += 1
-                for a in val.armements_inconnus:
-                    _row(ws_m, r_m, [etude_name, 'ARMEMENT INCONNU',
-                         a.get('nom_armement', ''),
-                         f"Support: {a.get('support', '')}, Conducteur: {a.get('conducteur', '')}"],
-                         fill=_P_WARN)
-                    r_m += 1
-                for c in val.cables_inconnus:
-                    _row(ws_m, r_m, [etude_name, 'CABLE INCONNU', c, ''],
-                         fill=_P_WARN)
-                    r_m += 1
-                for s in val.supports_catalogue_ko:
-                    _row(ws_m, r_m, [etude_name, 'SUPPORT HORS CATALOGUE',
-                         s.get('nom_pcm', ''),
-                         f"H={s.get('hauteur', 0)} {s.get('classe', '')} E={s.get('effort', 0)}"],
-                         fill=_P_INFO)
-                    r_m += 1
+    ws = wb.create_sheet("PCM_SUPPORTS")
+    hdrs = ["ETUDE", "NOM PCM", "INF_NUM BDD", "NOE_CODEXT BDD",
+            "METHODE", "TYPE PCM", "TYPE BDD", "TYPE OK",
+            "ECART COORD (m)", "ETAT PCM", "ETAT BDD", "STATUT"]
+    widths = [25, 18, 22, 22, 14, 10, 10, 10, 16, 16, 16, 18]
+    _init_sheet(ws, key, hdrs, widths)
+    r = 2
+    for comp in pcm_data.etudes:
+        for m in comp.supports_ok:
+            _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
+                         m.match_method, m.type_pcm, m.type_bdd, 'OK',
+                         round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
+                         m.etat_pcm, m.etat_bdd, 'OK'], fill=_P_OK)
+            r += 1
+        for m in comp.supports_type_ko:
+            _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
+                         m.match_method, m.type_pcm, m.type_bdd, 'KO',
+                         round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
+                         m.etat_pcm, m.etat_bdd, 'TYPE_KO'], fill=_P_CRIT)
+            r += 1
+        for m in comp.supports_coord_ko:
+            _row(ws, r, [comp.num_etude, m.nom_pcm, m.inf_num_bdd, m.noe_codext_bdd,
+                         m.match_method, m.type_pcm, m.type_bdd,
+                         'OK' if m.type_coherent else 'KO',
+                         round(m.ecart_coord_m, 1) if m.ecart_coord_m >= 0 else '',
+                         m.etat_pcm, m.etat_bdd, 'COORD_KO'], fill=_P_WARN)
+            r += 1
+        for m in comp.supports_absents_bdd:
+            _row(ws, r, [comp.num_etude, m.nom_pcm, '', '',
+                         '', m.type_pcm, '', '',
+                         '', m.etat_pcm, '', 'ABSENT_BDD'], fill=_P_ERR)
+            r += 1
 
 
 # ======================================================================
@@ -1374,7 +1358,8 @@ def _write_gespot_absent_gespot(wb, records):
 
 def _write_gespot_anomalies(wb, anomalies):
     ws = wb.create_sheet('GESPOT_ANOMALIES')
-    headers = ['SOURCE', 'FICHIER', 'NUM', 'TYPE_ANOMALIE', 'DETAIL', 'ACTION']
+    headers = ['SOURCE', 'FICHIER_CONCERNE', 'APPUI_CONCERNE', 'CODE_ANOMALIE',
+               'EXPLICATION', 'ACTION_A_REALISER']
     for col_idx, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=col_idx, value=h)
         c.fill = _P_HEAD
@@ -1418,7 +1403,7 @@ def _write_glossary_sheet(wb, data):
     ws.sheet_properties.tabColor = '555555'
 
     ws.merge_cells('A1:B1')
-    t = ws.cell(row=1, column=1, value="GLOSSAIRE — POLE AERIEN")
+    t = ws.cell(row=1, column=1, value="GLOSSAIRE - POLE AERIEN")
     t.font = _F_TITLE
     t.alignment = _AL_C
 
@@ -1466,7 +1451,7 @@ def _write_dictionary_sheet(wb, data):
     ws.sheet_properties.tabColor = '555555'
 
     ws.merge_cells('A1:G1')
-    t = ws.cell(row=1, column=1, value="DICTIONNAIRE DE DONNEES — ISO/IEC 11179")
+    t = ws.cell(row=1, column=1, value="DICTIONNAIRE DE DONNEES - ISO/IEC 11179")
     t.font = _F_TITLE
     t.alignment = _AL_C
 
@@ -1570,8 +1555,9 @@ def _report_message(report_options, message, color='grey'):
         callback(message, color)
         return
     try:
-        from qgis.core import QgsMessageLog, Qgis
-        level = Qgis.Warning if color == 'orange' else Qgis.Info
+        from qgis.core import QgsMessageLog
+        from .compat import MSG_WARNING, MSG_INFO
+        level = MSG_WARNING if color == 'orange' else MSG_INFO
         QgsMessageLog.logMessage(message, "PoleAerien", level)
     except Exception:
         pass

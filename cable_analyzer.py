@@ -12,6 +12,7 @@ from qgis.core import (
 )
 
 from .db_connection import CableSegment
+from .compat import MSG_INFO, MSG_WARNING
 
 
 def _safe_attr_text(feature, idx):
@@ -95,7 +96,7 @@ class CableAnalyzer:
         QgsMessageLog.logMessage(
             f"Analyse charge: {len(appuis)} appuis, {len(cables)} câbles "
             f"({'aériens/façade' if only_aerien else 'tous'})",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         
         for appui in appuis:
@@ -241,20 +242,20 @@ class CableAnalyzer:
             diff = result.nb_cables_bdd - result.nb_cables_c6
             if diff > 0:
                 messages.append(
-                    f"BDD: {result.nb_cables_bdd} câbles, C6: {result.nb_cables_c6} "
-                    f"(+{diff} câbles en BDD non déclarés en C6)"
+                    f"Base : {result.nb_cables_bdd} cable(s), annexe C6 : {result.nb_cables_c6} "
+                    f"(+{diff} cable(s) en base non declare(s) dans l'annexe C6)"
                 )
             else:
                 messages.append(
-                    f"BDD: {result.nb_cables_bdd} câbles, C6: {result.nb_cables_c6} "
-                    f"({abs(diff)} câbles C6 non trouvés en BDD)"
+                    f"Base : {result.nb_cables_bdd} cable(s), annexe C6 : {result.nb_cables_c6} "
+                    f"({abs(diff)} cable(s) de l'annexe C6 introuvable(s) en base)"
                 )
         
         if result.capacite_totale_bdd != result.capacite_totale_c6:
             diff = result.capacite_totale_bdd - result.capacite_totale_c6
             messages.append(
-                f"Capacité BDD: {result.capacite_totale_bdd} FO, C6: {result.capacite_totale_c6} FO "
-                f"(différence: {diff:+d} FO)"
+                f"Capacite fibre : base = {result.capacite_totale_bdd} FO, annexe C6 = {result.capacite_totale_c6} FO "
+                f"(ecart {diff:+d} FO)"
             )
         
         return " | ".join(messages) if messages else ""
@@ -310,7 +311,7 @@ def extraire_appuis_from_layer(layer: QgsVectorLayer, field_num_appui: str = 'nu
         QgsMessageLog.logMessage(
             f"Champ numéro d'appui non trouvé dans {layer.name()}. "
             f"Champs disponibles: {field_names[:10]}...",
-            "PoleAerien", Qgis.Warning
+            "PoleAerien", MSG_WARNING
         )
         return appuis
     
@@ -435,7 +436,7 @@ def _get_attache_extensions(
 def compter_cables_par_appui(
     cables: List[CableSegment],
     appuis: List[Dict],
-    tolerance: float = 0.5,
+    tolerance: float = 1.5,
     group_by_gid: bool = False,
     attaches_parsed: Optional[List[Dict]] = None,
     match_mode: str = 'endpoint',
@@ -469,7 +470,7 @@ def compter_cables_par_appui(
     if not cables or not appuis:
         QgsMessageLog.logMessage(
             f"compter_cables_par_appui: SKIP (cables={len(cables) if cables else 0}, appuis={len(appuis) if appuis else 0})",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         return result
     
@@ -500,7 +501,7 @@ def compter_cables_par_appui(
     if nb_appuis_no_geom:
         QgsMessageLog.logMessage(
             f"compter_cables_par_appui: {nb_appuis_no_geom}/{len(appuis_by_id)} appuis SANS geometrie",
-            "PoleAerien", Qgis.Warning
+            "PoleAerien", MSG_WARNING
         )
 
     # Index spatial O(log n): appuis + points d'extension via attaches
@@ -646,7 +647,7 @@ def compter_cables_par_appui(
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erreur comptage câble: {e}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
     
     # Resume matching
@@ -657,7 +658,7 @@ def compter_cables_par_appui(
         f"{nb_cables_skipped_geom} sans geom) | "
         f"{nb_total_matches} matches ({nb_endpoint_matches} endpoint, {nb_midline_matches} milieu) | "
         f"{nb_with_cables}/{len(result)} appuis avec cables",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
 
     if group_by_gid:
@@ -668,7 +669,7 @@ def compter_cables_par_appui(
         if nb_gid_dedup > 0:
             QgsMessageLog.logMessage(
                 f"compter_cables_par_appui: {nb_gid_dedup} segments fusionnes par dedup GID",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
 
     # Nettoyer les sets internes
@@ -723,7 +724,7 @@ def comparer_source_cables(
         f"comparer_source_cables({source_label} vs {ref_label}): "
         f"{len(source_keys)} appuis {source_label}, {len(ref_keys)} appuis {ref_label}, "
         f"{len(matched_keys)} correspondances, {len(missing_keys)} absents",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     if missing_keys:
         bt_missing = sorted(k for k in missing_keys if k.startswith('BT'))
@@ -732,12 +733,12 @@ def comparer_source_cables(
             QgsMessageLog.logMessage(
                 f"  {len(bt_missing)} appui(s) BT absents (poteaux BT non charges dans infra_pt_pot): "
                 f"{bt_missing[:8]}{'...' if len(bt_missing) > 8 else ''}",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
         if other_missing:
             QgsMessageLog.logMessage(
                 f"  {len(other_missing)} appui(s) COMAC sans poteau dans {ref_label}: {other_missing[:5]}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
     nb_logged_ecarts = 0
@@ -764,7 +765,7 @@ def comparer_source_cables(
         messages = []
         if not bdd_data:
             statut = f"ABSENT_{ref_label.upper().replace(' ', '_')}"
-            messages.append(f"Appui non trouve dans les appuis QGIS ({ref_label})")
+            messages.append(f"Appui introuvable en base de donnees ({ref_label})")
         else:
             ecart_count = nb_cables_source != nb_cables_bdd
             ecart_capa = not capacites_compatibles(capas_possibles, capas_bdd)
@@ -772,13 +773,13 @@ def comparer_source_cables(
             if ecart_count:
                 diff = nb_cables_bdd - nb_cables_source
                 messages.append(
-                    f"Écart nombre: {diff:+d} câble(s) ({ref_label}={nb_cables_bdd}, {source_label}={nb_cables_source})"
+                    f"Nombre de cables different : {ref_label}={nb_cables_bdd}, {source_label}={nb_cables_source} (ecart {diff:+d})"
                 )
             if ecart_capa:
                 src_str = '+'.join(capas_display) or '?'
                 bdd_str = '+'.join(str(c) for c in capas_bdd) or '?'
                 messages.append(
-                    f"Écart capacité: {source_label}=[{src_str}] vs {ref_label}=[{bdd_str}]"
+                    f"Capacites FO differentes : {source_label}=[{src_str}] FO vs {ref_label}=[{bdd_str}] FO"
                 )
 
             statut = "ECART" if (ecart_count or ecart_capa) else "OK"
@@ -910,7 +911,7 @@ def verifier_boitiers(
 
         if not appui_geom:
             entry['statut'] = 'ERREUR'
-            entry['bpe_noe_type'] = 'appui non localisé'
+            entry['bpe_noe_type'] = 'coordonnees GPS absentes'
             result[num_appui] = entry
             continue
 
@@ -1043,7 +1044,7 @@ def reconstituer_portees_bdd(
     QgsMessageLog.logMessage(
         f"reconstituer_portees_bdd: {len(troncons)} troncons reconstitues "
         f"({nb_one_end} avec 1 seul appui, {nb_no_end} sans appui)",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     return troncons
 
@@ -1171,7 +1172,7 @@ def extraire_portees_gracethd(
     QgsMessageLog.logMessage(
         f"extraire_portees_gracethd: {len(troncons)} troncons inferes "
         f"depuis {nb_cables_ok} cables ({nb_cables_no_appui} sans appuis proches)",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     return troncons
 
@@ -1318,8 +1319,8 @@ def comparer_portees(
         if not matches:
             entry['statut'] = 'ABSENT_REF'
             entry['message'] = (
-                f"Troncon {dep_pcm}->{arr_pcm} absent de la reference "
-                f"({dep_ref}->{arr_ref})"
+                f"Portee {dep_pcm} vers {arr_pcm} introuvable dans la reference "
+                f"({dep_ref} vers {arr_ref})"
             )
             nb_absent += 1
         else:
@@ -1342,8 +1343,8 @@ def comparer_portees(
             else:
                 entry['statut'] = 'ECART'
                 entry['message'] = (
-                    f"Ecart portee: PCM={pcm.portee_m}m, "
-                    f"Ref={best.portee_m}m ({ecart_m:+.1f}m, {ecart_pct:.1f}%)"
+                    f"Ecart de portee : PCM = {pcm.portee_m}m, reference = {best.portee_m}m "
+                    f"(difference {ecart_m:+.1f}m, soit {ecart_pct:.1f}%)"
                 )
                 nb_ecart += 1
 
@@ -1377,7 +1378,7 @@ def comparer_portees(
         f"{nb_ok} OK, {nb_ecart} ecarts, {nb_absent} absents ref, "
         f"{nb_ref_hors_pcm} ref hors perimetre PCM (ignores), "
         f"{nb_existant} existants ignores (tolerance={tolerance_pct}%)",
-        "PoleAerien", Qgis.Info
+        "PoleAerien", MSG_INFO
     )
     # Diagnostic: premiers ecarts pour comprendre les valeurs
     ecarts_sample = [e for e in result if e.get('statut') == 'ECART'][:10]
@@ -1388,7 +1389,7 @@ def comparer_portees(
             f"PCM={e['portee_pcm']}m, Ref={e['portee_ref']}m, "
             f"ecart={e['ecart_m']:+.1f}m ({e['ecart_pct']:.1f}%), "
             f"conf={e['confiance_ref']}",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
     absents_sample = [e for e in result if e.get('statut') == 'ABSENT_REF'][:5]
     for e in absents_sample:
@@ -1396,7 +1397,7 @@ def comparer_portees(
             f"  [ABSENT_REF] {e['support_depart_pcm']}->{e['support_arrivee_pcm']} "
             f"(traduit: {e['support_depart_ref']}->{e['support_arrivee_ref']}): "
             f"PCM={e['portee_pcm']}m, cable={e['cable']}",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
     return result
 

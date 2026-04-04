@@ -17,6 +17,7 @@ from qgis.core import (
     QgsVectorLayer, QgsDataSourceUri, QgsProject,
     QgsMessageLog, Qgis
 )
+from .compat import MSG_INFO, MSG_WARNING
 
 from .db_connection import get_shared_connection
 
@@ -75,7 +76,7 @@ class DbLayerLoader:
         if not conn_name:
             QgsMessageLog.logMessage(
                 "Mode Projet: connexion PostgreSQL 'Auvergne' non trouvee",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return False
 
@@ -108,14 +109,14 @@ class DbLayerLoader:
             QgsMessageLog.logMessage(
                 f"Mode Projet: couche '{layer_name}' invalide "
                 f"(table={self._schema}.{table_name}, filtre={sql_filter})",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
             return None
 
         feat_count = layer.featureCount()
         QgsMessageLog.logMessage(
             f"Mode Projet: {layer_name} = {feat_count} entites",
-            "PoleAerien", Qgis.Info
+            "PoleAerien", MSG_INFO
         )
         return layer
 

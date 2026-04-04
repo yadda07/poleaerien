@@ -14,17 +14,25 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QLineEdit, QCheckBox, QFrame,
     QTextBrowser, QProgressBar, QFileDialog,
-    QWidget, QScrollArea, QSplitter,
+    QWidget, QSplitter,
     QRadioButton, QButtonGroup, QDialogButtonBox,
     QDoubleSpinBox,
 )
-from qgis.PyQt.QtCore import Qt, QSize, QEvent, pyqtSignal, QStringListModel
+from qgis.PyQt.QtCore import Qt, QSize, QEvent, pyqtSignal
 from qgis.PyQt.QtGui import QTextCursor, QFont, QPalette, QColor
-from qgis.core import QgsApplication, QgsProject, QgsMapLayerProxyModel, QgsSettings
+from qgis.core import QgsApplication, QgsProject, QgsSettings
 from qgis.gui import QgsMapLayerComboBox, QgsCollapsibleGroupBox
 
+from .compat import (
+    VERTICAL,
+    CURSOR_POINTING,
+    WF_NO_HELP, CASE_INSENSITIVE, MATCH_CONTAINS,
+    PAL_BASE, PAL_WINDOW, PAL_WINDOW_TEXT, PAL_MID, PAL_MIDLIGHT,
+    PAL_BRIGHT_TEXT, PAL_HIGHLIGHT,
+    FRAME_HLINE, FRAME_SUNKEN, BTN_OK, BTN_CANCEL,
+    LAYER_FILTER_POINT, LAYER_FILTER_POLYGON,
+)
 from .project_detector import detect_project, DetectionResult, analyse_livrable
-from .batch_runner import MODULE_REGISTRY
 from .async_tasks import SmoothProgressController
 
 
@@ -76,19 +84,19 @@ class _ThemeColors:
     @classmethod
     def _is_dark(cls):
         p = cls.pal()
-        # QPalette.Base is the text-widget background — Qt synthesizes it from
+        # QPalette.Base is the text-widget background - Qt synthesizes it from
         # QSS stylesheets, so it reflects QGIS dark themes reliably.
-        base = p.color(QPalette.Base)
+        base = p.color(PAL_BASE)
         if base.isValid() and base.lightnessF() < 0.5:
             return True
         # Fallback: main window background
-        return p.color(QPalette.Window).lightnessF() < 0.5
+        return p.color(PAL_WINDOW).lightnessF() < 0.5
 
     # --- Semantic colors (adapt to light/dark) ---
 
     @classmethod
     def ok(cls):
-        """Success / positive — green tones."""
+        """Success / positive - green tones."""
         return QColor(76, 175, 80) if cls._is_dark() else QColor(46, 125, 50)
 
     @classmethod
@@ -101,7 +109,7 @@ class _ThemeColors:
 
     @classmethod
     def error(cls):
-        """Error / destructive — red tones."""
+        """Error / destructive - red tones."""
         return QColor(239, 83, 80) if cls._is_dark() else QColor(198, 40, 40)
 
     @classmethod
@@ -110,19 +118,19 @@ class _ThemeColors:
 
     @classmethod
     def info(cls):
-        """Information / accent — blue tones."""
+        """Information / accent - blue tones."""
         return QColor(100, 181, 246) if cls._is_dark() else QColor(21, 101, 192)
 
     @classmethod
     def warn(cls):
-        """Warning — orange tones."""
+        """Warning - orange tones."""
         return QColor(255, 167, 38) if cls._is_dark() else QColor(230, 81, 0)
 
     @classmethod
     def dim(cls):
         """Dimmed / secondary text."""
         p = cls.pal()
-        c = p.color(QPalette.WindowText)
+        c = p.color(PAL_WINDOW_TEXT)
         c.setAlphaF(0.55)
         return c
 
@@ -131,25 +139,25 @@ class _ThemeColors:
         """Background for the project tag pill."""
         p = cls.pal()
         if cls._is_dark():
-            return p.color(QPalette.Midlight)
-        return p.color(QPalette.Mid)
+            return p.color(PAL_MIDLIGHT)
+        return p.color(PAL_MID)
 
     @classmethod
     def tag_fg(cls):
         """Foreground for the project tag pill."""
         p = cls.pal()
         if cls._is_dark():
-            return p.color(QPalette.WindowText)
-        return p.color(QPalette.BrightText)
+            return p.color(PAL_WINDOW_TEXT)
+        return p.color(PAL_BRIGHT_TEXT)
 
     @classmethod
     def highlight(cls):
         """The native highlight color from the palette."""
-        return cls.pal().color(QPalette.Highlight)
+        return cls.pal().color(PAL_HIGHLIGHT)
 
     @classmethod
     def progress_chunk(cls):
-        """Progress bar fill — uses the highlight or ok color."""
+        """Progress bar fill - uses the highlight or ok color."""
         return cls.highlight()
 
 
@@ -159,7 +167,7 @@ def _c(color):
 
 
 # ---------------------------------------------------------------------------
-#  Targeted styles — only for action buttons; everything else is native Qt
+#  Targeted styles - only for action buttons; everything else is native Qt
 # ---------------------------------------------------------------------------
 
 def _btn_start_style():
@@ -167,11 +175,11 @@ def _btn_start_style():
     ok = _c(_ThemeColors.ok())
     ok_h = _c(_ThemeColors.ok_hover())
     ok_p = _c(_ThemeColors.ok_pressed())
-    mid = _c(_ThemeColors.pal().color(QPalette.Mid))
-    midl = _c(_ThemeColors.pal().color(QPalette.Midlight))
+    mid = _c(_ThemeColors.pal().color(PAL_MID))
+    midl = _c(_ThemeColors.pal().color(PAL_MIDLIGHT))
     return (
         f"QPushButton {{ background-color: {ok}; color: white; border: none;"
-        f" border-radius: 3px; padding: 7px 22px; font-weight: bold; font-size: 10pt; }}"
+        f" border-radius: 6px; padding: 7px 24px; font-weight: bold; font-size: 10pt; }}"
         f" QPushButton:hover {{ background-color: {ok_h}; }}"
         f" QPushButton:pressed {{ background-color: {ok_p}; }}"
         f" QPushButton:disabled {{ background-color: {mid}; color: {midl}; }}"
@@ -184,8 +192,19 @@ def _btn_cancel_style():
     err_h = _c(_ThemeColors.error_hover())
     return (
         f"QPushButton {{ background-color: {err}; color: white; border: none;"
-        f" border-radius: 3px; padding: 7px 22px; font-weight: bold; font-size: 10pt; }}"
+        f" border-radius: 6px; padding: 7px 24px; font-weight: bold; font-size: 10pt; }}"
         f" QPushButton:hover {{ background-color: {err_h}; }}"
+    )
+
+
+def _progress_bar_style():
+    """Themed QSS for the progress bar chunk color."""
+    chunk = _c(_ThemeColors.progress_chunk())
+    bg = _c(_ThemeColors.pal().color(PAL_MID))
+    return (
+        f"QProgressBar {{ border: 1px solid {bg}; border-radius: 4px;"
+        f" text-align: center; font-size: 8pt; }}"
+        f" QProgressBar::chunk {{ background-color: {chunk}; border-radius: 3px; }}"
     )
 
 
@@ -204,7 +223,7 @@ def _make_font(pt=None, bold=False, family=None):
 def _set_foreground(widget, color):
     """Set a widget's foreground color via QPalette (theme-safe)."""
     pal = widget.palette()
-    pal.setColor(QPalette.WindowText, color)
+    pal.setColor(PAL_WINDOW_TEXT, color)
     widget.setPalette(pal)
 
 
@@ -226,7 +245,7 @@ class SroInputDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('SRO')
         self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowContextHelpButtonHint
+            self.windowFlags() & ~WF_NO_HELP
         )
         self.setFixedWidth(340)
 
@@ -252,8 +271,8 @@ class SroInputDialog(QDialog):
         if sro_list:
             from qgis.PyQt.QtWidgets import QCompleter
             completer = QCompleter(sro_list, self)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchContains)
+            completer.setCaseSensitivity(CASE_INSENSITIVE)
+            completer.setFilterMode(MATCH_CONTAINS)
             completer.setMaxVisibleItems(12)
             self._edit.setCompleter(completer)
 
@@ -267,7 +286,7 @@ class SroInputDialog(QDialog):
 
         # Standard button box (native OK/Cancel)
         self._btn_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+            BTN_OK | BTN_CANCEL
         )
         self._btn_box.accepted.connect(self._accept)
         self._btn_box.rejected.connect(self.reject)
@@ -279,17 +298,17 @@ class SroInputDialog(QDialog):
         text = text.strip().upper()
         if not text:
             self._validation.setText('')
-            self._btn_box.button(self._btn_box.Ok).setEnabled(False)
+            self._btn_box.button(BTN_OK).setEnabled(False)
             return
         normalized = text.replace('-', '/').replace('_', '/')
         if _SRO_REGEX.match(normalized):
             self._validation.setText('[OK]')
             _set_foreground(self._validation, _ThemeColors.ok())
-            self._btn_box.button(self._btn_box.Ok).setEnabled(True)
+            self._btn_box.button(BTN_OK).setEnabled(True)
         else:
             self._validation.setText('Format: XXXXX/YYY/ZZZ/NNNNN')
             _set_foreground(self._validation, _ThemeColors.error())
-            self._btn_box.button(self._btn_box.Ok).setEnabled(False)
+            self._btn_box.button(BTN_OK).setEnabled(False)
 
     def _accept(self):
         raw = self._edit.text().strip().upper()
@@ -307,7 +326,7 @@ class SroInputDialog(QDialog):
 #  Module row widget
 # ---------------------------------------------------------------------------
 class _ModuleRow(QWidget):
-    """Compact module row: [checkbox] [status_icon] [detected_path]."""
+    """Module row: main line [checkbox] [status] + detail line [resource or reason]."""
 
     toggled = pyqtSignal(str, bool)
 
@@ -317,29 +336,36 @@ class _ModuleRow(QWidget):
         self._found = False
         self._prereq_tooltip = tooltip
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(4, 2, 4, 2)
-        lay.setSpacing(6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 1, 4, 1)
+        outer.setSpacing(0)
+
+        # Main row
+        main_row = QHBoxLayout()
+        main_row.setContentsMargins(0, 0, 0, 0)
+        main_row.setSpacing(6)
 
         self.checkbox = QCheckBox(label)
         self.checkbox.setEnabled(False)
         if tooltip:
             self.checkbox.setToolTip(tooltip)
         self.checkbox.toggled.connect(lambda c: self.toggled.emit(self.key, c))
-        lay.addWidget(self.checkbox, 1)
+        main_row.addWidget(self.checkbox, 1)
 
         self.status_icon = QLabel()
         self.status_icon.setFixedWidth(28)
         self.status_icon.setToolTip("Non detecte")
-        lay.addWidget(self.status_icon)
+        main_row.addWidget(self.status_icon)
 
-        self.path_label = QLabel()
-        self.path_label.setFont(_make_font(pt=8))
-        _set_foreground(self.path_label, _ThemeColors.dim())
-        self.path_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.path_label.setMinimumWidth(80)
-        self.path_label.setMaximumWidth(260)
-        lay.addWidget(self.path_label)
+        outer.addLayout(main_row)
+
+        # Detail row (UI-012: sub-state)
+        self._detail_label = QLabel()
+        self._detail_label.setFont(_make_font(pt=7.5))
+        _set_foreground(self._detail_label, _ThemeColors.dim())
+        self._detail_label.setContentsMargins(22, 0, 4, 0)
+        self._detail_label.setVisible(False)
+        outer.addWidget(self._detail_label)
 
         self._update_status_icon(False)
 
@@ -351,11 +377,20 @@ class _ModuleRow(QWidget):
 
         if found:
             display = os.path.basename(path) if path else ''
-            self.path_label.setText(display)
-            self.path_label.setToolTip(path)
+            self._detail_label.setText(display)
+            self._detail_label.setToolTip(path)
+            _set_foreground(self._detail_label, _ThemeColors.dim())
+            self._detail_label.setVisible(bool(display))
         else:
-            self.path_label.setText("")
-            self.path_label.setToolTip("")
+            reason = diagnostic or ''
+            if reason:
+                first_line = reason.split('\n')[0]
+                self._detail_label.setText(first_line)
+                _set_foreground(self._detail_label, _ThemeColors.warn())
+                self._detail_label.setVisible(True)
+            else:
+                self._detail_label.setVisible(False)
+            self._detail_label.setToolTip(diagnostic or self._prereq_tooltip)
 
     def _update_status_icon(self, found, diagnostic=''):
         self.status_icon.clear()
@@ -383,7 +418,7 @@ class _ModuleRow(QWidget):
 #  Main Dialog
 # ---------------------------------------------------------------------------
 class PoleAerienDialogV2(QDialog):
-    """Streamlined batch analysis dialog — professional native QGIS look."""
+    """Streamlined batch analysis dialog - professional native QGIS look."""
 
     start_requested = pyqtSignal(list)
     cancel_requested = pyqtSignal()
@@ -397,6 +432,13 @@ class PoleAerienDialogV2(QDialog):
         self._module_rows = {}
         self._project_mode = False
         self._chk_comac_drawings = None
+        self._chk_data_dictionary = None
+        self._sro_source = ''
+        self._export_status = None
+        self._layers_status = None
+        self._readiness_label = None
+        self._splitter = None
+        self._progress_step = None
         self.smooth_progress = SmoothProgressController(interval_ms=25)
 
         self._build_ui()
@@ -421,7 +463,8 @@ class PoleAerienDialogV2(QDialog):
         root.addLayout(self._build_header())
 
         # --- Main splitter: config (top) / log (bottom) ---
-        splitter = QSplitter(Qt.Vertical)
+        self._splitter = QSplitter(VERTICAL)
+        splitter = self._splitter
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(2)
 
@@ -444,6 +487,13 @@ class PoleAerienDialogV2(QDialog):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter, 1)
+
+        # --- Readiness summary (UI-009) ---
+        self._readiness_label = QLabel()
+        self._readiness_label.setFont(_make_font(pt=8.5, bold=True))
+        self._readiness_label.setContentsMargins(4, 2, 4, 2)
+        self._readiness_label.setVisible(False)
+        root.addWidget(self._readiness_label)
 
         # --- Footer ---
         root.addLayout(self._build_footer())
@@ -476,15 +526,15 @@ class PoleAerienDialogV2(QDialog):
         self._project_tag.setFont(_make_font(pt=9, bold=True))
         self._project_tag.setAutoFillBackground(True)
         tag_pal = self._project_tag.palette()
-        tag_pal.setColor(QPalette.Window, _ThemeColors.tag_bg())
-        tag_pal.setColor(QPalette.WindowText, _ThemeColors.tag_fg())
+        tag_pal.setColor(PAL_WINDOW, _ThemeColors.tag_bg())
+        tag_pal.setColor(PAL_WINDOW_TEXT, _ThemeColors.tag_fg())
         self._project_tag.setPalette(tag_pal)
         self._project_tag.setContentsMargins(10, 2, 10, 2)
         lay.addWidget(self._project_tag)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFrameShape(FRAME_HLINE)
+        sep.setFrameShadow(FRAME_SUNKEN)
 
         outer = QVBoxLayout()
         outer.setSpacing(4)
@@ -495,6 +545,8 @@ class PoleAerienDialogV2(QDialog):
     # ---- Project group ----
     def _build_project_group(self, parent):
         grp = QgsCollapsibleGroupBox("Dossier projet")
+        grp.setObjectName("PoleAerien_grp_project")
+        grp.setSettingGroup("PoleAerien/dialog_v2")
         lay = QVBoxLayout()
         lay.setSpacing(4)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -516,14 +568,14 @@ class PoleAerienDialogV2(QDialog):
         self.browseProjectBtn.setIcon(_qgs_icon('mActionFileOpen.svg'))
         self.browseProjectBtn.setIconSize(QSize(16, 16))
         self.browseProjectBtn.setToolTip("Parcourir...")
-        self.browseProjectBtn.setCursor(Qt.PointingHandCursor)
+        self.browseProjectBtn.setCursor(CURSOR_POINTING)
         row1.addWidget(self.browseProjectBtn)
 
         self.refreshBtn = QPushButton()
         self.refreshBtn.setIcon(_qgs_icon('mActionRefresh.svg'))
         self.refreshBtn.setIconSize(QSize(16, 16))
         self.refreshBtn.setToolTip("Re-detecter les dossiers (synchroniser)")
-        self.refreshBtn.setCursor(Qt.PointingHandCursor)
+        self.refreshBtn.setCursor(CURSOR_POINTING)
         row1.addWidget(self.refreshBtn)
 
         lay.addLayout(row1)
@@ -545,10 +597,17 @@ class PoleAerienDialogV2(QDialog):
         self.browseExportBtn.setIcon(_qgs_icon('mActionFileSaveAs.svg'))
         self.browseExportBtn.setIconSize(QSize(16, 16))
         self.browseExportBtn.setToolTip("Changer le dossier d'export")
-        self.browseExportBtn.setCursor(Qt.PointingHandCursor)
+        self.browseExportBtn.setCursor(CURSOR_POINTING)
         row2.addWidget(self.browseExportBtn)
 
         lay.addLayout(row2)
+
+        # Export status inline (UI-006)
+        self._export_status = QLabel()
+        self._export_status.setFont(_make_font(pt=8))
+        self._export_status.setContentsMargins(56, 0, 0, 0)
+        self._export_status.setVisible(False)
+        lay.addWidget(self._export_status)
 
         # Detection summary label
         self._det_summary = QLabel()
@@ -565,6 +624,8 @@ class PoleAerienDialogV2(QDialog):
     # ---- Mode group ----
     def _build_mode_group(self, parent):
         grp = QgsCollapsibleGroupBox("Mode d'execution")
+        grp.setObjectName("PoleAerien_grp_mode")
+        grp.setSettingGroup("PoleAerien/dialog_v2")
         lay = QVBoxLayout()
         lay.setSpacing(4)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -662,6 +723,8 @@ class PoleAerienDialogV2(QDialog):
     # ---- Layers group ----
     def _build_layers_group(self, parent):
         self._layers_grp = QgsCollapsibleGroupBox("Couches QGIS")
+        self._layers_grp.setObjectName("PoleAerien_grp_layers")
+        self._layers_grp.setSettingGroup("PoleAerien/dialog_v2")
         grp = self._layers_grp
         form = QFormLayout()
         form.setHorizontalSpacing(12)
@@ -669,16 +732,26 @@ class PoleAerienDialogV2(QDialog):
         form.setContentsMargins(6, 4, 6, 4)
 
         self.comboInfraPtPot = QgsMapLayerComboBox()
-        self.comboInfraPtPot.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.comboInfraPtPot.setFilters(LAYER_FILTER_POINT)
+        self.comboInfraPtPot.setShowCrs(True)
         form.addRow("infra_pt_pot :", self.comboInfraPtPot)
 
         self.comboEtudeCapFt = QgsMapLayerComboBox()
-        self.comboEtudeCapFt.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        self.comboEtudeCapFt.setFilters(LAYER_FILTER_POLYGON)
+        self.comboEtudeCapFt.setShowCrs(True)
         form.addRow("etude_cap_ft :", self.comboEtudeCapFt)
 
         self.comboEtudeComac = QgsMapLayerComboBox()
-        self.comboEtudeComac.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        self.comboEtudeComac.setFilters(LAYER_FILTER_POLYGON)
+        self.comboEtudeComac.setShowCrs(True)
         form.addRow("etude_comac :", self.comboEtudeComac)
+
+        # Layers status inline (UI-007)
+        self._layers_status = QLabel()
+        self._layers_status.setFont(_make_font(pt=8))
+        self._layers_status.setContentsMargins(6, 2, 6, 0)
+        self._layers_status.setVisible(False)
+        form.addRow("", self._layers_status)
 
         grp.setLayout(form)
         parent.addWidget(grp)
@@ -686,6 +759,8 @@ class PoleAerienDialogV2(QDialog):
     # ---- Modules group ----
     def _build_modules_group(self, parent):
         grp = QgsCollapsibleGroupBox("Modules d'analyse")
+        grp.setObjectName("PoleAerien_grp_modules")
+        grp.setSettingGroup("PoleAerien/dialog_v2")
         lay = QVBoxLayout()
         lay.setSpacing(1)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -697,18 +772,18 @@ class PoleAerienDialogV2(QDialog):
         self.selectAllBtn = QPushButton("Tout cocher")
         self.selectAllBtn.setIcon(_qgs_icon('mActionSelectAll.svg'))
         self.selectAllBtn.setIconSize(QSize(14, 14))
-        self.selectAllBtn.setCursor(Qt.PointingHandCursor)
+        self.selectAllBtn.setCursor(CURSOR_POINTING)
         act_row.addWidget(self.selectAllBtn)
 
         self.deselectAllBtn = QPushButton("Tout décocher")
         self.deselectAllBtn.setIcon(_qgs_icon('mActionDeselectAll.svg'))
         self.deselectAllBtn.setIconSize(QSize(14, 14))
-        self.deselectAllBtn.setCursor(Qt.PointingHandCursor)
+        self.deselectAllBtn.setCursor(CURSOR_POINTING)
         act_row.addWidget(self.deselectAllBtn)
 
         act_row.addStretch()
 
-        self._mod_count = QLabel("0/6")
+        self._mod_count = QLabel("0/7")
         self._mod_count.setFont(_make_font(pt=8.5))
         _set_foreground(self._mod_count, _ThemeColors.dim())
         act_row.addWidget(self._mod_count)
@@ -717,8 +792,8 @@ class PoleAerienDialogV2(QDialog):
 
         # Separator
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFrameShape(FRAME_HLINE)
+        sep.setFrameShadow(FRAME_SUNKEN)
         lay.addWidget(sep)
 
         # Module rows with prerequisite tooltips
@@ -754,8 +829,8 @@ class PoleAerienDialogV2(QDialog):
             lay.addWidget(row)
 
         sep_opts = QFrame()
-        sep_opts.setFrameShape(QFrame.HLine)
-        sep_opts.setFrameShadow(QFrame.Sunken)
+        sep_opts.setFrameShape(FRAME_HLINE)
+        sep_opts.setFrameShadow(FRAME_SUNKEN)
         lay.addWidget(sep_opts)
 
         opts_row = QHBoxLayout()
@@ -785,12 +860,19 @@ class PoleAerienDialogV2(QDialog):
 
     # ---- Progress ----
     def _build_progress(self, parent):
+        self._progress_step = QLabel()
+        self._progress_step.setFont(_make_font(pt=8))
+        _set_foreground(self._progress_step, _ThemeColors.dim())
+        self._progress_step.setVisible(False)
+        parent.addWidget(self._progress_step)
+
         self.progressBar = QProgressBar()
         self.progressBar.setRange(0, 100)
         self.progressBar.setValue(0)
         self.progressBar.setTextVisible(True)
         self.progressBar.setFormat("%p%")
         self.progressBar.setMinimumHeight(20)
+        self.progressBar.setStyleSheet(_progress_bar_style())
         parent.addWidget(self.progressBar)
         self.smooth_progress.set_progress_bar(self.progressBar)
 
@@ -813,13 +895,13 @@ class PoleAerienDialogV2(QDialog):
         self.clearLogBtn = QPushButton("Effacer")
         self.clearLogBtn.setIcon(_qgs_icon('mActionDeleteSelected.svg'))
         self.clearLogBtn.setIconSize(QSize(12, 12))
-        self.clearLogBtn.setCursor(Qt.PointingHandCursor)
+        self.clearLogBtn.setCursor(CURSOR_POINTING)
         hdr.addWidget(self.clearLogBtn)
 
         self.exportLogBtn = QPushButton("Exporter")
         self.exportLogBtn.setIcon(_qgs_icon('mActionFileSaveAs.svg'))
         self.exportLogBtn.setIconSize(QSize(12, 12))
-        self.exportLogBtn.setCursor(Qt.PointingHandCursor)
+        self.exportLogBtn.setCursor(CURSOR_POINTING)
         hdr.addWidget(self.exportLogBtn)
 
         lay.addLayout(hdr)
@@ -847,13 +929,13 @@ class PoleAerienDialogV2(QDialog):
         self.helpButton = QPushButton("Aide")
         self.helpButton.setIcon(_qgs_icon('mActionHelpContents.svg'))
         self.helpButton.setIconSize(QSize(16, 16))
-        self.helpButton.setCursor(Qt.PointingHandCursor)
+        self.helpButton.setCursor(CURSOR_POINTING)
         lay.addWidget(self.helpButton)
 
         self.diagButton = QPushButton("Diagnostic")
         self.diagButton.setIcon(_qgs_icon('mActionPropertiesWidget.svg'))
         self.diagButton.setIconSize(QSize(16, 16))
-        self.diagButton.setCursor(Qt.PointingHandCursor)
+        self.diagButton.setCursor(CURSOR_POINTING)
         self.diagButton.setToolTip(
             "Scanner le projet et afficher un rapport complet\n"
             "des ressources detectees, manquantes et couches QGIS."
@@ -866,7 +948,7 @@ class PoleAerienDialogV2(QDialog):
         self.cancelBtn.setStyleSheet(_btn_cancel_style())
         self.cancelBtn.setIcon(_qgs_icon('mTaskCancel.svg'))
         self.cancelBtn.setIconSize(QSize(16, 16))
-        self.cancelBtn.setCursor(Qt.PointingHandCursor)
+        self.cancelBtn.setCursor(CURSOR_POINTING)
         self.cancelBtn.setVisible(False)
         lay.addWidget(self.cancelBtn)
 
@@ -874,14 +956,14 @@ class PoleAerienDialogV2(QDialog):
         self.startBtn.setStyleSheet(_btn_start_style())
         self.startBtn.setIcon(_qgs_icon('mActionStart.svg'))
         self.startBtn.setIconSize(QSize(16, 16))
-        self.startBtn.setCursor(Qt.PointingHandCursor)
+        self.startBtn.setCursor(CURSOR_POINTING)
         self.startBtn.setEnabled(False)
         self.startBtn.setMinimumWidth(180)
         lay.addWidget(self.startBtn)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFrameShape(FRAME_HLINE)
+        sep.setFrameShadow(FRAME_SUNKEN)
 
         outer = QVBoxLayout()
         outer.setSpacing(4)
@@ -910,6 +992,10 @@ class PoleAerienDialogV2(QDialog):
         self.textBrowser.anchorClicked.connect(self._on_link_clicked)
         self._chk_comac_drawings.toggled.connect(lambda _: self._save_ui_state())
         self._chk_data_dictionary.toggled.connect(lambda _: self._save_ui_state())
+        self.comboInfraPtPot.layerChanged.connect(lambda _: self._refresh_readiness())
+        self.comboEtudeCapFt.layerChanged.connect(lambda _: self._refresh_readiness())
+        self.comboEtudeComac.layerChanged.connect(lambda _: self._refresh_readiness())
+        self.exportPathEdit.textChanged.connect(lambda _: self._refresh_readiness())
 
     def _save_ui_state(self):
         settings = QgsSettings()
@@ -920,6 +1006,10 @@ class PoleAerienDialogV2(QDialog):
         settings.setValue(
             "PoleAerien/dialog_v2/include_data_dictionary",
             self._chk_data_dictionary.isChecked()
+        )
+        settings.setValue(
+            "PoleAerien/dialog_v2/splitter_state",
+            self._splitter.saveState()
         )
 
     def _restore_ui_state(self):
@@ -936,6 +1026,14 @@ class PoleAerienDialogV2(QDialog):
             type=bool
         )
         self._chk_data_dictionary.setChecked(bool(checked_dict))
+        splitter_state = settings.value(
+            "PoleAerien/dialog_v2/splitter_state"
+        )
+        if splitter_state:
+            try:
+                self._splitter.restoreState(splitter_state)
+            except (TypeError, AttributeError):
+                pass
 
     # ==================================================================
     #  PROJECT DETECTION
@@ -971,6 +1069,7 @@ class PoleAerienDialogV2(QDialog):
             self._sro_status.setText("[--] Saisissez le SRO")
             _set_foreground(self._sro_status, _ThemeColors.warn())
             self._detection.sro = ''
+            self._sro_source = ''
             self._validate_start()
             return
         normalized = text.replace('-', '/').replace('_', '/')
@@ -978,7 +1077,11 @@ class PoleAerienDialogV2(QDialog):
             parts = normalized.split('/')
             sro = f'{parts[0]}/{parts[1]}/{parts[2]}/{parts[3]}'
             self._detection.sro = sro
-            self._sro_status.setText("[OK]")
+            if self._sro_source != 'detecte':
+                self._sro_source = 'manuel'
+            self._sro_status.setText(
+                f"[OK] SRO {self._sro_source}"
+            )
             _set_foreground(self._sro_status, _ThemeColors.ok())
             self._radio_project.setEnabled(True)
         else:
@@ -1026,11 +1129,13 @@ class PoleAerienDialogV2(QDialog):
         # SRO display
         if d.sro:
             self._sro_value.setText(d.sro)
+            self._sro_source = 'detecte'
             self._sro_status.setText("[OK] SRO detecte")
             _set_foreground(self._sro_status, _ThemeColors.ok())
             self._radio_project.setEnabled(True)
         else:
             self._sro_value.clear()
+            self._sro_source = ''
             self._sro_status.setText(
                 "[--] Saisissez le SRO ou utilisez la liste BDD"
             )
@@ -1041,12 +1146,25 @@ class PoleAerienDialogV2(QDialog):
         if not self.exportPathEdit.text():
             self.exportPathEdit.setText(d.export_dir)
 
-        # Summary
-        parts = []
+        # Summary (UI-010: multi-line)
+        lines = []
+        ok_parts = []
+        ko_parts = []
         for label, p, found in d.summary_lines():
-            parts.append(f"{'[OK]' if found else '[--]'} {label}")
-        self._det_summary.setText("   ".join(parts))
-        self._det_summary.setVisible(True)
+            if found:
+                ok_parts.append(label)
+            else:
+                ko_parts.append(label)
+        if ok_parts:
+            lines.append(f"Detecte : {', '.join(ok_parts)}")
+        if ko_parts:
+            lines.append(f"Absent : {', '.join(ko_parts)}")
+        if d.sro:
+            lines.append(f"SRO : {d.sro}")
+        if d.has_gracethd:
+            lines.append("BE : Axione (GraceTHD)")
+        self._det_summary.setText("\n".join(lines))
+        self._det_summary.setVisible(bool(lines))
 
         # Module rows with diagnostic hints
         module_map = {
@@ -1130,16 +1248,179 @@ class PoleAerienDialogV2(QDialog):
         sel = sum(1 for r in self._module_rows.values() if r.is_selected)
         self._mod_count.setText(f"{sel}/{len(self._module_rows)} sélectionné(s)")
 
-    def _validate_start(self):
-        has_proj = bool(self.projectPathEdit.text()) and os.path.isdir(
-            self.projectPathEdit.text() or ''
-        )
+    def _refresh_readiness(self):
+        """Recompute readiness and update all inline indicators."""
+        state = self._compute_readiness()
+        self.startBtn.setEnabled(state['ready'] and not self._is_running)
+        self._update_readiness_label(state)
+        self._update_export_status(state)
+        self._update_layers_status(state)
+
+    def _compute_readiness(self):
+        """Central readiness model: returns a dict with all blocking reasons."""
+        reasons = []
+        proj_path = self.projectPathEdit.text() or ''
+        has_proj = bool(proj_path) and os.path.isdir(proj_path)
+        if not has_proj:
+            reasons.append("Aucun dossier projet valide")
+
         has_mod = any(r.is_selected for r in self._module_rows.values())
-        # In project mode, SRO must be available
+        if not has_mod:
+            reasons.append("Aucun module selectionne")
+
+        sro_ok = True
         if self._project_mode and not self._detection.sro:
-            self.startBtn.setEnabled(False)
+            reasons.append("SRO requis en mode Projet")
+            sro_ok = False
+
+        export_dir = self.exportPathEdit.text() or self._detection.export_dir
+        export_ok = bool(export_dir) and os.path.isdir(export_dir)
+        if not export_ok and export_dir:
+            reasons.append("Dossier export introuvable")
+
+        layers_ok = True
+        missing_layers = []
+        if not self._project_mode:
+            if not self.comboInfraPtPot.currentLayer():
+                missing_layers.append("infra_pt_pot")
+            if not self.comboEtudeCapFt.currentLayer():
+                missing_layers.append("etude_cap_ft")
+            if not self.comboEtudeComac.currentLayer():
+                missing_layers.append("etude_comac")
+            if missing_layers:
+                layers_ok = False
+                reasons.append(
+                    f"Couche(s) manquante(s) : {', '.join(missing_layers)}"
+                )
+
+        # CRS mismatch warning (mode QGIS only, non-blocking)
+        if not self._project_mode and layers_ok:
+            crs_set = set()
+            for combo in (self.comboInfraPtPot, self.comboEtudeCapFt,
+                          self.comboEtudeComac):
+                layer = combo.currentLayer()
+                if layer and layer.crs().isValid():
+                    crs_set.add(layer.crs().authid())
+            if len(crs_set) > 1:
+                reasons.append(
+                    f"Attention : CRS divergents ({', '.join(sorted(crs_set))})"
+                )
+
+        sel_count = sum(1 for r in self._module_rows.values() if r.is_selected)
+        mode_label = "Projet (BDD)" if self._project_mode else "Couches QGIS"
+
+        ready = (has_proj and has_mod and sro_ok and layers_ok
+                 and not self._is_running)
+
+        return {
+            'ready': ready,
+            'reasons': reasons,
+            'has_project': has_proj,
+            'has_modules': has_mod,
+            'sro_ok': sro_ok,
+            'export_ok': export_ok,
+            'export_dir': export_dir,
+            'layers_ok': layers_ok,
+            'missing_layers': missing_layers,
+            'selected_count': sel_count,
+            'total_count': len(self._module_rows),
+            'mode': mode_label,
+        }
+
+    def _update_readiness_label(self, state):
+        """Update the inline readiness summary before the footer."""
+        if self._is_running:
+            self._readiness_label.setText("Analyse en cours...")
+            _set_foreground(self._readiness_label, _ThemeColors.info())
+            self._readiness_label.setVisible(True)
             return
-        self.startBtn.setEnabled(has_proj and has_mod and not self._is_running)
+        if not state['has_project']:
+            self._readiness_label.setVisible(False)
+            return
+        if state['ready']:
+            txt = (f"Pret : {state['selected_count']}/{state['total_count']} "
+                   f"module(s) | {state['mode']}")
+            if self._project_mode:
+                src = self._sro_source or '?'
+                txt += f" | SRO {src}"
+                if self._chk_load_layers.isChecked():
+                    txt += " | Charger couches"
+                tol = self._spin_spatial_tol.value()
+                if tol != 7.5:
+                    txt += f" | Rayon {tol}m"
+            if not state['export_ok']:
+                txt += " | Export: defaut projet"
+            self._readiness_label.setText(txt)
+            _set_foreground(self._readiness_label, _ThemeColors.ok())
+        else:
+            parts = state['reasons'][:3]
+            self._readiness_label.setText("Incomplet : " + " ; ".join(parts))
+            _set_foreground(self._readiness_label, _ThemeColors.warn())
+        self._readiness_label.setVisible(True)
+
+    def _update_export_status(self, state):
+        """Update the inline export status label (UI-006)."""
+        if not state['has_project']:
+            self._export_status.setVisible(False)
+            return
+        export_dir = state.get('export_dir', '')
+        if not export_dir:
+            self._export_status.setText("Export : racine projet (par defaut)")
+            _set_foreground(self._export_status, _ThemeColors.dim())
+        elif not os.path.isdir(export_dir):
+            self._export_status.setText("Export : dossier introuvable")
+            _set_foreground(self._export_status, _ThemeColors.error())
+        else:
+            try:
+                test_path = os.path.join(export_dir, '.poleaerien_write_test')
+                with open(test_path, 'w', encoding='utf-8') as _f:
+                    pass
+                os.remove(test_path)
+                self._export_status.setText("Export : OK")
+                _set_foreground(self._export_status, _ThemeColors.ok())
+            except OSError:
+                self._export_status.setText("Export : non inscriptible")
+                _set_foreground(self._export_status, _ThemeColors.error())
+        self._export_status.setVisible(True)
+
+    def _update_layers_status(self, state):
+        """Update the inline layers status label (UI-007)."""
+        if self._project_mode:
+            self._layers_status.setVisible(False)
+            return
+        if not state['has_project']:
+            self._layers_status.setVisible(False)
+            return
+        missing = state.get('missing_layers', [])
+        if missing:
+            self._layers_status.setText(
+                f"{3 - len(missing)}/3 couches | manquante(s) : {', '.join(missing)}"
+            )
+            _set_foreground(self._layers_status, _ThemeColors.warn())
+        else:
+            # Check CRS divergence
+            crs_set = set()
+            for combo in (self.comboInfraPtPot, self.comboEtudeCapFt,
+                          self.comboEtudeComac):
+                layer = combo.currentLayer()
+                if layer and layer.crs().isValid():
+                    crs_set.add(layer.crs().authid())
+            if len(crs_set) > 1:
+                self._layers_status.setText(
+                    f"3/3 couches | CRS divergents : {', '.join(sorted(crs_set))}"
+                )
+                _set_foreground(self._layers_status, _ThemeColors.warn())
+            else:
+                crs_txt = f" [{next(iter(crs_set))}]" if crs_set else ""
+                self._layers_status.setText(
+                    f"3/3 couches selectionnees{crs_txt}"
+                )
+                _set_foreground(self._layers_status, _ThemeColors.ok())
+        self._layers_status.setVisible(True)
+
+    def _validate_start(self):
+        """Legacy compat: delegates to centralized readiness."""
+        self._refresh_readiness()
 
     def selected_modules(self):
         order = ['maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a', 'gespot_c6']
@@ -1164,9 +1445,17 @@ class PoleAerienDialogV2(QDialog):
         self.browseProjectBtn.setEnabled(not running)
         self.browseExportBtn.setEnabled(not running)
         self.projectPathEdit.setReadOnly(running)
+        self.exportPathEdit.setReadOnly(running)
         self.selectAllBtn.setEnabled(not running)
         self.deselectAllBtn.setEnabled(not running)
         self._chk_comac_drawings.setEnabled(not running)
+        self._chk_data_dictionary.setEnabled(not running)
+        self._radio_qgis.setEnabled(not running)
+        self._radio_project.setEnabled(not running)
+        self._sro_value.setReadOnly(running)
+        self._chk_load_layers.setEnabled(not running)
+        self._spin_spatial_tol.setEnabled(not running)
+        self.refreshBtn.setEnabled(not running)
 
         for row in self._module_rows.values():
             row.checkbox.setEnabled(not running and row._found)
@@ -1179,17 +1468,36 @@ class PoleAerienDialogV2(QDialog):
     def set_progress(self, percent):
         self.smooth_progress.set_target(percent)
 
+    def set_progress_step(self, text):
+        """Show a short step label above the progress bar during batch."""
+        if self._progress_step is None:
+            return
+        if text:
+            self._progress_step.setText(text)
+            self._progress_step.setVisible(True)
+        else:
+            self._progress_step.setVisible(False)
+
     def reset_after_batch(self):
         self._is_running = False
         self.smooth_progress.set_target(100)
+        self.set_progress_step('')
         self.startBtn.setVisible(True)
         self.cancelBtn.setVisible(False)
         self.browseProjectBtn.setEnabled(True)
         self.browseExportBtn.setEnabled(True)
         self.projectPathEdit.setReadOnly(False)
+        self.exportPathEdit.setReadOnly(False)
         self.selectAllBtn.setEnabled(True)
         self.deselectAllBtn.setEnabled(True)
         self._chk_comac_drawings.setEnabled(True)
+        self._chk_data_dictionary.setEnabled(True)
+        self._radio_qgis.setEnabled(True)
+        self._radio_project.setEnabled(True)
+        self._sro_value.setReadOnly(False)
+        self._chk_load_layers.setEnabled(True)
+        self._spin_spatial_tol.setEnabled(True)
+        self.refreshBtn.setEnabled(True)
         for row in self._module_rows.values():
             row.checkbox.setEnabled(row._found)
         self._validate_start()
@@ -1327,7 +1635,7 @@ class PoleAerienDialogV2(QDialog):
 
             if len(crs_set) > 1:
                 self._log_warn(
-                    f"  CRS : heterogenes ({', '.join(crs_set)}) — detail dans Qualite donnees")
+                    f"  CRS : heterogenes ({', '.join(crs_set)}) - detail dans Qualite donnees")
 
         # Export
         export_dir = self.exportPathEdit.text() or d.export_dir
@@ -1572,7 +1880,7 @@ class PoleAerienDialogV2(QDialog):
     def _log_html(self, html):
         self.textBrowser.append(html)
         c = self.textBrowser.textCursor()
-        c.movePosition(QTextCursor.End)
+        c.movePosition(QTextCursor.MoveOperation.End)
         self.textBrowser.setTextCursor(c)
 
     def _log_info(self, msg):
@@ -1703,12 +2011,29 @@ class PoleAerienDialogV2(QDialog):
         if best_com[0]:
             self.comboEtudeComac.setLayer(best_com[0])
 
+    def keyPressEvent(self, event):
+        """UI-024: Keyboard shortcuts for batch actions."""
+        key = event.key()
+        mods = event.modifiers()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                if self.startBtn.isEnabled() and self.startBtn.isVisible():
+                    self._on_start_clicked()
+                    return
+        if key == Qt.Key.Key_Escape:
+            if self._is_running:
+                self._on_cancel_clicked()
+                return
+        super().keyPressEvent(event)
+
     def changeEvent(self, event):
-        """Refresh targeted button stylesheets when the QGIS theme changes."""
+        """Refresh targeted stylesheets when the QGIS theme changes."""
         super().changeEvent(event)
-        if event.type() == QEvent.PaletteChange:
+        if event.type() == QEvent.Type.PaletteChange:
             self.startBtn.setStyleSheet(_btn_start_style())
             self.cancelBtn.setStyleSheet(_btn_cancel_style())
+            self.progressBar.setStyleSheet(_progress_bar_style())
+            self._refresh_readiness()
 
     def closeEvent(self, event):
         _ThemeColors._widget_palette_ref = None

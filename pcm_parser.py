@@ -49,7 +49,8 @@ except ImportError as e:
 def _log_message(msg: str, tag: str = "PoleAerien", level: int = 0):
     """Log avec fallback print si hors QGIS"""
     if HAS_QGIS:
-        qgis_level = Qgis.Info if level == 0 else (Qgis.Warning if level == 1 else Qgis.Critical)
+        from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
+        qgis_level = MSG_INFO if level == 0 else (MSG_WARNING if level == 1 else MSG_CRITICAL)
         QgsMessageLog.logMessage(msg, tag, qgis_level)
     else:
         print(f"[{tag}] {msg}")

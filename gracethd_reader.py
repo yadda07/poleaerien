@@ -33,6 +33,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QVariant
 
 from .db_connection import CableSegment
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL, FIELD_TYPE_STRING
 
 
 # ---------------------------------------------------------------------------
@@ -91,14 +92,14 @@ def _load_csv(filepath: str) -> List[Dict[str, str]]:
             if rows:
                 QgsMessageLog.logMessage(
                     f"CSV {os.path.basename(filepath)}: {len(rows)} lignes, encoding={enc}",
-                    _LOG_TAG, Qgis.Info
+                    _LOG_TAG, MSG_INFO
                 )
             return rows
         except UnicodeDecodeError:
             continue
     QgsMessageLog.logMessage(
         f"CSV {os.path.basename(filepath)}: echec lecture (utf-8 + latin-1)",
-        _LOG_TAG, Qgis.Warning
+        _LOG_TAG, MSG_WARNING
     )
     return []
 
@@ -115,7 +116,7 @@ def _load_shp_features(filepath: str) -> List[QgsFeature]:
     if not layer.isValid():
         QgsMessageLog.logMessage(
             f"GraceTHD: impossible de charger {filepath}",
-            _LOG_TAG, Qgis.Warning
+            _LOG_TAG, MSG_WARNING
         )
         return []
     features = list(layer.getFeatures())
@@ -196,7 +197,7 @@ class GraceTHDReader:
             )
             QgsMessageLog.logMessage(
                 f"t_noeud: {len(self._noeuds)} noeuds charges",
-                _LOG_TAG, Qgis.Info
+                _LOG_TAG, MSG_INFO
             )
         return self._noeuds
 
@@ -352,7 +353,7 @@ class GraceTHDReader:
         if missing_geom:
             QgsMessageLog.logMessage(
                 f"t_cable: {missing_geom} cables sans geometrie (jointure t_cableline echouee)",
-                _LOG_TAG, Qgis.Warning
+                _LOG_TAG, MSG_WARNING
             )
 
         # Resume detaille
@@ -371,7 +372,7 @@ class GraceTHDReader:
             f"({len(cables_csv)} filtres, {missing_geom} sans geom, "
             f"{skipped_placeholder} placeholders exclus) | "
             f"Capacites: [{capas_str}] | Posemode: [{pm_str}]",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         return segments
@@ -454,7 +455,7 @@ class GraceTHDReader:
         QgsMessageLog.logMessage(
             f"GraceTHD cables_with_nodes: {len(result)} cables {typelog_filter} "
             f"({missing_geom} sans geom exclus)",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
         return result
 
@@ -541,13 +542,13 @@ class GraceTHDReader:
         if no_geom:
             QgsMessageLog.logMessage(
                 f"t_ebp: {no_geom} BPE sans geometrie (jointure ptech/noeud echouee)",
-                _LOG_TAG, Qgis.Warning
+                _LOG_TAG, MSG_WARNING
             )
 
         QgsMessageLog.logMessage(
             f"GraceTHD BPE: {len(results)} boitiers charges "
             f"({no_geom} sans geom, {skipped_placeholder} placeholders exclus)",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         return results
@@ -609,13 +610,13 @@ class GraceTHDReader:
         if no_geom:
             QgsMessageLog.logMessage(
                 f"t_ptech: {no_geom} poteaux sans geometrie (noeud manquant)",
-                _LOG_TAG, Qgis.Warning
+                _LOG_TAG, MSG_WARNING
             )
 
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux: {len(poteaux)} appuis charges "
             f"({no_geom} sans geom exclus)",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         return poteaux
@@ -690,11 +691,11 @@ class GraceTHDReader:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             pr.addAttributes([
-                QgsField("inf_num", QVariant.String),
-                QgsField("inf_type", QVariant.String),
-                QgsField("inf_propri", QVariant.String),
-                QgsField("commentaire", QVariant.String),
-                QgsField("etat", QVariant.String),
+                QgsField("inf_num", FIELD_TYPE_STRING),
+                QgsField("inf_type", FIELD_TYPE_STRING),
+                QgsField("inf_propri", FIELD_TYPE_STRING),
+                QgsField("commentaire", FIELD_TYPE_STRING),
+                QgsField("etat", FIELD_TYPE_STRING),
             ])
         lyr.updateFields()
 
@@ -759,7 +760,7 @@ class GraceTHDReader:
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux->layer: {len(features)} poteaux charges, "
             f"{no_geom} sans geometrie, {no_codeext} sans nd_codeext/pt_etiquet",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         # Log inf_type distribution
@@ -770,41 +771,41 @@ class GraceTHDReader:
         type_str = ', '.join(f'{t}: {n}' for t, n in sorted(type_counts.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux inf_type repartition: {type_str}",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         # Log pt_prop distinct values
         prop_str = ', '.join(f'{v}: {n}' for v, n in sorted(prop_values.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux pt_prop valeurs distinctes: {prop_str}",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         # Log match method breakdown
         method_str = ', '.join(f'{m}: {n}' for m, n in sorted(match_methods.items(), key=lambda x: -x[1]))
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux match_method: {method_str}",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         # Log cross-tab pt_prop x inf_type
         for (pv, it), cnt in sorted(prop_type_cross.items(), key=lambda x: -x[1]):
             QgsMessageLog.logMessage(
                 f"GraceTHD classification: pt_prop={pv!r} -> {it} (x{cnt}, methode={prop_method_map.get(pv, '?')})",
-                _LOG_TAG, Qgis.Info
+                _LOG_TAG, MSG_INFO
             )
 
         # Log sample poteaux with full detail
         sample_limit = min(10, len(features))
         QgsMessageLog.logMessage(
             f"GraceTHD poteaux echantillon ({sample_limit} premiers):",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
         for feat in features[:sample_limit]:
             QgsMessageLog.logMessage(
                 f"  inf_num={feat['inf_num']}, inf_type={feat['inf_type']}, "
                 f"etat={feat['etat']}, commentaire={feat['commentaire'][:50]}",
-                _LOG_TAG, Qgis.Info
+                _LOG_TAG, MSG_INFO
             )
 
         return lyr
@@ -898,13 +899,13 @@ class GraceTHDReader:
         if no_geom:
             QgsMessageLog.logMessage(
                 f"t_ptech: {no_geom} chambres sans geometrie (noeud manquant)",
-                _LOG_TAG, Qgis.Warning
+                _LOG_TAG, MSG_WARNING
             )
 
         QgsMessageLog.logMessage(
             f"GraceTHD chambres: {len(chambres)} chargees "
             f"({no_geom} sans geom exclus)",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         return chambres
@@ -953,13 +954,13 @@ class GraceTHDReader:
         if no_geom:
             QgsMessageLog.logMessage(
                 f"t_ptech: {no_geom} facades sans geometrie (noeud manquant)",
-                _LOG_TAG, Qgis.Warning
+                _LOG_TAG, MSG_WARNING
             )
 
         QgsMessageLog.logMessage(
             f"GraceTHD facades: {len(facades)} chargees "
             f"({no_geom} sans geom exclus)",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
 
         return facades
@@ -1020,7 +1021,7 @@ class GraceTHDReader:
 
         QgsMessageLog.logMessage(
             f"GraceTHD cheminements: {len(results)} troncons charges",
-            _LOG_TAG, Qgis.Info
+            _LOG_TAG, MSG_INFO
         )
         return results
 

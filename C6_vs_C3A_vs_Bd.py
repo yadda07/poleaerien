@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from qgis.core import QgsFeatureRequest, QgsExpression, QgsSpatialIndex, NULL, QgsMessageLog, Qgis
+from .compat import MSG_WARNING, MSG_CRITICAL
 import os
 import re
 import numpy as np
@@ -125,7 +126,7 @@ class C6_vs_C3A_vs_Bd:
             QgsMessageLog.logMessage(
                 f"[C6_vs_C3A_vs_Bd.liste_poteau_c3a_excel] {fichier_c3a}: {err}",
                 "PoleAerien",
-                Qgis.Warning
+                MSG_WARNING
             )
             df4 = pd.DataFrame({})
             df4_rempl = pd.DataFrame({})
@@ -134,7 +135,7 @@ class C6_vs_C3A_vs_Bd:
             QgsMessageLog.logMessage(
                 f"[C6_vs_C3A_vs_Bd.liste_poteau_c3a_excel] {fichier_c3a}: {err}",
                 "PoleAerien",
-                Qgis.Critical
+                MSG_CRITICAL
             )
 
         return df4, df4_rempl
@@ -200,7 +201,7 @@ class C6_vs_C3A_vs_Bd:
                         QgsMessageLog.logMessage(
                             f"[C6_vs_C3A_vs_Bd.liste_poteau_etudes] inf_num invalide: {inf_num}",
                             "PoleAerien",
-                            Qgis.Warning
+                            MSG_WARNING
                         )
                         continue
 
@@ -291,7 +292,7 @@ class C6_vs_C3A_vs_Bd:
                             QgsMessageLog.logMessage(
                                 f"[C6_vs_C3A_vs_Bd.liste_poteau_c3a_qgis] num_a invalide: {num_a}",
                                 "PoleAerien",
-                                Qgis.Warning
+                                MSG_WARNING
                             )
                             continue
                         # listePoteaux.append(str(num_a))
@@ -319,7 +320,7 @@ class C6_vs_C3A_vs_Bd:
                             QgsMessageLog.logMessage(
                                 f"[C6_vs_C3A_vs_Bd.liste_poteau_c3a_qgis] num_b invalide: {num_b}",
                                 "PoleAerien",
-                                Qgis.Warning
+                                MSG_WARNING
                             )
                             continue
 
@@ -398,7 +399,7 @@ class C6_vs_C3A_vs_Bd:
             QgsMessageLog.logMessage(
                 f"[C6_vs_C3A_vs_Bd.lectureFichierC7] {fichier_c7}: {err}",
                 "PoleAerien",
-                Qgis.Warning
+                MSG_WARNING
             )
             df4 = pd.DataFrame({})
 
@@ -406,7 +407,7 @@ class C6_vs_C3A_vs_Bd:
             QgsMessageLog.logMessage(
                 f"[C6_vs_C3A_vs_Bd.lectureFichierC7] {fichier_c7}: {e}",
                 "PoleAerien",
-                Qgis.Critical
+                MSG_CRITICAL
             )
             df4 = pd.DataFrame({})
 

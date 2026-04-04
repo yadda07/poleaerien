@@ -6,6 +6,7 @@ Orchestre la comparaison entre les fichiers Excel C6, C3A, C7 et les données QG
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog, QgsApplication
+from ..compat import MSG_CRITICAL
 from ..C6_vs_C3A_vs_Bd import C6_vs_C3A_vs_Bd
 from ..async_tasks import ExcelExportTask, run_async_task
 import os
@@ -35,6 +36,10 @@ class C6C3AWorkflow(QObject):
         super().__init__()
         self.logic = C6_vs_C3A_vs_Bd()
         self.current_task = None
+
+    def cancel(self):
+        if self.current_task:
+            self.current_task.cancel()
 
     def start_analysis(self, params):
         """
@@ -174,7 +179,7 @@ class C6C3AWorkflow(QObject):
             self.analysis_finished.emit(result)
             
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur C6C3AWorkflow: {traceback.format_exc()}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur C6C3AWorkflow: {traceback.format_exc()}", "PoleAerien", MSG_CRITICAL)
             self.error_occurred.emit(str(e))
 
     def start_export(self, result):

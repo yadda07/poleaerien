@@ -11,12 +11,14 @@ import os
 import time
 
 from qgis.PyQt.QtCore import QObject
-from qgis.core import QgsMessageLog, Qgis, QgsTask, QgsApplication, QgsProject
+from qgis.core import QgsMessageLog, QgsTask, QgsApplication, QgsProject
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL, FIELD_TYPE_STRING
 
 from .project_detector import DetectionResult
 from .db_layer_loader import DbLayerLoader
 from .qgis_utils import detect_etude_field as _detect_etude_field, reset_crs_cache, show_feature_count
 from .report_export_task import UnifiedReportExportTask
+from .batch_extractor import BatchDataExtractor
 
 class _LoadProjectLayersTask(QgsTask):
     """Background task: PG connection + layer creation for project mode.
@@ -96,6 +98,31 @@ class _LoadProjectLayersTask(QgsTask):
         pass
 
 
+class _PreExtractPgTask(QgsTask):
+    def __init__(self, sro, be_type, gracethd_dir):
+        super().__init__(f"Prechargement batch ({sro})")
+        self.sro = sro
+        self.be_type = be_type
+        self.gracethd_dir = gracethd_dir
+        self.data = None
+        self.error_msg = None
+
+    def run(self):
+        try:
+            extractor = BatchDataExtractor()
+            self.data = extractor.extract_all(
+                ['comac'], None, None, None,
+                self.sro, self.be_type, self.gracethd_dir
+            )
+            return True
+        except Exception as e:
+            self.error_msg = str(e)
+            return False
+
+    def finished(self, result):
+        pass
+
+
 _VALIDATION_LABELS = {
     'hors_etude': 'poteaux hors perimetre etude',
     'doublons': 'etudes en doublon',
@@ -145,11 +172,13 @@ class BatchOrchestrator(QObject):
         self._c6c3a_wf = c6c3a_wf
         self._gespot_wf = gespot_wf
 
-        # Track current batch callback for the active module
-        self._current_done_cb = None
+        # Per-module done callbacks: {module_key: callback}
+        # Dict instead of single attr so multiple modules can run in parallel
+        self._done_callbacks = {}
         self._module_start_times = {}
-        self._batch_total = 0
-        self._batch_index = 0
+        # Per-module progress tracking: {module_key: 0-100}
+        # Enables correct progress bar with parallel modules
+        self._module_progress = {}
         self._batch_results = {}
 
         # Shared fddcpi2 cache: avoids duplicate PostgreSQL calls
@@ -172,6 +201,10 @@ class BatchOrchestrator(QObject):
         self._layer_load_task = None
         self._pending_module_keys = None
         self._report_task = None
+        self._prefetch_task = None
+        self._pending_prefetch_keys = None
+        # P-02: pre-extracted batch data (populated before runner.start)
+        self._extracted_data = None
 
         # Register launchers
         self._runner.set_launcher('maj', self._launch_maj)
@@ -189,12 +222,22 @@ class BatchOrchestrator(QObject):
         self._runner.batch_cancelled.connect(self._on_batch_cancelled)
         self._runner.log_message.connect(self._dlg.log_message)
 
-        # Connect workflow progress_changed for intra-module granularity
-        for wf in (self._maj_wf, self._capft_wf, self._comac_wf,
-                    self._c6bd_wf, self._police_wf, self._c6c3a_wf,
-                    self._gespot_wf):
-            if wf and hasattr(wf, 'progress_changed'):
-                wf.progress_changed.connect(self._on_workflow_progress)
+        # Connect workflow progress_changed with per-module key tagging
+        # Lambda with default arg captures key at definition time (closure-safe)
+        _wf_map = {
+            'maj': self._maj_wf,
+            'capft': self._capft_wf,
+            'comac': self._comac_wf,
+            'c6bd': self._c6bd_wf,
+            'police_c6': self._police_wf,
+            'c6c3a': self._c6c3a_wf,
+            'gespot_c6': self._gespot_wf,
+        }
+        for _key, _wf in _wf_map.items():
+            if _wf and hasattr(_wf, 'progress_changed'):
+                _wf.progress_changed.connect(
+                    lambda pct, k=_key: self._on_module_progress(k, pct)
+                )
 
         # Connect dialog signals
         self._dlg.start_requested.connect(self._on_start)
@@ -209,18 +252,22 @@ class BatchOrchestrator(QObject):
         'anomalies_c6_', 'cables_anomalie',
     )
 
-    _MODULE_PROGRESS_LIMIT = 84
+
     _REPORT_PROGRESS_START = 85
     _REPORT_PROGRESS_END = 99
 
     def _on_start(self, module_keys):
+        self._module_progress = {}
         self._batch_results = {}
+        self._extracted_data = None
         self._fddcpi_cache = {}
         self._sro_appuis_cache = {}
         self._be_type = 'nge'
         self._gracethd_dir = ''
         self._gracethd_lyr_preloaded = None
         self._report_task = None
+        self._prefetch_task = None
+        self._pending_prefetch_keys = None
         reset_crs_cache()
         self._dlg.textBrowser.clear()
 
@@ -277,6 +324,21 @@ class BatchOrchestrator(QObject):
         # Mode Couches QGIS: log les couches selectionnees avec leur nombre d'entites
         if needs_layers:
             self._log_selected_layers(module_keys)
+
+        # P-02: pre-fetch PG data (fddcpi2, BPE, attaches) before tasks start
+        # Enables COMAC + Police C6 to run in parallel (P-03)
+        sro_for_fetch = self._dlg.sro if self._dlg.is_project_mode else ''
+        if not sro_for_fetch:
+            det_pre = self._detection()
+            sro_for_fetch = det_pre.sro if det_pre else ''
+        if not sro_for_fetch:
+            from .db_connection import extract_sro_from_layer
+            lyr_pot = self._lyr_pot()
+            if lyr_pot:
+                sro_for_fetch = extract_sro_from_layer(lyr_pot) or ''
+        if self._start_async_pre_extract(module_keys, sro_for_fetch):
+            return
+
         self._runner.start(module_keys)
 
     def _detect_be_type(self, sro, det):
@@ -302,7 +364,7 @@ class BatchOrchestrator(QObject):
 
             if be == 'nge':
                 self._dlg.log_message(
-                    f"SRO {sro} — Bureau d'etudes: NGE "
+                    f"SRO {sro} - Bureau d'etudes: NGE "
                     "(source cables: PostgreSQL / fddcpiax)",
                     'info'
                 )
@@ -315,7 +377,7 @@ class BatchOrchestrator(QObject):
             )
 
             self._dlg.log_message(
-                f"SRO {sro} — Bureau d'etudes: AXIONE",
+                f"SRO {sro} - Bureau d'etudes: AXIONE",
                 'info'
             )
 
@@ -344,7 +406,7 @@ class BatchOrchestrator(QObject):
 
         except Exception as e:
             QgsMessageLog.logMessage(
-                f"Erreur detection BE: {e}", "PoleAerien", Qgis.Warning
+                f"Erreur detection BE: {e}", "PoleAerien", MSG_WARNING
             )
 
     def _log_gracethd_inventory(self, gracethd_dir):
@@ -361,7 +423,7 @@ class BatchOrchestrator(QObject):
         self._dlg.log_message(
             f"  Contenu: {inv['total_files']} fichiers "
             f"({inv['shp_count']} SHP, {inv['csv_count']} CSV, "
-            f"{inv['other_count']} auxiliaires) — "
+            f"{inv['other_count']} auxiliaires) - "
             f"{inv['total_size_mb']} Mo",
             'info'
         )
@@ -445,14 +507,14 @@ class BatchOrchestrator(QObject):
 
             if needs_pot and (not lyr_pot or not lyr_pot.isValid()):
                 issues.append(
-                    "Couche infra_pt_pot manquante ou invalide. "
-                    "Chargez la couche poteaux dans le projet QGIS "
+                    "Couche poteaux (infra_pt_pot) manquante ou invalide. "
+                    "Chargez-la dans le projet QGIS "
                     "et selectionnez-la dans la liste deroulante."
                 )
             elif needs_pot and lyr_pot and lyr_pot.featureCount() == 0:
                 issues.append(
-                    f"Couche {lyr_pot.name()} est vide (0 entites). "
-                    "Verifiez le filtre applique sur la couche."
+                    f"Couche {lyr_pot.name()} vide (aucun appui). "
+                    "Verifiez le filtre ou le SRO applique."
                 )
 
             if needs_cap and (not lyr_cap or not lyr_cap.isValid()):
@@ -471,8 +533,8 @@ class BatchOrchestrator(QObject):
         # Axione+GraceTHD: SRO non requis (intersection spatiale avec emprise GraceTHD)
         if is_pm and not self._dlg.sro and not (self._be_type == 'axione' and self._gracethd_dir):
             issues.append(
-                "Mode Projet: SRO non derivable du nom de dossier. "
-                "Format attendu: XXXXX-YYY-ZZZ-NNNNN (ex: 63041-B1I-PMZ-00003)"
+                "Mode Projet : impossible de determiner le SRO depuis le nom du dossier. "
+                "Format attendu : XXXXX-YYY-ZZZ-NNNNN (ex: 63041-B1I-PMZ-00003)."
             )
 
         # --- Per-module resource checks ---
@@ -580,7 +642,7 @@ class BatchOrchestrator(QObject):
 
     def _cleanup_temp_layers(self):
         """QP-06: Remove temporary layers created by previous batch runs."""
-        from qgis.core import QgsProject, QgsMessageLog, Qgis
+        from qgis.core import QgsProject, QgsMessageLog
         project = QgsProject.instance()
         to_remove = []
         for layer_id, layer in project.mapLayers().items():
@@ -592,7 +654,7 @@ class BatchOrchestrator(QObject):
                 project.removeMapLayer(lid)
             QgsMessageLog.logMessage(
                 f"Mode Projet: {len(to_remove)} couches temporaires supprimees",
-                "PoleAerien", Qgis.Info
+                "PoleAerien", MSG_INFO
             )
             self._dlg.log_message(
                 f"{len(to_remove)} couche(s) temporaire(s) du batch precedent supprimee(s)",
@@ -603,6 +665,8 @@ class BatchOrchestrator(QObject):
         # Cancel layer loading task if in progress
         if self._layer_load_task:
             self._layer_load_task.cancel()
+        if self._prefetch_task:
+            self._prefetch_task.cancel()
         if self._report_task:
             self._report_task.cancel()
         self._runner.cancel()
@@ -616,17 +680,27 @@ class BatchOrchestrator(QObject):
                 except Exception:
                     pass
 
+        if self._prefetch_task and not self._runner.is_running:
+            self._pending_prefetch_keys = None
+            self._cleanup_project_mode_layers()
+            self._dlg.reset_after_batch()
+            self._dlg.log_message("Batch annulé.", 'warning')
+
     # ------------------------------------------------------------------
     #  Runner signal handlers
     # ------------------------------------------------------------------
-    def _map_module_progress(self, module_pct):
-        total = self._batch_total
-        idx = self._batch_index
-        if total <= 0:
+    def _on_module_progress(self, key: str, pct: int) -> None:
+        """Update per-module progress slot and recompute global bar."""
+        self._module_progress[key] = max(0, min(100, pct))
+        self._dlg.set_progress(self._compute_global_progress())
+
+    def _compute_global_progress(self) -> int:
+        """Average active module progress, capped at REPORT_PROGRESS_START."""
+        slots = self._module_progress
+        if not slots:
             return 0
-        range_start = (idx / total) * self._MODULE_PROGRESS_LIMIT
-        range_end = ((idx + 1) / total) * self._MODULE_PROGRESS_LIMIT
-        return int(range_start + (module_pct / 100.0) * (range_end - range_start))
+        avg = sum(slots.values()) // len(slots)
+        return min(avg, self._REPORT_PROGRESS_START - 1)
 
     def _set_report_progress(self, report_pct):
         bounded = max(0, min(100, int(report_pct)))
@@ -644,6 +718,7 @@ class BatchOrchestrator(QObject):
         if not self._batch_results:
             self._finalize_batch_ui()
             return
+        self._dlg.set_progress_step("Generation du rapport unifie...")
         self._dlg.log_message("Generation du rapport unifie...", 'info')
         det = self._detection()
         self._report_task = UnifiedReportExportTask({
@@ -678,21 +753,17 @@ class BatchOrchestrator(QObject):
         self._dlg.log_message(f"Erreur rapport: {err}", 'error')
         self._finalize_batch_ui()
 
-    def _on_module_started(self, key, idx, total):
-        self._batch_index = idx
-        self._batch_total = total
+    def _on_module_started(self, key, _idx, _total):
         self._module_start_times[key] = time.time()
-        if total > 0:
-            pct = self._map_module_progress(0)
-            self._dlg.set_progress(max(pct, 2))
+        self._module_progress[key] = 0
+        self._dlg.set_progress(max(self._compute_global_progress(), 2))
+        from .batch_runner import MODULE_REGISTRY
+        name = MODULE_REGISTRY.get(key, key)
+        self._dlg.set_progress_step(f"{name} ({_idx + 1}/{_total})")
 
     def _on_module_finished(self, key, success, msg):
-        if self._batch_total > 0:
-            pct = self._map_module_progress(100)
-            self._dlg.set_progress(pct)
-
-    def _on_workflow_progress(self, module_pct):
-        self._dlg.set_progress(self._map_module_progress(module_pct))
+        self._module_progress[key] = 100
+        self._dlg.set_progress(self._compute_global_progress())
 
     def _on_batch_finished(self, results):
         self._log_batch_recap(results)
@@ -709,6 +780,11 @@ class BatchOrchestrator(QObject):
         for key, t0 in self._module_start_times.items():
             elapsed[key] = time.time() - t0
 
+        sro = self._dlg.sro if self._dlg.is_project_mode else ''
+        if not sro:
+            det = self._detection()
+            sro = det.sro if det else ''
+
         for key, result in self._batch_results.items():
             name = {
                 'maj': 'MAJ BD', 'capft': 'CAP_FT', 'comac': 'COMAC',
@@ -718,6 +794,16 @@ class BatchOrchestrator(QObject):
 
             dur = elapsed.get(key)
             dur_str = f" ({dur:.1f}s)" if dur else ""
+
+            if dur:
+                try:
+                    from .perf_logger import PerfLogger
+                    run_res = runner_results.get(key, {})
+                    status = 'ok' if run_res.get('success') else 'error'
+                    PerfLogger.record(key, 'module_total',
+                                      dur * 1000, sro=sro or '', status=status)
+                except Exception:
+                    pass
 
             metrics = self._extract_metrics(key, result)
             if metrics:
@@ -816,8 +902,6 @@ class BatchOrchestrator(QObject):
                 QgsVectorLayer, QgsFeature, QgsGeometry,
                 QgsPointXY, QgsField, QgsProject,
             )
-            from qgis.PyQt.QtCore import QVariant
-
             STYLE_DIR = os.path.join(os.path.dirname(__file__), 'styles')
 
             sources = {
@@ -851,9 +935,9 @@ class BatchOrchestrator(QObject):
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=DeprecationWarning)
                     pr.addAttributes([
-                        QgsField("nom", QVariant.String),
-                        QgsField("source", QVariant.String),
-                        QgsField("fichier", QVariant.String),
+                        QgsField("nom", FIELD_TYPE_STRING),
+                        QgsField("source", FIELD_TYPE_STRING),
+                        QgsField("fichier", FIELD_TYPE_STRING),
                     ])
                 lyr.updateFields()
 
@@ -883,7 +967,7 @@ class BatchOrchestrator(QObject):
 
         except Exception as e:
             QgsMessageLog.logMessage(
-                f"Erreur creation couche absents: {e}", "PoleAerien", Qgis.Warning
+                f"Erreur creation couche absents: {e}", "PoleAerien", MSG_WARNING
             )
 
     def _on_batch_cancelled(self):
@@ -1095,6 +1179,55 @@ class BatchOrchestrator(QObject):
                 self._cleanup_project_mode_layers()
                 self._dlg.reset_after_batch()
                 return
+
+            # P-02: pre-fetch PG data before tasks start (project mode)
+            sro_pm = self._dlg.sro or ''
+            if not sro_pm and self._pm_lyr_pot:
+                from .db_connection import extract_sro_from_layer
+                sro_pm = extract_sro_from_layer(self._pm_lyr_pot) or ''
+            if self._start_async_pre_extract(keys, sro_pm):
+                return
+
+            self._runner.start(keys)
+
+    def _start_async_pre_extract(self, module_keys, sro):
+        cable_modules = set(module_keys) & {'comac', 'police_c6'}
+        if not cable_modules or not sro:
+            return False
+
+        self._pending_prefetch_keys = list(module_keys)
+        self._prefetch_task = _PreExtractPgTask(sro, self._be_type, self._gracethd_dir)
+        self._prefetch_task.taskCompleted.connect(self._on_pre_extract_done)
+        self._prefetch_task.taskTerminated.connect(self._on_pre_extract_failed)
+        QgsApplication.taskManager().addTask(self._prefetch_task)
+        return True
+
+    def _on_pre_extract_done(self):
+        task = self._prefetch_task
+        self._prefetch_task = None
+        keys = self._pending_prefetch_keys
+        self._pending_prefetch_keys = None
+        if task and task.data:
+            self._extracted_data = task.data
+            if task.data.cables is not None:
+                self._fddcpi_cache = {'sro': task.data.sro, 'cables': task.data.cables}
+                self._dlg.log_message(
+                    f"[P-02] cables pre-fetches: {len(task.data.cables)} segments (source: {task.data.cables_source})",
+                    'info'
+                )
+        if keys:
+            self._runner.start(keys)
+
+    def _on_pre_extract_failed(self):
+        task = self._prefetch_task
+        self._prefetch_task = None
+        keys = self._pending_prefetch_keys
+        self._pending_prefetch_keys = None
+        if task and task.isCanceled():
+            return
+        if task and task.error_msg:
+            self._dlg.log_message(f"[P-02] pre-extraction ignoree: {task.error_msg}", 'warning')
+        if keys:
             self._runner.start(keys)
 
     def _log_spatial_sro(self, task):
@@ -1154,7 +1287,7 @@ class BatchOrchestrator(QObject):
         if not self._dlg.load_layers_in_qgis:
             self._db_loader.cleanup_layers()
             QgsMessageLog.logMessage(
-                "Mode Projet: couches temporaires supprimees", "PoleAerien", Qgis.Info
+                "Mode Projet: couches temporaires supprimees", "PoleAerien", MSG_INFO
             )
 
         self._pm_lyr_pot = None
@@ -1162,7 +1295,7 @@ class BatchOrchestrator(QObject):
         self._pm_lyr_com = None
         self._db_loader = None
 
-    def _auto_field(self, layer, patterns=None):
+    def _auto_field(self, layer, _patterns=None):
         """Auto-detect study field name from layer. Delegue a qgis_utils."""
         result = _detect_etude_field(layer, context="BatchOrchestrator")
         if result:
@@ -1179,7 +1312,7 @@ class BatchOrchestrator(QObject):
     # ------------------------------------------------------------------
     def _launch_maj(self, on_done):
         """Launch MAJ FT/BT module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['maj'] = on_done
         det = self._detection()
 
         lyr_pot = self._lyr_pot()
@@ -1215,7 +1348,7 @@ class BatchOrchestrator(QObject):
     def _on_maj_done(self, result):
         import pandas as pd
 
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('maj', None)
         if not cb:
             return
 
@@ -1272,14 +1405,14 @@ class BatchOrchestrator(QObject):
         )
 
     def _on_maj_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('maj', None)
         if cb:
             cb(False, str(err))
 
     # ------------------------------------------------------------------
     def _launch_capft(self, on_done):
         """Launch CAP_FT module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['capft'] = on_done
         det = self._detection()
 
         lyr_pot = self._lyr_pot()
@@ -1312,24 +1445,24 @@ class BatchOrchestrator(QObject):
     def _on_capft_analysis(self, result):
         err_type = result.get('error_type', '')
         if err_type:
-            cb = self._current_done_cb
+            cb = self._done_callbacks.pop('capft', None)
             if cb:
                 cb(False, _format_validation_error(result))
             return
         self._batch_results['capft'] = result
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('capft', None)
         if cb:
             cb(True, 'OK')
 
     def _on_capft_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('capft', None)
         if cb:
             cb(False, str(err))
 
     # ------------------------------------------------------------------
     def _launch_comac(self, on_done):
         """Launch COMAC module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['comac'] = on_done
         det = self._detection()
 
         lyr_pot = self._lyr_pot()
@@ -1375,7 +1508,7 @@ class BatchOrchestrator(QObject):
     def _on_comac_analysis(self, result):
         err_type = result.get('error_type', '')
         if err_type:
-            cb = self._current_done_cb
+            cb = self._done_callbacks.pop('comac', None)
             if cb:
                 cb(False, _format_validation_error(result))
             return
@@ -1389,19 +1522,19 @@ class BatchOrchestrator(QObject):
         if sro and appuis_wkb is not None and not self._sro_appuis_cache:
             self._sro_appuis_cache = {'sro': sro, 'appuis_wkb': appuis_wkb}
         self._batch_results['comac'] = result
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('comac', None)
         if cb:
             cb(True, 'OK')
 
     def _on_comac_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('comac', None)
         if cb:
             cb(False, str(err))
 
     # ------------------------------------------------------------------
     def _launch_c6bd(self, on_done):
         """Launch C6 vs BD module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['c6bd'] = on_done
         det = self._detection()
 
         lyr_pot = self._lyr_pot()
@@ -1435,19 +1568,19 @@ class BatchOrchestrator(QObject):
 
     def _on_c6bd_analysis(self, result):
         self._batch_results['c6bd'] = result
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('c6bd', None)
         if cb:
             cb(True, 'OK')
 
     def _on_c6bd_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('c6bd', None)
         if cb:
             cb(False, str(err))
 
     # ------------------------------------------------------------------
     def _launch_police_c6(self, on_done):
         """Launch Police C6 module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['police_c6'] = on_done
         det = self._detection()
 
         if not det.has_c6:
@@ -1500,6 +1633,13 @@ class BatchOrchestrator(QObject):
         # En batch, pas d'export individuel: tout va dans le rapport unifie
         params['skip_individual_export'] = True
 
+        # P-02: inject pre-fetched BPE + attaches so task skips PG queries
+        if self._extracted_data:
+            if self._extracted_data.bpe_list:
+                params['bpe_list_cache'] = self._extracted_data.bpe_list
+            if self._extracted_data.attaches_raw:
+                params['attaches_cache'] = self._extracted_data.attaches_raw
+
         c6_path = det.c6_dir
         self._police_wf.reset_logic()
 
@@ -1507,8 +1647,9 @@ class BatchOrchestrator(QObject):
             params['repertoire_c6'] = c6_path
             self._police_wf.run_analysis_auto_browse(params)
         else:
-            params['fname'] = c6_path
-            self._police_wf.run_analysis(params)
+            params['single_c6_file'] = c6_path
+            params['single_etude_name'] = os.path.splitext(os.path.basename(c6_path))[0]
+            self._police_wf.run_analysis_auto_browse(params)
 
     def _on_police_done(self, result):
         # Cache fddcpi2 data for other modules in this batch
@@ -1521,19 +1662,19 @@ class BatchOrchestrator(QObject):
         if sro and appuis_wkb is not None and not self._sro_appuis_cache:
             self._sro_appuis_cache = {'sro': sro, 'appuis_wkb': appuis_wkb}
         self._batch_results['police_c6'] = result
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('police_c6', None)
         if cb:
             cb(True, 'OK')
 
     def _on_police_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('police_c6', None)
         if cb:
             cb(False, str(err))
 
     # ------------------------------------------------------------------
     def _launch_c6c3a(self, on_done):
         """Launch C6-C3A-C7-BD module."""
-        self._current_done_cb = on_done
+        self._done_callbacks['c6c3a'] = on_done
         det = self._detection()
 
         if not det.has_c6 and not det.has_c6_annexe:
@@ -1592,22 +1733,22 @@ class BatchOrchestrator(QObject):
     def _on_c6c3a_analysis(self, result):
         if result.get('success'):
             self._batch_results['c6c3a'] = result
-            cb = self._current_done_cb
+            cb = self._done_callbacks.pop('c6c3a', None)
             if cb:
                 cb(True, 'OK')
         else:
-            cb = self._current_done_cb
+            cb = self._done_callbacks.pop('c6c3a', None)
             if cb:
                 cb(False, 'Erreur analyse')
 
     def _on_c6c3a_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('c6c3a', None)
         if cb:
             cb(False, str(err))
 
     def _launch_gespot_c6(self, on_done):
         """Lance le module GESPOT vs C6 (pur fichier-fichier, zéro couche QGIS)."""
-        self._current_done_cb = on_done
+        self._done_callbacks['gespot_c6'] = on_done
         det = self._detection()
 
         if not det.has_gespot:
@@ -1638,12 +1779,15 @@ class BatchOrchestrator(QObject):
 
     def _on_gespot_c6_done(self, result):
         self._batch_results['gespot_c6'] = result
-        cb = self._current_done_cb
+        output_path = result.get('output_path', '')
+        if output_path:
+            self._dlg.log_result_link(output_path)
+        cb = self._done_callbacks.pop('gespot_c6', None)
         if cb:
             cb(True, 'OK')
 
     def _on_gespot_c6_error(self, err):
-        cb = self._current_done_cb
+        cb = self._done_callbacks.pop('gespot_c6', None)
         if cb:
             cb(False, str(err))
 

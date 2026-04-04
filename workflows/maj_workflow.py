@@ -41,7 +41,14 @@ class MajWorkflow(QObject):
         
         # État extraction incrémentale
         self._extraction_state = None
-    
+
+    def cancel(self):
+        self._extraction_state = None
+        if self.current_task:
+            self.current_task.cancel()
+        if self._sql_bg_task:
+            self._sql_bg_task.cancel()
+
     @staticmethod
     def _compute_cache_key(lyr_pot, lyr_cap, lyr_com):
         """Calcule une clé de cache basée sur les couches."""

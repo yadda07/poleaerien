@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Batch Runner - Sequential multi-module execution controller.
+Batch Runner - DAG-aware multi-module execution controller.
 
-Executes selected modules one after another, collecting results
-and reporting progress to the UI via signals.
+Sprint E2: Groups execute sequentially; background modules (gespot_c6)
+run in parallel with the sequential group chain.
+Sprint E3: Group 1 (capft/c6bd/c6c3a) and Group 2 (comac+police_c6)
+will be made truly intra-group parallel.
+
+Public API identical to the original sequential runner (same signals).
 """
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer
 
 
-# Module registry: key → display name
+# Module registry: key -> display name
 MODULE_REGISTRY = {
     'maj':       '0. MAJ BD',
     'capft':     '1. VERIF CAP_FT',
@@ -17,20 +21,39 @@ MODULE_REGISTRY = {
     'c6bd':      '3. C6 vs BD',
     'police_c6': '4. POLICE C6',
     'c6c3a':     '5. C6-C3A-C7-BD',
+    'gespot_c6': '6. GESPOT vs C6',
 }
+
+# DAG: explicit dependency and group declarations.
+# - group: ascending order = execution order; modules in same group run after
+#          the previous group completes (Sprint E3 makes intra-group parallel)
+# - depends_on: list of prerequisite module keys; evaluated against selected
+#               modules only (not selected = auto-satisfied)
+# - background: True = launched immediately, runs in parallel with ALL groups
+MODULE_DAG = {
+    'maj':       {'depends_on': [],      'group': 0, 'background': False},
+    'capft':     {'depends_on': ['maj'], 'group': 1, 'background': False},
+    'c6bd':      {'depends_on': ['maj'], 'group': 1, 'background': False},
+    'c6c3a':     {'depends_on': ['maj'], 'group': 1, 'background': False},
+    'comac':     {'depends_on': ['maj'], 'group': 2, 'background': False},
+    'police_c6': {'depends_on': ['maj'], 'group': 2, 'background': False},
+    'gespot_c6': {'depends_on': [],      'group': 0, 'background': True},
+}
+# Note: comac and police_c6 in same group (2) because fddcpi2 is pre-fetched
+# by BatchDataExtractor._pre_extract_cables() before runner.start().
 
 
 class BatchRunner(QObject):
-    """Runs selected modules sequentially.
+    """DAG-aware batch execution controller.
 
-    Signals:
-        module_started(str, int, int): module_key, current_index, total
+    Signals (identical to original sequential runner):
+        module_started(str, int, int): module_key, position, total
         module_finished(str, bool, str): module_key, success, message
         batch_progress(int): overall percent 0-100
         modules_finished(dict): {module_key: {'success': bool, 'message': str}}
-        batch_finished(dict): {module_key: {'success': bool, 'message': str}}
-        batch_cancelled(): emitted on user cancel
-        log_message(str, str): message, level ('info'|'success'|'warning'|'error')
+        batch_finished(dict): same as modules_finished
+        batch_cancelled(): emitted on cancel
+        log_message(str, str): message, level
     """
 
     module_started = pyqtSignal(str, int, int)
@@ -43,17 +66,18 @@ class BatchRunner(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._queue = []
+        self._launchers = {}
         self._results = {}
-        self._current_index = 0
         self._running = False
         self._cancelled = False
 
-        # Module launchers: set by the orchestrator (PoleAerien.py)
-        # Each launcher is a callable that starts the module and connects
-        # its finished signal to self._on_module_done
-        self._launchers = {}
-        self._current_module_key = None
+        self._plan = []
+        self._group_index = 0
+        self._active_group_keys = set()
+        self._background_active = set()
+        self._sequential_done = False
+        self._total_modules = 0
+        self._launch_position = 0
 
     @property
     def is_running(self) -> bool:
@@ -63,134 +87,192 @@ class BatchRunner(QObject):
         self.batch_finished.emit(dict(self._results))
 
     def set_launcher(self, module_key: str, launcher_fn):
-        """Register a launcher function for a module.
+        """Register a launcher for a module.
 
         Args:
             module_key: Key from MODULE_REGISTRY
-            launcher_fn: Callable that starts the module analysis.
-                         Must accept a callback: launcher_fn(on_done_callback)
-                         where on_done_callback(success: bool, message: str)
+            launcher_fn: Callable accepting a callback: fn(on_done(success, msg))
         """
         self._launchers[module_key] = launcher_fn
 
     def start(self, module_keys: list):
-        """Start batch execution of selected modules.
+        """Start batch execution respecting DAG dependencies.
 
         Args:
-            module_keys: Ordered list of module keys to execute.
+            module_keys: List of module keys to execute (order irrelevant, DAG governs).
         """
         if self._running:
             return
 
         valid_keys = [k for k in module_keys if k in self._launchers]
         if not valid_keys:
-            self.log_message.emit("Aucun module valide sélectionné.", 'warning')
+            self.log_message.emit("Aucun module valide selectionne.", 'warning')
             return
 
-        self._queue = list(valid_keys)
         self._results = {}
-        self._current_index = 0
         self._running = True
         self._cancelled = False
+        self._sequential_done = False
+        self._group_index = 0
+        self._active_group_keys = set()
+        self._background_active = set()
+        self._launch_position = 0
 
-        total = len(self._queue)
-        names = ', '.join(MODULE_REGISTRY.get(k, k) for k in self._queue)
+        background, sequential = self._split_background(valid_keys)
+        try:
+            self._plan = self._compute_plan(sequential, set(valid_keys))
+        except RuntimeError as exc:
+            self._running = False
+            self.log_message.emit(f"Plan batch invalide : {exc}", 'error')
+            return
+        self._total_modules = len(valid_keys)
+
+        names = ', '.join(MODULE_REGISTRY.get(k, k) for k in valid_keys)
         self.log_message.emit(
-            f"Lancement de {total} module(s) : {names}",
-            'info'
+            f"Lancement de {self._total_modules} module(s) : {names}", 'info'
         )
         self.batch_progress.emit(0)
 
-        # Start first module (deferred to let signals connect)
-        QTimer.singleShot(100, self._run_next)
+        for key in background:
+            QTimer.singleShot(100, lambda k=key: self._launch_single(k))
+
+        QTimer.singleShot(100, self._launch_next_group)
 
     def cancel(self):
-        """Cancel the batch execution."""
+        """Cancel batch execution. Stops all active and pending modules."""
         if not self._running:
             return
         self._cancelled = True
         self._running = False
-        self.log_message.emit("Exécution annulée par l'utilisateur.", 'warning')
+        self._active_group_keys.clear()
+        self._background_active.clear()
+        self._plan = []
+        self.log_message.emit("Execution annulee par l'utilisateur.", 'warning')
         self.batch_cancelled.emit()
 
-    def _run_next(self):
-        """Launch the next module in the queue."""
-        if self._cancelled or not self._running:
+    # ------------------------------------------------------------------
+    #  Internal: plan computation
+    # ------------------------------------------------------------------
+
+    def _split_background(self, keys):
+        bg = [k for k in keys if MODULE_DAG.get(k, {}).get('background')]
+        seq = [k for k in keys if not MODULE_DAG.get(k, {}).get('background')]
+        return bg, seq
+
+    def _compute_plan(self, sequential_keys, all_selected):
+        """Group sequential_keys by DAG group number.
+
+        Returns list of lists: [[group0_keys], [group1_keys], ...].
+        Empty groups are skipped. Dependencies on non-selected modules
+        are auto-satisfied.
+        """
+        selected = set(all_selected)
+        remaining = set(sequential_keys)
+        done = set()
+        plan = []
+
+        while remaining:
+            ready = []
+            for key in remaining:
+                node = MODULE_DAG.get(key, {'depends_on': [], 'group': 99})
+                deps = [d for d in node.get('depends_on', []) if d in selected]
+                if all(d in done for d in deps):
+                    ready.append(key)
+            if not ready:
+                raise RuntimeError(f"DAG invalide ou cyclique: {sorted(remaining)}")
+
+            min_group = min(MODULE_DAG.get(k, {'group': 99})['group'] for k in ready)
+            current = sorted(k for k in ready if MODULE_DAG.get(k, {'group': 99})['group'] == min_group)
+            plan.append(current)
+            done.update(current)
+            remaining.difference_update(current)
+
+        return plan
+
+    # ------------------------------------------------------------------
+    #  Internal: execution
+    # ------------------------------------------------------------------
+
+    def _launch_next_group(self):
+        if self._cancelled:
             return
-
-        if self._current_index >= len(self._queue):
-            self._finish_batch()
+        if self._group_index >= len(self._plan):
+            self._sequential_done = True
+            if not self._background_active:
+                self._finish_batch()
             return
+        group_keys = self._plan[self._group_index]
+        self._active_group_keys = set(group_keys)
+        for key in group_keys:
+            self._launch_single(key)
 
-        key = self._queue[self._current_index]
-        total = len(self._queue)
-        self._current_module_key = key
-
+    def _launch_single(self, key):
+        if self._cancelled:
+            return
+        if MODULE_DAG.get(key, {}).get('background'):
+            self._background_active.add(key)
         name = MODULE_REGISTRY.get(key, key)
+        self._launch_position += 1
         self.log_message.emit(
-            f"--- Module {self._current_index + 1}/{total} : {name} ---",
+            f"--- Module {self._launch_position}/{self._total_modules} : {name} ---",
             'info'
         )
-        self.module_started.emit(key, self._current_index, total)
-
+        self.module_started.emit(key, self._launch_position - 1, self._total_modules)
         launcher = self._launchers.get(key)
         if launcher is None:
-            self._on_module_done(False, f"Lanceur non configuré pour '{key}'")
+            self._on_module_done(key, False, f"Lanceur non configure pour '{key}'")
             return
-
+        callback = self._make_callback(key)
         try:
-            launcher(self._on_module_done)
+            launcher(callback)
         except Exception as exc:
-            self._on_module_done(False, f"Erreur lancement : {exc}")
+            self._on_module_done(key, False, f"Erreur lancement : {exc}")
 
-    def _on_module_done(self, success: bool, message: str = ''):
-        """Called when a module finishes (success or error).
+    def _make_callback(self, key):
+        def on_done(success: bool, message: str = ''):
+            self._on_module_done(key, success, message)
+        return on_done
 
-        Args:
-            success: True if module completed successfully.
-            message: Optional result/error message.
-        """
+    def _on_module_done(self, key: str, success: bool, message: str = ''):
         if not self._running:
             return
-
-        key = self._current_module_key
         name = MODULE_REGISTRY.get(key, key)
-
         self._results[key] = {'success': success, 'message': message}
-
         level = 'success' if success else 'error'
         status = 'OK' if success else 'ERREUR'
         self.log_message.emit(f"{name} : {status} {message}", level)
         self.module_finished.emit(key, success, message)
+        self._update_progress()
 
-        # Update progress
-        total = len(self._queue)
-        self._current_index += 1
-        pct = int((self._current_index / total) * 100) if total > 0 else 100
+        if key in self._background_active:
+            self._background_active.discard(key)
+            if self._sequential_done and not self._background_active:
+                self._finish_batch()
+            return
+
+        self._active_group_keys.discard(key)
+        if not self._active_group_keys:
+            self._group_index += 1
+            QTimer.singleShot(200, self._launch_next_group)
+
+    def _update_progress(self):
+        total = self._total_modules
+        done = len(self._results)
+        pct = int((done / total) * 100) if total > 0 else 100
         self.batch_progress.emit(pct)
 
-        # Next module (deferred to allow UI refresh)
-        QTimer.singleShot(200, self._run_next)
-
     def _finish_batch(self):
-        """Complete the batch and emit results."""
         self._running = False
-        self._current_module_key = None
-
         successes = sum(1 for r in self._results.values() if r['success'])
         total = len(self._results)
         errors = total - successes
-
         if errors == 0:
             self.log_message.emit(
-                f"Tous les modules terminés avec succès ({total}/{total}).",
-                'success'
+                f"Tous les modules termines avec succes ({total}/{total}).", 'success'
             )
         else:
             self.log_message.emit(
-                f"Terminé : {successes}/{total} OK, {errors} erreur(s).",
-                'warning'
+                f"Termine : {successes}/{total} OK, {errors} erreur(s).", 'warning'
             )
-
         self.batch_progress.emit(100)
         self.modules_finished.emit(dict(self._results))

@@ -6,10 +6,11 @@ Responsabilité unique : lire les colonnes utiles de l'onglet Export 1,
 agréger la whitelist depuis l'onglet Bases, puis produire les statuts
 de comparaison C1-C11 par appui.
 
-Zéro dépendance QGIS — thread-safe.
+Zéro dépendance QGIS - thread-safe.
 """
 
 import os
+import re as _re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -19,9 +20,12 @@ import openpyxl
 from .core_utils import is_plugin_output_file, normalize_appui_num
 from .gespot_reader import GespotRecord, GespotLoadResult
 
+_PLACEHOLDERS_NUM_VOIE = {'9999', '99999'}
+_RE_LEADING_NUM = _re.compile(r'^(\d+)\s+')
+
 
 # ===========================================================================
-#  CONSTANTES — indices colonnes C6 (0-bases depuis le header ligne 8)
+#  CONSTANTES - indices colonnes C6 (0-bases depuis le header ligne 8)
 # ===========================================================================
 
 _C6_HDR_ROW = 7        # header ligne 8 (0-base)
@@ -29,17 +33,17 @@ _C6_DATA_ROW = 8       # données à partir ligne 9 (0-base)
 _C6_CENTRE_ROW = 2     # cellule E3 (0-base)
 _C6_CENTRE_COL = 4     # colonne E (0-base)
 
-_C6_COL_NUM = 0        # A — N° appui
-_C6_COL_TYPE = 1       # B — Type d'appui
-_C6_COL_ADRESSE = 2    # C — Adresse
-_C6_COL_CTRL_VIS = 5   # F — Contrôle visuel
-_C6_COL_VERTIC = 6     # G — Verticalité
-_C6_COL_YELLOW = 12    # M — Absence étiquette jaune
-_C6_COL_USABLE = 13    # N — Appui utilisable
-_C6_COL_ENV = 14       # O — Milieu environnant
-_C6_COL_ELEC = 15      # P — Environnement électrique
-_C6_COL_STRAT = 16     # Q — Appui stratégique
-_C6_COL_INACC = 17     # R — Appui inaccessible
+_C6_COL_NUM = 0        # A - N° appui
+_C6_COL_TYPE = 1       # B - Type d'appui
+_C6_COL_ADRESSE = 2    # C - Adresse
+_C6_COL_CTRL_VIS = 5   # F - Contrôle visuel
+_C6_COL_VERTIC = 6     # G - Verticalité
+_C6_COL_YELLOW = 12    # M - Absence étiquette jaune
+_C6_COL_USABLE = 13    # N - Appui utilisable
+_C6_COL_ENV = 14       # O - Milieu environnant
+_C6_COL_ELEC = 15      # P - Environnement électrique
+_C6_COL_STRAT = 16     # Q - Appui stratégique
+_C6_COL_INACC = 17     # R - Appui inaccessible
 
 _BASES_STRAT_COL = 13  # colonne M (1-base pour openpyxl)
 _BASES_STRAT_ROW_START = 2  # ligne 2 (1-base)
@@ -197,56 +201,96 @@ def _read_one_c6(filepath: str,
     """Lit un fichier C6 Excel. Retourne (records_dict, whitelist, anomalies)."""
     anomalies = []
     try:
-        wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(filepath, data_only=True)
     except Exception as e:
         anomalies.append({
             'source': 'C6', 'fichier': fname, 'num': '',
-            'type': 'FICHIER_IGNORE', 'detail': str(e),
-            'action': 'Verifier que le fichier est un .xlsx valide',
+            'type': 'FICHIER_IGNORE',
+            'detail': (
+                f"Le fichier C6 '{fname}' n'a pas pu etre lu comme fichier Excel .xlsx "
+                f"({e})"
+            ),
+            'action': (
+                f"Ouvrir '{fname}', verifier qu'il ne s'agit pas d'un fichier corrompu "
+                f"ou d'un faux .xlsx, puis relancer"
+            ),
         })
         return None, set(), anomalies
 
-    if 'Export 1' not in wb.sheetnames:
-        wb.close()
-        return None, set(), anomalies
+    try:
+        if 'Export 1' not in wb.sheetnames:
+            anomalies.append({
+                'source': 'C6', 'fichier': fname, 'num': '',
+                'type': 'FEUILLE_EXPORT_1_ABSENTE',
+                'detail': (
+                    f"Le fichier C6 '{fname}' ne contient pas l'onglet 'Export 1', "
+                    f"qui est obligatoire pour lire les donnees appuis"
+                ),
+                'action': (
+                    f"Verifier que '{fname}' est bien un export C6 complet contenant "
+                    f"l'onglet 'Export 1', puis relancer"
+                ),
+            })
+            return None, set(), anomalies
 
-    ws = wb['Export 1']
-    whitelist = _read_whitelist(wb)
-    centre_raw = _cell_str(ws, _C6_CENTRE_ROW + 1, _C6_CENTRE_COL + 1)
-    if not centre_raw:
+        ws = wb['Export 1']
+        whitelist = _read_whitelist(wb)
+        centre_raw = _cell_str(ws, _C6_CENTRE_ROW + 1, _C6_CENTRE_COL + 1)
+        if not centre_raw:
+            anomalies.append({
+                'source': 'C6', 'fichier': fname, 'num': '',
+                'type': 'CENTRE_C6_ABSENT',
+                'detail': (
+                    f"Le code centre est absent dans le fichier C6 '{fname}' : "
+                    f"onglet 'Export 1', cellule E3 vide. Tous les appuis de ce fichier "
+                    f"auront un centre C6 vide"
+                ),
+                'action': (
+                    f"Ouvrir '{fname}', aller dans l'onglet 'Export 1', renseigner le code "
+                    f"centre en cellule E3, enregistrer puis relancer le controle"
+                ),
+            })
+
+        records = {}
+        for row in ws.iter_rows(min_row=_C6_DATA_ROW + 1, values_only=True):
+            if not row or row[_C6_COL_NUM] is None:
+                continue
+            num_raw = str(row[_C6_COL_NUM]).strip()
+            num_key = normalize_appui_num(num_raw)
+            if not num_key:
+                continue
+
+            records[num_key] = C6Record(
+                num=num_key,
+                adresse=_safe_cell(row, _C6_COL_ADRESSE),
+                centre=centre_raw,
+                type_c6=_safe_cell(row, _C6_COL_TYPE),
+                ctrl_vis=_safe_cell(row, _C6_COL_CTRL_VIS),
+                vertic=_safe_cell(row, _C6_COL_VERTIC),
+                yellow=_safe_cell(row, _C6_COL_YELLOW),
+                usable=_safe_cell(row, _C6_COL_USABLE),
+                env=_safe_cell(row, _C6_COL_ENV),
+                elec=_safe_cell(row, _C6_COL_ELEC),
+                strat=_safe_cell(row, _C6_COL_STRAT),
+                inacc=_safe_cell(row, _C6_COL_INACC),
+                source_file=fname,
+            )
+        return records, whitelist, anomalies
+    except Exception as e:
         anomalies.append({
             'source': 'C6', 'fichier': fname, 'num': '',
-            'type': 'CENTRE_C6_ABSENT',
-            'detail': 'Cellule E3 vide dans Export 1',
-            'action': 'Renseigner le code centre dans la cellule E3',
+            'type': 'FICHIER_IGNORE',
+            'detail': (
+                f"Erreur lors de la lecture des donnees du fichier C6 '{fname}' : {e}"
+            ),
+            'action': (
+                f"Ouvrir '{fname}' dans Excel, enregistrer sous un nouveau .xlsx, "
+                f"puis relancer"
+            ),
         })
-
-    records = {}
-    for row in ws.iter_rows(min_row=_C6_DATA_ROW + 1, values_only=True):
-        if not row or row[_C6_COL_NUM] is None:
-            continue
-        num_raw = str(row[_C6_COL_NUM]).strip()
-        num_key = normalize_appui_num(num_raw)
-        if not num_key:
-            continue
-
-        records[num_key] = C6Record(
-            num=num_key,
-            adresse=_safe_cell(row, _C6_COL_ADRESSE),
-            centre=centre_raw,
-            type_c6=_safe_cell(row, _C6_COL_TYPE),
-            ctrl_vis=_safe_cell(row, _C6_COL_CTRL_VIS),
-            vertic=_safe_cell(row, _C6_COL_VERTIC),
-            yellow=_safe_cell(row, _C6_COL_YELLOW),
-            usable=_safe_cell(row, _C6_COL_USABLE),
-            env=_safe_cell(row, _C6_COL_ENV),
-            elec=_safe_cell(row, _C6_COL_ELEC),
-            strat=_safe_cell(row, _C6_COL_STRAT),
-            inacc=_safe_cell(row, _C6_COL_INACC),
-            source_file=fname,
-        )
-    wb.close()
-    return records, whitelist, anomalies
+        return None, set(), anomalies
+    finally:
+        wb.close()
 
 
 def load_c6_dir(c6_dir: str) -> C6LoadResult:
@@ -281,10 +325,18 @@ def _handle_c6_dup(num: str, new_rec: C6Record,
                    records: Dict[str, C6Record]) -> None:
     if str(new_rec) == existing['payload']:
         anomalies.append({
-            'source': 'C6', 'fichier': new_rec.source_file, 'num': num,
+            'source': 'C6',
+            'fichier': f"{existing['rec'].source_file} / {new_rec.source_file}",
+            'num': num,
             'type': 'DOUBLON_IDENTIQUE',
-            'detail': 'Meme appui dans plusieurs fichiers C6 (identique)',
-            'action': 'Aucune (consolide automatiquement)',
+            'detail': (
+                f"L'appui {num} est present dans plusieurs fichiers C6 avec exactement "
+                f"les memes valeurs. Une seule version a ete conservee automatiquement"
+            ),
+            'action': (
+                "Aucune correction bloquante. Vous pouvez supprimer les doublons C6 si "
+                "vous voulez nettoyer la source"
+            ),
         })
     else:
         records.pop(num, None)
@@ -293,8 +345,14 @@ def _handle_c6_dup(num: str, new_rec: C6Record,
             'fichier': f"{existing['rec'].source_file} / {new_rec.source_file}",
             'num': num,
             'type': 'DOUBLON_CONFLICTUEL',
-            'detail': 'Valeurs differentes dans plusieurs fichiers C6',
-            'action': 'Corriger la source C6 avant de relancer',
+            'detail': (
+                f"L'appui {num} est present dans plusieurs fichiers C6 avec des valeurs "
+                f"differentes. Le plugin ne peut pas choisir automatiquement la bonne version"
+            ),
+            'action': (
+                f"Comparer les fichiers C6 cites pour l'appui {num}, garder une seule "
+                f"version coherente, puis relancer"
+            ),
         })
 
 
@@ -321,10 +379,51 @@ def _recalage_to_vertic(recalage_raw: str) -> str:
     return 'Non' if recalage_raw.strip().upper() == 'O' else 'Oui'
 
 
+def _compare_adresse(gespot: GespotRecord,
+                     c6_adresse: str) -> Tuple[str, str]:
+    """Compare l'adresse GESPOT (voie + num_voie) avec l'adresse C6.
+
+    Logique :
+    1. Construire adresse_gespot = num_voie + voie si num_voie valide.
+    2. Match exact (full) -> OK.
+    3. Match voie seule vs C6 -> OK (info: num_voie absent du C6).
+    4. Match voie GESPOT vs C6 sans son numero de tete -> OK.
+    5. Sinon KO.
+    """
+    voie = gespot.voie.strip()
+    num_voie = gespot.num_voie.strip()
+    adr_c6 = c6_adresse.strip()
+
+    has_num = bool(num_voie) and num_voie not in _PLACEHOLDERS_NUM_VOIE
+    adresse_gespot = f"{num_voie} {voie}" if has_num else voie
+
+    ag = adresse_gespot.lower()
+    ac = adr_c6.lower()
+
+    if ag == ac:
+        return 'OK', ''
+    if not ag and not ac:
+        return 'OK', ''
+
+    if has_num and voie.lower() == ac:
+        return 'OK', ''
+
+    if not has_num and voie:
+        m = _RE_LEADING_NUM.match(adr_c6)
+        if m and adr_c6[m.end():].strip().lower() == voie.lower():
+            return 'OK', ''
+
+    if adresse_gespot and not adr_c6:
+        return 'KO', f"GESPOT='{adresse_gespot}' mais C6 vide"
+    if not adresse_gespot and adr_c6:
+        return 'KO', f"GESPOT vide mais C6='{adr_c6}'"
+    return 'KO', f"GESPOT='{adresse_gespot}' vs C6='{adr_c6}'"
+
+
 def _compare_one(gespot: GespotRecord, c6: C6Record) -> ComparisonResult:
     vertic_gespot = _recalage_to_vertic(gespot.recalage_raw)
 
-    s_adr, d_adr = _cmp(gespot.voie, c6.adresse, 'Voie GESPOT', 'Adresse C6')
+    s_adr, d_adr = _compare_adresse(gespot, c6.adresse)
     s_ctr, d_ctr = _cmp(gespot.centre, c6.centre, 'Centre GESPOT', 'Centre C6')
     s_typ, d_typ = _cmp(gespot.type_calc, c6.type_c6, 'Type GESPOT', 'Type C6')
     s_str, d_str = _cmp(gespot.strategie_calc, c6.strat, 'Strategie GESPOT', 'Strategie C6')
@@ -411,7 +510,7 @@ def export_to_excel(result: GespotC6Result, export_dir: str) -> str:
     except (PermissionError, OSError) as exc:
         raise RuntimeError(
             f"Impossible d'ecrire le rapport: {filepath} "
-            f"(fichier ouvert dans Excel ?) — {exc}"
+            f"(fichier ouvert dans Excel ?) - {exc}"
         ) from exc
     finally:
         wb.close()
@@ -533,8 +632,8 @@ def _write_absent_gespot(wb: openpyxl.Workbook,
 def _write_anomalies(wb: openpyxl.Workbook,
                      anomalies: List[dict]) -> None:
     ws = wb.create_sheet('ANOMALIES_SOURCE')
-    headers = ['SOURCE', 'FICHIER', 'NUM', 'TYPE_ANOMALIE', 'DETAIL',
-               'ACTION_REQUISE']
+    headers = ['SOURCE', 'FICHIER_CONCERNE', 'APPUI_CONCERNE', 'CODE_ANOMALIE',
+               'EXPLICATION', 'ACTION_A_REALISER']
     _write_sheet_header(ws, headers)
     for a in anomalies:
         ws.append([a.get('source', ''), a.get('fichier', ''),
@@ -597,6 +696,9 @@ def run_comparison(gespot_dir: str, c6_dir: str,
 
     _prog(60, 'Comparaison...')
     result = compare(gespot_result, c6_result)
+
+    _prog(85, 'Export Excel...')
+    export_to_excel(result, export_dir)
 
     _prog(100, 'Termine.')
     return result

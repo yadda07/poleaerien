@@ -10,6 +10,7 @@ from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsMessageLog, Qgis
+from .compat import MSG_WARNING
 from .resources import *
 import os.path
 
@@ -109,7 +110,7 @@ class PoleAerien:
             del self.toolbar
         except Exception as e:
             QgsMessageLog.logMessage(
-                f'PoleAerien.unload: {e}', 'PoleAerien', Qgis.Warning)
+                f'PoleAerien.unload: {e}', 'PoleAerien', MSG_WARNING)
 
     def openDocumentation(self):
         import webbrowser

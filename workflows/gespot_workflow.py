@@ -3,7 +3,7 @@
 Workflow pour l'analyse GESPOT vs C6.
 
 Orchestre la tâche asynchrone GespotC6Task et relaie les signaux vers l'UI.
-Zéro appel QGIS dans le worker — tout le traitement est pur Python.
+Zéro appel QGIS dans le worker - tout le traitement est pur Python.
 """
 
 import os

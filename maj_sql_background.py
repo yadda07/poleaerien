@@ -20,6 +20,7 @@ from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 from qgis.core import (
     Qgis, QgsTask, QgsMessageLog, QgsDataSourceUri, QgsProject
 )
+from .compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL
 
 class MajSqlSignals(QObject):
     """Signaux pour communication avec le main thread."""
@@ -114,7 +115,7 @@ class MajSqlBackgroundTask(QgsTask):
                        f"{self.result['bt_updated']} BT en {t1-t0:.1f}s")
                 if skipped_total:
                     msg += f" ({skipped_total} ligne(s) ignorée(s))"
-                QgsMessageLog.logMessage(msg, "PoleAerien", Qgis.Info)
+                QgsMessageLog.logMessage(msg, "PoleAerien", MSG_INFO)
                 
                 self.result['skipped_ft'] = self._skipped_ft
                 self.result['skipped_bt'] = self._skipped_bt
@@ -128,19 +129,19 @@ class MajSqlBackgroundTask(QgsTask):
         except Exception as e:
             self.exception = str(e)
             QgsMessageLog.logMessage(
-                f"[MAJ-SQL-BG] Erreur: {e}", "PoleAerien", Qgis.Critical
+                f"[MAJ-SQL-BG] Erreur: {e}", "PoleAerien", MSG_CRITICAL
             )
             return False
     
     def _exec_sp(self, db, sql):
         """Execute a SQL statement reliably (persistent QSqlQuery, checked)."""
         q = QSqlQuery(db)
-        ok = q.exec_(sql)
+        ok = q.exec(sql)
         if not ok:
             err = q.lastError().text()
             QgsMessageLog.logMessage(
                 f"[MAJ-SQL-BG] _exec_sp failed: {sql[:60]}... => {err}",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
         return ok
 
@@ -175,7 +176,7 @@ class MajSqlBackgroundTask(QgsTask):
                 if sel_cols:
                     select_sql = f'SELECT {", ".join(sel_cols)} FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
                     select_query = QSqlQuery(db)
-                    if select_query.exec_(select_sql) and select_query.next():
+                    if select_query.exec(select_sql) and select_query.next():
                         idx = 0
                         if self._column_exists("inf_num"):
                             current_inf_num = select_query.value(idx) or ""
@@ -259,7 +260,7 @@ class MajSqlBackgroundTask(QgsTask):
                 
                 sql = f'UPDATE "{schema}"."{table}" SET {", ".join(updates)} WHERE gid = {int(gid)}'
                 query = QSqlQuery(db)
-                if not query.exec_(sql):
+                if not query.exec(sql):
                     raise RuntimeError(query.lastError().text())
                 
                 self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
@@ -270,7 +271,7 @@ class MajSqlBackgroundTask(QgsTask):
                 self._skipped_ft.append({'gid': int(gid), 'error': str(exc)})
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] FT gid={gid} ignoré: {exc}",
-                    "PoleAerien", Qgis.Warning
+                    "PoleAerien", MSG_WARNING
                 )
             
             # Progression
@@ -285,18 +286,18 @@ class MajSqlBackgroundTask(QgsTask):
             gids_str = ",".join(str(g) for g in gids_pot_ac)
             sql_null = f'UPDATE "{schema}"."{table}" SET inf_num = NULL WHERE gid IN ({gids_str})'
             q_null = QSqlQuery(db)
-            if not q_null.exec_(sql_null):
+            if not q_null.exec(sql_null):
                 err_msg = q_null.lastError().text()
                 self._exec_sp(db, "ROLLBACK TO SAVEPOINT sp_ft_inf_num")
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] Erreur inf_num=NULL FT: {err_msg}",
-                    "PoleAerien", Qgis.Warning
+                    "PoleAerien", MSG_WARNING
                 )
             else:
                 self._exec_sp(db, "RELEASE SAVEPOINT sp_ft_inf_num")
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] Trigger FT: inf_num=NULL pour {len(gids_pot_ac)} POT-AC",
-                    "PoleAerien", Qgis.Info
+                    "PoleAerien", MSG_INFO
                 )
         
         self.result['gids_pot_ac'] = gids_pot_ac
@@ -331,7 +332,7 @@ class MajSqlBackgroundTask(QgsTask):
                 if sel_cols:
                     select_sql = f'SELECT {", ".join(sel_cols)} FROM "{schema}"."{table}" WHERE gid = {int(gid)}'
                     select_query = QSqlQuery(db)
-                    if select_query.exec_(select_sql) and select_query.next():
+                    if select_query.exec(select_sql) and select_query.next():
                         idx = 0
                         if self._column_exists("inf_num"):
                             current_inf_num = select_query.value(idx) or ""
@@ -386,7 +387,7 @@ class MajSqlBackgroundTask(QgsTask):
                 
                 sql = f'UPDATE "{schema}"."{table}" SET {", ".join(updates)} WHERE gid = {int(gid)}'
                 query = QSqlQuery(db)
-                if not query.exec_(sql):
+                if not query.exec(sql):
                     raise RuntimeError(query.lastError().text())
                 
                 self._exec_sp(db, f"RELEASE SAVEPOINT {sp_name}")
@@ -397,7 +398,7 @@ class MajSqlBackgroundTask(QgsTask):
                 self._skipped_bt.append({'gid': int(gid), 'error': str(exc)})
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] BT gid={gid} ignoré: {exc}",
-                    "PoleAerien", Qgis.Warning
+                    "PoleAerien", MSG_WARNING
                 )
             
             # Progression
@@ -411,18 +412,18 @@ class MajSqlBackgroundTask(QgsTask):
             gids_str = ",".join(str(g) for g in gids_pot_ac_bt)
             sql_null = f'UPDATE "{schema}"."{table}" SET inf_num = NULL WHERE gid IN ({gids_str})'
             q_null = QSqlQuery(db)
-            if not q_null.exec_(sql_null):
+            if not q_null.exec(sql_null):
                 err_msg = q_null.lastError().text()
                 self._exec_sp(db, "ROLLBACK TO SAVEPOINT sp_bt_inf_num")
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] Erreur inf_num=NULL BT: {err_msg}",
-                    "PoleAerien", Qgis.Warning
+                    "PoleAerien", MSG_WARNING
                 )
             else:
                 self._exec_sp(db, "RELEASE SAVEPOINT sp_bt_inf_num")
                 QgsMessageLog.logMessage(
                     f"[MAJ-SQL-BG] Trigger BT: inf_num=NULL pour {len(gids_pot_ac_bt)} POT-AC",
-                    "PoleAerien", Qgis.Info
+                    "PoleAerien", MSG_INFO
                 )
         
         self.result['gids_pot_ac_bt'] = gids_pot_ac_bt
@@ -446,7 +447,7 @@ class MajSqlBackgroundTask(QgsTask):
             WHERE table_schema = '{schema_clean}' AND table_name = '{table_clean}'
         """
         query = QSqlQuery(db)
-        if query.exec_(sql):
+        if query.exec(sql):
             while query.next():
                 columns.add(query.value(0))
         return columns

@@ -6,14 +6,16 @@ Orchestre l'extraction des données, l'analyse asynchrone et l'export Excel.
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import Qgis, QgsMessageLog
+from ..compat import MSG_INFO, MSG_WARNING, MSG_CRITICAL, FIELD_TYPE_STRING, FIELD_TYPE_INT, FIELD_TYPE_DOUBLE, FIELD_TYPE_LONGLONG
 from ..Comac import Comac
 from ..async_tasks import ComacTask, ExcelExportTask, run_async_task
 from ..core_utils import build_export_path
 from ..db_connection import extract_sro_from_layer
 from ..cable_analyzer import extraire_appuis_wkb
 from ..qgis_utils import show_feature_count
+from ..perf_logger import PerfLogger
 import os
-import copy
+import time
 
 class ComacWorkflow(QObject):
     """
@@ -36,6 +38,10 @@ class ComacWorkflow(QObject):
         super().__init__()
         self.comac_logic = Comac()
         self.current_task = None
+
+    def cancel(self):
+        if self.current_task:
+            self.current_task.cancel()
 
     def start_analysis(self, lyr_pot, lyr_comac, col_comac, chemin_comac, chemin_export,
                         fddcpi_cache=None, sro_appuis_cache=None,
@@ -62,6 +68,7 @@ class ComacWorkflow(QObject):
             return
 
         # 1. Extraction des donnees (Main Thread) - passe unique
+        _t0 = time.perf_counter()
         try:
             doublons, hors_etude, dico_qgis, dico_poteaux_prives, all_inf_nums, coords_qgis = (
                 self.comac_logic.extraire_donnees_comac(
@@ -73,9 +80,16 @@ class ComacWorkflow(QObject):
             self.error_occurred.emit(str(e))
             return
         except Exception as e:
-            QgsMessageLog.logMessage(f"Erreur extraction COMAC: {e}", "PoleAerien", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Erreur extraction COMAC: {e}", "PoleAerien", MSG_CRITICAL)
             self.error_occurred.emit(f"Erreur technique extraction: {e}")
             return
+        _n_pot = sum(len(v) for v in dico_qgis.values())
+        PerfLogger.record('comac', 'extraction_qgis',
+                          (time.perf_counter() - _t0) * 1000, sro=sro or '', feature_count=_n_pot)
+        self.message_received.emit(
+            f"[PERF] COMAC extraction_qgis: {int((time.perf_counter()-_t0)*1000)}ms "
+            f"({_n_pot} poteaux)", "grey"
+        )
 
         # 2. Extraction SRO + appuis WKB pour verif cables (Main Thread)
         # SRO: reutiliser le cache batch si disponible
@@ -88,11 +102,14 @@ class ComacWorkflow(QObject):
         # Ne pas reutiliser le cache Police C6 qui est sans commune.
         appuis_wkb = []
         if sro:
+            _t1 = time.perf_counter()
             appuis_wkb = extraire_appuis_wkb(lyr_pot, keep_commune=True)
+            PerfLogger.record('comac', 'appuis_wkb_extract',
+                              (time.perf_counter() - _t1) * 1000, sro=sro, feature_count=len(appuis_wkb))
         else:
             QgsMessageLog.logMessage(
                 "[COMAC] SRO non trouve - verif cables desactivee",
-                "PoleAerien", Qgis.Warning
+                "PoleAerien", MSG_WARNING
             )
 
         # 3. Préparation des données pour la Task
@@ -109,12 +126,11 @@ class ComacWorkflow(QObject):
             'spatial_tolerance': spatial_tolerance,
         }
         
-        # Deep copy pour éviter mutation
         qgis_data = {
             'doublons': list(doublons),
             'hors_etude': list(hors_etude),
-            'dico_qgis': copy.deepcopy(dico_qgis),
-            'dico_poteaux_prives': copy.deepcopy(dico_poteaux_prives),
+            'dico_qgis': dico_qgis,
+            'dico_poteaux_prives': dico_poteaux_prives,
             'appuis': appuis_wkb,
             'all_inf_nums': all_inf_nums,
             'coords_qgis': coords_qgis,
@@ -171,7 +187,6 @@ class ComacWorkflow(QObject):
         from qgis.core import (
             QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsProject
         )
-        from qgis.PyQt.QtCore import QVariant
 
         sro_safe = sro.replace('/', '_')
         prefix = 'gracethd_cables' if be_type == 'axione' else 'fddcpi2'
@@ -187,13 +202,13 @@ class ComacWorkflow(QObject):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             provider.addAttributes([
-                QgsField("gid_dc2", QVariant.LongLong),
-                QgsField("gid_dc", QVariant.LongLong),
-                QgsField("cab_capa", QVariant.Int),
-                QgsField("cab_type", QVariant.String),
-                QgsField("cb_etiquet", QVariant.String),
-                QgsField("posemode", QVariant.Int),
-                QgsField("length", QVariant.Double),
+                QgsField("gid_dc2", FIELD_TYPE_LONGLONG),
+                QgsField("gid_dc", FIELD_TYPE_LONGLONG),
+                QgsField("cab_capa", FIELD_TYPE_INT),
+                QgsField("cab_type", FIELD_TYPE_STRING),
+                QgsField("cb_etiquet", FIELD_TYPE_STRING),
+                QgsField("posemode", FIELD_TYPE_INT),
+                QgsField("length", FIELD_TYPE_DOUBLE),
             ])
         layer.updateFields()
 
