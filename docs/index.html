@@ -1542,7 +1542,7 @@
             <div class="cards-grid">
                 <article class="card animate-in">
                     <div class="card-icon blue">
-                        <img src="../images/icon-sync.svg" alt="Sync" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-sync.svg" alt="Sync" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Mise a jour FT/BT</h3>
                     <p>Import du fichier FT-BT KO Excel, analyse des correspondances poteaux, puis mise a jour SQL directe PostgreSQL en thread background avec rollback atomique et triggers auto.</p>
@@ -1550,7 +1550,7 @@
 
                 <article class="card animate-in delay-1">
                     <div class="card-icon green">
-                        <img src="../images/icon-success.svg" alt="Validation" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-success.svg" alt="Validation" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Verification CAP_FT</h3>
                     <p>Comparaison des poteaux FT vs fiches appuis. Extraction single-pass unifiee (doublons, hors-etude, dico poteaux, terrains prives). Normalisation robuste via <code>normalize_appui_num()</code>.</p>
@@ -1558,7 +1558,7 @@
 
                 <article class="card animate-in delay-2">
                     <div class="card-icon orange">
-                        <img src="../images/icon-database.svg" alt="Database" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-database.svg" alt="Database" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Controle COMAC</h3>
                     <p>Validation BT + VérifCabCOMAC (fddcpiax, CDI+posemode, capacites). Verification boitiers fibre optique (col AR). Filtrage poteaux par SRO. PostgreSQL natif (schema comac).</p>
@@ -1566,7 +1566,7 @@
 
                 <article class="card animate-in delay-3">
                     <div class="card-icon purple">
-                        <img src="../images/icon-chart.svg" alt="Chart" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-chart.svg" alt="Chart" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Comparaison C6 vs BD</h3>
                     <p>Extraction IN+OUT single-pass via <code>QgsSpatialIndex</code>. Auto-detection champ etude centralise. Hors-perimetre explicit. Deduplication fichiers output.</p>
@@ -1574,7 +1574,7 @@
 
                 <article class="card animate-in">
                     <div class="card-icon red">
-                        <img src="../images/icon-search.svg" alt="Search" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-search.svg" alt="Search" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Police C6</h3>
                     <p>Analyse via fddcpiax (NGE auto + Axione ST_Snap). Filtrage bold-only cables C6. Attaches-aware detection (cables + BPE). Compteur par etude. Exclusion appuis EDF. Securite NFC.</p>
@@ -1582,7 +1582,7 @@
 
                 <article class="card animate-in delay-1">
                     <div class="card-icon blue">
-                        <img src="../images/icon-folder-open.svg" alt="Folder" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-folder-open.svg" alt="Folder" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Mode Projet (BDD)</h3>
                     <p>Chargement couches PostgreSQL par SRO derive du nom de dossier. Layers async en background. Disambiguation inline si multi-candidats. Persistance etat via QgsSettings.</p>
@@ -1590,7 +1590,7 @@
 
                 <article class="card animate-in delay-2">
                     <div class="card-icon red">
-                        <img src="../images/icon-warning.svg" alt="Security" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-warning.svg" alt="Security" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Verification Securite</h3>
                     <p>Controle portees cables NFC 11201-A1. Zones ZVN/ZVF. Guards division par zero. Rapport unifie multi-modules avec KPI agreges et checks diagnostiques.</p>
@@ -1598,7 +1598,7 @@
 
                 <article class="card animate-in delay-3">
                     <div class="card-icon green">
-                        <img src="../images/icon-success.svg" alt="GraceTHD" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-success.svg" alt="GraceTHD" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>GraceTHD Axione</h3>
                     <p>Pipeline alternatif pour SRO Axione via fichiers locaux SHP+CSV. Detection auto NGE vs Axione. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie. Match mode ligne.</p>
@@ -1606,7 +1606,7 @@
 
                 <article class="card animate-in">
                     <div class="card-icon purple">
-                        <img src="../images/icon-chart.svg" alt="Diagnostic" width="28" height="28" style="filter: brightness(0) invert(1);">
+                        <img src="image/icon-chart.svg" alt="Diagnostic" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Diagnostic et Preflight</h3>
                     <p>Mode diagnostic 6 sections (structure, detection, couches, export, PG, modules). Preflight global avant batch. Messages actionnables. Tooltips prerequis par module.</p>
@@ -2235,28 +2235,28 @@
                 <div class="cards-grid">
                     <div class="card">
                         <div class="card-icon blue">
-                            <img src="../images/icon-folder-open.svg" alt="Folder" width="24" height="24" style="filter: brightness(0) invert(1);">
+                            <img src="image/icon-folder-open.svg" alt="Folder" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
                         <h3>Detection intelligente</h3>
                         <p>Auto-detection projet (FT-BT KO, CAP FT, COMAC, GraceTHD, C6, C3A, C7). Patterns elargis (ETUDE COMAC, KPFT). Deduplication fichiers output. Bouton refresh pour resync.</p>
                     </div>
                     <div class="card">
                         <div class="card-icon green">
-                            <img src="../images/icon-layers.svg" alt="Layers" width="24" height="24" style="filter: brightness(0) invert(1);">
+                            <img src="image/icon-layers.svg" alt="Layers" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
                         <h3>Mode Projet (BDD)</h3>
                         <p>Toggle "Couches QGIS" / "Mode Projet". SRO derive du nom de dossier (63041-B1I-PMZ-00003). Chargement async couches PostgreSQL. Option "Charger dans le projet".</p>
                     </div>
                     <div class="card">
                         <div class="card-icon purple">
-                            <img src="../images/icon-check.svg" alt="Check" width="24" height="24" style="filter: brightness(0) invert(1);">
+                            <img src="image/icon-check.svg" alt="Check" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
                         <h3>Disambiguation et Diagnostic</h3>
                         <p>Dropdowns inline si multi-candidats (COMAC, CAP FT, C7, C3A). Bouton Diagnostic : rapport 6 sections. Preflight global. Tooltips prerequis. Persistance etat QgsSettings.</p>
                     </div>
                     <div class="card">
                         <div class="card-icon orange">
-                            <img src="../images/icon-chart.svg" alt="Log" width="24" height="24" style="filter: brightness(0) invert(1);">
+                            <img src="image/icon-chart.svg" alt="Log" width="24" height="24" style="filter: brightness(0) invert(1);">
                         </div>
                         <h3>Journal et resultats</h3>
                         <p>Liens cliquables vers rapports Excel. Compteur etude Police C6 [i/N]. Recap post-batch avec metriques. Progression SmoothProgressController. Export log texte.</p>
@@ -5119,7 +5119,7 @@
 
             <div class="workflow">
                 <div class="workflow-step">
-                    <div class="step-number"><img src="../images/icon-layers.svg" alt="Layers" width="20" height="20"></div>
+                    <div class="step-number"><img src="image/icon-layers.svg" alt="Layers" width="20" height="20"></div>
                     <div class="step-content">
                         <h4>Charger les couches QGIS + connexion PostgreSQL</h4>
                         <p>Importez les couches dans votre projet QGIS et vérifiez la connexion PostgreSQL (serveur AUVERGNE, 10.241.228.107).</p>
@@ -5136,7 +5136,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                 </div>
 
                 <div class="workflow-step">
-                    <div class="step-number"><img src="../images/icon-settings.svg" alt="Settings" width="20" height="20"></div>
+                    <div class="step-number"><img src="image/icon-settings.svg" alt="Settings" width="20" height="20"></div>
                     <div class="step-content">
                         <h4>Selectionner le dossier projet</h4>
                         <p>Ouvrez le plugin via <strong>Extensions > Pole Aerien</strong>. Selectionnez le dossier projet : le <code>project_detector</code> identifie automatiquement les fichiers et active les modules disponibles. Cochez les modules souhaites.</p>
@@ -5144,7 +5144,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                 </div>
 
                 <div class="workflow-step">
-                    <div class="step-number"><img src="../images/icon-play.svg" alt="Play" width="20" height="20"></div>
+                    <div class="step-number"><img src="image/icon-play.svg" alt="Play" width="20" height="20"></div>
                     <div class="step-content">
                         <h4>Demarrer l'analyse par lot</h4>
                         <p>Cliquez sur <strong>Demarrer</strong>. Le <code>BatchRunner</code> execute les modules coches sequentiellement via QgsTask en arriere-plan. La barre de progression et le journal montrent l'avancement en temps reel. QGIS reste utilisable.</p>
@@ -5152,7 +5152,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                 </div>
 
                 <div class="workflow-step">
-                    <div class="step-number"><img src="../images/icon-export.svg" alt="Export" width="20" height="20"></div>
+                    <div class="step-number"><img src="image/icon-export.svg" alt="Export" width="20" height="20"></div>
                     <div class="step-content">
                         <h4>Consulter les resultats</h4>
                         <p>Les rapports Excel sont generes automatiquement (openpyxl, coloration conditionnelle). Pour MAJ BD, le SQL s'execute en background avec rollback atomique. Les resultats sont affiches dans le journal du dialog.</p>
@@ -5874,7 +5874,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
     <footer class="footer">
         <div class="footer-content">
             <div class="footer-logo" style="display: flex; align-items: center; gap: 12px;">
-                <img src="../images/icon-pole.svg" alt="Pole" width="32" height="32" style="filter: brightness(0) invert(1);">
+                <img src="image/icon-pole.svg" alt="Pole" width="32" height="32" style="filter: brightness(0) invert(1);">
                 <span>Pole Aerien - Plugin QGIS</span>
             </div>
             <ul class="footer-links">
@@ -5884,7 +5884,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                 <li><a href="#">Licence GPL v2</a></li>
             </ul>
             <div style="display: flex; align-items: center; gap: 16px; margin-top: 1rem;">
-                <img src="../images/logo_NGE.svg" alt="NGE" width="80" height="28">
+                <img src="image/logo_NGE.svg" alt="NGE" width="80" height="28">
                 <p style="margin: 0;">&copy; 2022-2026 NGE Energie Solutions. Tous droits reserves.</p>
             </div>
         </div>
