@@ -13,7 +13,7 @@ Real project convention:
         FT-BT KO *.xlsx
         CAP FT/                   ← studies + C6 annexes inside
             CMD 1/                  (also: CAPFT, ETUDE CAPFT,
-                FTTH-NGE-ETUDE-*/    ETUDE CAP FT, KPFT, etc.)
+                FTTH-*-ETUDE-*/      ETUDE CAP FT, KPFT, etc.)
             CMD 2/
             ...
         COMAC/                    (also: ETUDE COMAC, Export COMAC)
@@ -98,7 +98,7 @@ class DetectionResult:
     # Export (defaults to project root)
     export_dir: str = ''
 
-    # GraceTHD directory (for Axione SROs)
+    # GraceTHD directory (for alternate-engineering-office SROs)
     gracethd_dir: str = ''
 
     # SRO extracted from t_zsro.shp (zs_refpm field) inside GraceTHD directory
@@ -498,7 +498,7 @@ def _build_diagnostics(result: DetectionResult, project_root: str) -> List[tuple
 
 
 def _count_studies_recursive(capft_dir: str) -> int:
-    """Count study Excel files (FTTH-NGE-ETUDE-*.xlsx) recursively in CAP FT."""
+    """Count study Excel files (FTTH-*-ETUDE-*.xlsx) recursively in CAP FT."""
     count = 0
     for _, _, filenames in os.walk(capft_dir):
         for fn in filenames:
@@ -527,7 +527,7 @@ def _count_cmd_folders(capft_dir: str) -> int:
 
 
 def _count_etude_folders(directory: str) -> int:
-    """Count FTTH-NGE-ETUDE-* study folders recursively."""
+    """Count FTTH-*-ETUDE-* study folders recursively."""
     count = 0
     for _, dirnames, _ in os.walk(directory):
         count += sum(1 for d in dirnames if 'ETUDE' in d.upper())
@@ -707,7 +707,7 @@ def detect_project(project_root: str) -> DetectionResult:
     if gespot:
         result.gespot_dir = gespot
 
-    # GraceTHD directory (for Axione SROs) - content-based detection
+    # GraceTHD directory (for alternate-engineering-office SROs) - content-based detection
     gracethd = _find_gracethd_dir(project_root)
     if gracethd:
         result.gracethd_dir = gracethd

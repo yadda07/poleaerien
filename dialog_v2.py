@@ -1162,7 +1162,7 @@ class PoleAerienDialogV2(QDialog):
         if d.sro:
             lines.append(f"SRO : {d.sro}")
         if d.has_gracethd:
-            lines.append("BE : Axione (GraceTHD)")
+            lines.append("BE : alternatif (GraceTHD)")
         self._det_summary.setText("\n".join(lines))
         self._det_summary.setVisible(bool(lines))
 
@@ -1191,7 +1191,7 @@ class PoleAerienDialogV2(QDialog):
         if d.sro:
             self._log_ok(f"  SRO : {d.sro}")
         if d.has_gracethd:
-            self._log_ok(f"  BE : Axione (GraceTHD detecte)")
+            self._log_ok(f"  BE : alternatif (GraceTHD detecte)")
         has_missing = False
         for label, p, found in d.summary_lines():
             if found:
@@ -1593,14 +1593,14 @@ class PoleAerienDialogV2(QDialog):
             try:
                 from .db_connection import get_shared_connection
                 db = get_shared_connection()
-                conn_name = db.find_auvergne_connection()
+                conn_name = db.find_target_connection()
                 if conn_name and db.connect():
                     self._log_ok(f"  PostgreSQL : OK ({conn_name})")
                     pg_ok = True
                 elif conn_name:
                     self._log_warn(f"  PostgreSQL : connexion '{conn_name}' trouvee mais echec")
                 else:
-                    self._log_warn("  PostgreSQL : aucune connexion 'Auvergne' configuree")
+                    self._log_warn("  PostgreSQL : aucune connexion cible configuree")
             except Exception as exc:
                 self._log_warn(f"  PostgreSQL : erreur ({exc})")
 
@@ -1676,8 +1676,8 @@ class PoleAerienDialogV2(QDialog):
         _be_type_dq = 'axione' if d.has_gracethd else 'nge'
         if not d.has_gracethd and d.sro:
             self._log_dim(
-                "  Type BE : infere 'NGE' (dossier GraceTHD absent). "
-                "Pour un SRO Axione, livrer le dossier GraceTHD pour activer PF-09/10."
+                "  Type BE : infere 'standard' (dossier GraceTHD absent). "
+                "Pour un SRO du BE alternatif, livrer le dossier GraceTHD pour activer PF-09/10."
             )
         _mods_dq = self.selected_modules() or [
             'maj', 'capft', 'comac', 'c6bd', 'police_c6', 'c6c3a'
@@ -1860,7 +1860,7 @@ class PoleAerienDialogV2(QDialog):
         if self._project_mode and not pg_ok:
             recos.append(
                 'Mode Projet : configurer la connexion PostgreSQL '
-                'Auvergne dans QGIS > Parametres > PostgreSQL')
+                'cible dans QGIS > Parametres > PostgreSQL')
         if not self._project_mode:
             any_missing = not all([
                 self.comboInfraPtPot.currentLayer(),

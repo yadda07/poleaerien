@@ -3,11 +3,11 @@
 /***************************************************************************
  Pôle Aérien
                                  A QGIS plugin
- Contrôle qualité et mise à jour des poteaux aériens ENEDIS (FT/BT)
+ Contrôle qualité et mise à jour des poteaux aériens (FT/BT)
                             -------------------
         begin                : 2022-03-01
-        copyright            : (C) 2022-2026 by NGE ES
-        email                : contact@nge-es.fr
+        copyright            : (C) 2022-2026
+        email                : contact@example.com
         git sha              : $Format:%H$
  ***************************************************************************/
 
@@ -36,7 +36,7 @@ class Initialisation:
         return "2.3.0"
 
     def description(self):
-        return "Contrôle qualité et mise à jour des poteaux aériens ENEDIS (FT/BT) pour projets FTTH"
+        return "Contrôle qualité et mise à jour des poteaux aériens (FT/BT) pour projets FTTH"
 
     def qgisMinimumVersion(self):
         return "3.28"
@@ -48,13 +48,13 @@ class Initialisation:
         return False
 
     def author(self):
-        return "NGE ES"
+        return "Editeur"
 
     def authorName(self):
         return self.author()
 
     def email(self):
-        return "yadda@nge-es.fr"
+        return "contact@example.com"
 
     def icon(self):
         return "images/icon.svg"

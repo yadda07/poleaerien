@@ -215,7 +215,7 @@ class Comac:
             tuple: (doublons, hors_etude, dico_qgis, dico_poteaux_prives)
 
         """
-        # Axione: COMAC inclut FT + BT ; NGE: COMAC = BT uniquement
+        # BE alternatif: COMAC inclut FT + BT ; BE standard: COMAC = BT uniquement
         pot_filter = 'POT-%' if be_type == 'axione' else 'POT-BT'
 
         return extraire_poteaux_etude(
@@ -240,7 +240,7 @@ class Comac:
 
         Détecte automatiquement les fichiers Excel COMAC par:
 
-        - Pattern nom: EXPORTCOMAC, Export_Comac, ou nom d'étude (NGE-*, PA-*)
+        - Pattern nom: EXPORTCOMAC, Export_Comac, ou nom d'etude (prefixe BE historique, PA-*)
 
         - Structure: colonne A avec numéros poteaux (format Exxxxxx ou BT-xxx)
 
@@ -335,7 +335,7 @@ class Comac:
 
                     
 
-                    # Fallback: accepter tous les Excel dans dossiers d'études (NGE-*, PA-*)
+                    # Fallback: accepter tous les Excel dans dossiers d'etudes (prefixe BE, PA-*)
 
                     is_in_etude_folder = any(pat in parent_folder for pat in ['NGE-', 'PA-', 'B1L-', 'B1I-'])
 
@@ -730,7 +730,7 @@ class Comac:
             all_inf_nums = set()
 
         # Index sans commune pour le check ABSENT vs HORS_PERIMETRE
-        # Les cles Excel NGE n'ont pas /commune (ex: "1016436") mais
+        # Les cles Excel du BE standard n'ont pas /commune (ex: "1016436") mais
         # all_inf_nums a /commune (ex: "1016436/63041") quand keep_commune=True
         all_inf_sans_commune = {k.split('/')[0] for k in all_inf_nums if '/' in k}
         all_inf_sans_commune.update(k for k in all_inf_nums if '/' not in k)

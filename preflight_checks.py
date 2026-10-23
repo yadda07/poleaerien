@@ -39,7 +39,7 @@ def run_data_quality_checks(
         module_keys: list of module keys selected (['comac', 'capft', ...])
         auto_field_fn: callable(layer) -> field_name for study name field detection
         be_type: 'nge' or 'axione'
-        gracethd_dir: path to GraceTHD directory (Axione only)
+        gracethd_dir: path to GraceTHD directory (BE alternatif only)
         comac_dir: path to COMAC Excel directory
         capft_dir: path to CAP_FT directory
     
@@ -217,7 +217,7 @@ def run_data_quality_checks(
                 'message': f'Dossier CAP_FT: {fiche_count} FicheAppui detecte(s)'
             })
 
-    # === PF-09 to PF-10e: GraceTHD MCD (Axione only) ===
+    # === PF-09 to PF-10e: GraceTHD MCD (BE alternatif only) ===
     if be_type == 'axione' and gracethd_dir and os.path.isdir(gracethd_dir):
         results.extend(_check_gracethd_mcd(gracethd_dir))
 

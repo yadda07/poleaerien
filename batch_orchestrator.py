@@ -26,9 +26,9 @@ class _LoadProjectLayersTask(QgsTask):
     Network I/O (connection, metadata fetch) runs in worker thread.
     Project registration (addMapLayer) deferred to main thread callback.
 
-    For Axione (extent_wkt set): skip infra_pt_pot (GraceTHD replaces it),
+    For the alternate engineering office (extent_wkt set): skip infra_pt_pot (GraceTHD replaces it),
     load etude layers by spatial intersection with GraceTHD extent.
-    For NGE (extent_wkt empty): load all layers filtered by SRO.
+    For the standard engineering office (extent_wkt empty): load all layers filtered by SRO.
     """
 
     def __init__(self, sro, extent_wkt=''):
@@ -52,7 +52,7 @@ class _LoadProjectLayersTask(QgsTask):
         if self.isCanceled():
             return False
 
-        # Axione: skip infra_pt_pot (GraceTHD poteaux loaded on main thread)
+        # BE alternatif: skip infra_pt_pot (GraceTHD poteaux loaded on main thread)
         if not self.extent_wkt:
             self.lyr_pot = self.loader.load_infra_pt_pot(
                 self.sro, add_to_project=False
@@ -65,7 +65,7 @@ class _LoadProjectLayersTask(QgsTask):
         if self.isCanceled():
             return False
 
-        # etude_cap_ft: spatial for Axione, SRO for NGE
+        # etude_cap_ft: spatial for BE alternatif, SRO for BE standard
         if self.extent_wkt:
             self.lyr_cap = self.loader.load_etude_cap_ft_by_extent(self.extent_wkt)
         else:
@@ -80,7 +80,7 @@ class _LoadProjectLayersTask(QgsTask):
         if self.isCanceled():
             return False
 
-        # etude_comac: spatial for Axione, SRO for NGE
+        # etude_comac: spatial for BE alternatif, SRO for BE standard
         if self.extent_wkt:
             self.lyr_com = self.loader.load_etude_comac_by_extent(self.extent_wkt)
         else:
@@ -274,7 +274,7 @@ class BatchOrchestrator(QObject):
         # QP-06: Nettoyage couches temporaires du batch precedent
         self._cleanup_temp_layers()
 
-        # Detect BE type (NGE vs Axione)
+        # Detect BE type (standard vs alternatif)
         det = self._detection()
         sro = self._dlg.sro if self._dlg.is_project_mode else ''
         if not sro and det.sro:
@@ -342,7 +342,7 @@ class BatchOrchestrator(QObject):
         self._runner.start(module_keys)
 
     def _detect_be_type(self, sro, det):
-        """Detect bureau d'etudes (NGE/Axione).
+        """Detect bureau d'etudes (standard/alternatif).
 
         Source de verite : toujours la table comac.sro_nge_axione en BDD.
         GraceTHD local = indice pour gracethd_dir, pas pour be_type.
@@ -364,20 +364,20 @@ class BatchOrchestrator(QObject):
 
             if be == 'nge':
                 self._dlg.log_message(
-                    f"SRO {sro} - Bureau d'etudes: NGE "
+                    f"SRO {sro} - Bureau d'etudes: standard "
                     "(source cables: PostgreSQL / fddcpiax)",
                     'info'
                 )
                 return
 
-            # --- Axione: verifier presence GraceTHD ---
+            # --- BE alternatif: verifier presence GraceTHD ---
             self._dlg.log_message(
                 "═══════════════════════════════════════════",
                 'info'
             )
 
             self._dlg.log_message(
-                f"SRO {sro} - Bureau d'etudes: AXIONE",
+                f"SRO {sro} - Bureau d'etudes: alternatif",
                 'info'
             )
 
@@ -530,7 +530,7 @@ class BatchOrchestrator(QObject):
                 )
 
         # --- Project mode: SRO ---
-        # Axione+GraceTHD: SRO non requis (intersection spatiale avec emprise GraceTHD)
+        # BE alternatif + GraceTHD: SRO non requis (intersection spatiale avec emprise GraceTHD)
         if is_pm and not self._dlg.sro and not (self._be_type == 'axione' and self._gracethd_dir):
             issues.append(
                 "Mode Projet : impossible de determiner le SRO depuis le nom du dossier. "
@@ -556,11 +556,11 @@ class BatchOrchestrator(QObject):
                 "Noms acceptes: COMAC, Export COMAC, ETUDE COMAC."
             )
 
-        # Axione SROs: GraceTHD required for cable verification modules
+        # BE alternatif SROs: GraceTHD required for cable verification modules
         cable_modules = set(module_keys) & {'comac', 'police_c6'}
         if self._be_type == 'axione' and cable_modules and not self._gracethd_dir:
             issues.append(
-                f"SRO Axione: repertoire GraceTHD requis pour {', '.join(sorted(cable_modules))}. "
+                f"SRO BE alternatif: repertoire GraceTHD requis pour {', '.join(sorted(cable_modules))}. "
                 "Placez un dossier contenant t_noeud.shp + t_cableline.shp "
                 "(+ t_cable.csv, t_ptech.csv, t_ebp.csv) dans le projet."
             )
@@ -1033,14 +1033,14 @@ class BatchOrchestrator(QObject):
         On completion, layers are registered in QgsProject on the main thread,
         then the batch starts.
 
-        For Axione with GraceTHD: load poteaux from local files first (main
+        For the alternate engineering office with GraceTHD: load poteaux from local files first (main
         thread), compute extent, then load etude layers by spatial intersection
         instead of SRO filter.  infra_pt_pot is skipped (GraceTHD replaces it).
         """
         sro = self._dlg.sro
         extent_wkt = ''
 
-        # Axione: load GraceTHD poteaux first, compute extent for spatial query
+        # BE alternatif: load GraceTHD poteaux first, compute extent for spatial query
         if self._be_type == 'axione' and self._gracethd_dir:
             from .gracethd_reader import GraceTHDReader
             reader = GraceTHDReader(self._gracethd_dir)
@@ -1052,7 +1052,7 @@ class BatchOrchestrator(QObject):
                 ext = gracethd_lyr.extent()
                 extent_wkt = ext.asWktPolygon()
                 self._dlg.log_message(
-                    f"Mode Projet Axione: {gracethd_lyr.featureCount()} poteaux GraceTHD, "
+                    f"Mode Projet BE alternatif: {gracethd_lyr.featureCount()} poteaux GraceTHD, "
                     f"recherche etudes par intersection spatiale...", 'info'
                 )
             else:
@@ -1091,7 +1091,7 @@ class BatchOrchestrator(QObject):
         # other name-based lookups work inside workflows.
         # Cleanup after batch removes them if user didn't ask to keep.
 
-        # infra_pt_pot: GraceTHD poteaux for Axione, BDD for NGE
+        # infra_pt_pot: GraceTHD poteaux for BE alternatif, BDD for BE standard
         gracethd_preloaded = getattr(self, '_gracethd_lyr_preloaded', None)
         if gracethd_preloaded and gracethd_preloaded.isValid():
             self._pm_lyr_pot = gracethd_preloaded
@@ -1627,7 +1627,7 @@ class BatchOrchestrator(QObject):
         if self._sro_appuis_cache:
             params['sro_appuis_cache'] = self._sro_appuis_cache
 
-        # BE type routing (Axione -> GraceTHD)
+        # BE type routing (BE alternatif -> GraceTHD)
         params['be_type'] = self._be_type
         params['gracethd_dir'] = self._gracethd_dir
         # En batch, pas d'export individuel: tout va dans le rapport unifie

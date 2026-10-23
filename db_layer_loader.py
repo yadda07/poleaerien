@@ -22,7 +22,7 @@ from .compat import MSG_INFO, MSG_WARNING
 from .db_connection import get_shared_connection
 
 
-# Default schema for all RIP AVG NGE tables
+# Default schema for all target PostgreSQL tables
 _DEFAULT_SCHEMA = 'rip_avg_nge'
 
 # Layer definitions: (table_name, geometry_column, key_column)
@@ -72,10 +72,10 @@ class DbLayerLoader:
             True if connection parameters were found successfully.
         """
         db = get_shared_connection()
-        conn_name = db.find_auvergne_connection()
+        conn_name = db.find_target_connection()
         if not conn_name:
             QgsMessageLog.logMessage(
-                "Mode Projet: connexion PostgreSQL 'Auvergne' non trouvee",
+                "Mode Projet: connexion PostgreSQL cible non trouvee",
                 "PoleAerien", MSG_WARNING
             )
             return False
@@ -192,7 +192,7 @@ class DbLayerLoader:
                                     srid: int = 2154) -> Optional[QgsVectorLayer]:
         """Load etude_cap_ft zones that intersect with a geometry extent.
 
-        Used for Axione: finds etude zones by spatial intersection with
+        Used for the alternate engineering office: finds etude zones by spatial intersection with
         GraceTHD poteaux extent, instead of filtering by SRO.
 
         Args:
@@ -212,7 +212,7 @@ class DbLayerLoader:
                                    srid: int = 2154) -> Optional[QgsVectorLayer]:
         """Load etude_comac zones that intersect with a geometry extent.
 
-        Used for Axione: finds etude zones by spatial intersection with
+        Used for the alternate engineering office: finds etude zones by spatial intersection with
         GraceTHD poteaux extent, instead of filtering by SRO.
 
         Args:

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Documentation complète du plugin QGIS Pôle Aérien - Contrôle qualité et analyse des poteaux aériens ENEDIS pour projets FTTH">
-    <meta name="keywords" content="QGIS, Pôle Aérien, FTTH, ENEDIS, C6, CAP FT, COMAC, Police C6">
+    <meta name="description" content="Documentation complète du plugin QGIS Pôle Aérien - Contrôle qualité et analyse des poteaux aériens pour projets FTTH">
+    <meta name="keywords" content="QGIS, Pôle Aérien, FTTH, C6, CAP FT, COMAC, Police C6">
     <title>Pôle Aérien - Documentation Technique Complète</title>
     
     <!-- Google Fonts -->
@@ -1515,7 +1515,7 @@
         <div class="hero-content">
             <span class="hero-badge">Plugin QGIS v3.1</span>
             <h1>Pole Aerien</h1>
-            <p>Controle qualite et analyse des poteaux aeriens ENEDIS (FT/BT). 6 modules d'analyse, Mode Projet BDD, GraceTHD Axione, execution par lot, rapports Excel unifies.</p>
+            <p>Controle qualite et analyse des poteaux aeriens (FT/BT). 6 modules d'analyse, Mode Projet BDD, GraceTHD (BE alternatif), execution par lot, rapports Excel unifies.</p>
             <div class="hero-buttons">
                 <a href="#reference" class="btn btn-primary">
                     Decouvrir
@@ -1577,7 +1577,7 @@
                         <img src="image/icon-search.svg" alt="Search" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
                     <h3>Police C6</h3>
-                    <p>Analyse via fddcpiax (NGE auto + Axione ST_Snap). Filtrage bold-only cables C6. Attaches-aware detection (cables + BPE). Compteur par etude. Exclusion appuis EDF. Securite NFC.</p>
+                    <p>Analyse via fddcpiax (BE standard auto + BE alternatif ST_Snap). Filtrage bold-only cables C6. Attaches-aware detection (cables + BPE). Compteur par etude. Exclusion appuis du distributeur electrique. Securite NFC.</p>
                 </article>
 
                 <article class="card animate-in delay-1">
@@ -1600,8 +1600,8 @@
                     <div class="card-icon green">
                         <img src="image/icon-success.svg" alt="GraceTHD" width="28" height="28" style="filter: brightness(0) invert(1);">
                     </div>
-                    <h3>GraceTHD Axione</h3>
-                    <p>Pipeline alternatif pour SRO Axione via fichiers locaux SHP+CSV. Detection auto NGE vs Axione. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie. Match mode ligne.</p>
+                    <h3>GraceTHD (BE alternatif)</h3>
+                    <p>Pipeline alternatif pour les SRO du BE alternatif via fichiers locaux SHP+CSV. Detection auto BE standard vs BE alternatif. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie. Match mode ligne.</p>
                 </article>
 
                 <article class="card animate-in">
@@ -1701,7 +1701,7 @@
                             <td><strong>Police C6</strong></td>
                             <td><code>PoliceC6.py</code></td>
                             <td><code>police_workflow.py</code></td>
-                            <td>Analyse fddcpiax complete, bold-only C6, attaches-aware, CDI/posemode, exclusion EDF, securite NFC</td>
+                            <td>Analyse fddcpiax complete, bold-only C6, attaches-aware, CDI/posemode, exclusion appuis electriques, securite NFC</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-orange">5</span></td>
@@ -1776,7 +1776,7 @@
                         <tr>
                             <td><span class="badge badge-orange">Regles</span></td>
                             <td><code>gracethd_reader.py</code></td>
-                            <td>GraceTHDReader : cables, BPE, poteaux depuis fichiers SHP+CSV locaux (Axione)</td>
+                            <td>GraceTHDReader : cables, BPE, poteaux depuis fichiers SHP+CSV locaux (BE alternatif)</td>
                         </tr>
                         <tr>
                             <td><span class="badge badge-orange">Regles</span></td>
@@ -1791,7 +1791,7 @@
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
                             <td><code>db_connection.py</code></td>
-                            <td>Connexion psycopg2 auto (credentials QGIS), fddcpiax() (NGE auto + Axione ST_Snap)</td>
+                            <td>Connexion psycopg2 auto (credentials QGIS), fddcpiax() (BE standard auto + BE alternatif ST_Snap)</td>
                         </tr>
                         <tr>
                             <td><span class="badge" style="background: #fee2e2; color: #dc2626;">Donnees</span></td>
@@ -1899,7 +1899,7 @@
                     <div class="timeline-content" style="border-color: #10b981;">
                         <span class="timeline-date" style="background: #d1fae5; color: #059669;">Mars 2026</span>
                         <h4>v3.1 - GraceTHD, Mode Projet, Optimisations</h4>
-                        <p><strong>Pipeline GraceTHD Axione</strong> (SHP+CSV locaux, fddcpiax ST_Snap). <strong>Mode Projet BDD</strong> (layers async PostgreSQL par SRO). <strong>4 sprints optimisation</strong> : caches inter-modules (fddcpi2, SRO, appuis_wkb, CRS), extractions single-pass, centralisation credentials PG. <strong>Police C6</strong> : bold-only C6, attaches-aware, compteur etudes. <strong>COMAC</strong> : boitiers FO, group_by_gid. <strong>UX</strong> : disambiguation inline, diagnostic 6 sections, preflight, refresh, persistance etat, liens cliquables. Dead code -1400 lignes.</p>
+                        <p><strong>Pipeline GraceTHD (BE alternatif)</strong> (SHP+CSV locaux, fddcpiax ST_Snap). <strong>Mode Projet BDD</strong> (layers async PostgreSQL par SRO). <strong>4 sprints optimisation</strong> : caches inter-modules (fddcpi2, SRO, appuis_wkb, CRS), extractions single-pass, centralisation credentials PG. <strong>Police C6</strong> : bold-only C6, attaches-aware, compteur etudes. <strong>COMAC</strong> : boitiers FO, group_by_gid. <strong>UX</strong> : disambiguation inline, diagnostic 6 sections, preflight, refresh, persistance etat, liens cliquables. Dead code -1400 lignes.</p>
                         <span class="timeline-badge" style="background: rgba(16,185,129,0.15); color: #10b981;">ACTUELLE</span>
                     </div>
                 </div>
@@ -2189,8 +2189,8 @@
                             <li><strong>FT-BT KO</strong> : fichier Excel a la racine (pattern FT-BT KO*.xlsx)</li>
                             <li><strong>CAP FT</strong> : sous-dossier CAP FT/ contenant les etudes par CMD</li>
                             <li><strong>COMAC</strong> : sous-dossier COMAC/ ou ExportComac/</li>
-                            <li><strong>C6</strong> : = dossier CAP FT (les annexes C6 sont les Excel d'etude FTTH-NGE-ETUDE-*.xlsx)</li>
-                            <li><strong>GraceTHD</strong> : BASE DE DONNEES/NGE/ (verifie bpe.shp ou t_cheminement.shp)</li>
+                            <li><strong>C6</strong> : = dossier CAP FT (les annexes C6 sont les Excel d'etude FTTH-*-ETUDE-*.xlsx)</li>
+                            <li><strong>GraceTHD</strong> : BASE DE DONNEES/gracethd/ (verifie bpe.shp ou t_cheminement.shp)</li>
                             <li><strong>C7, C3A</strong> : fichiers ou dossiers a la racine</li>
                         </ul>
                         <p>Les modules sont automatiquement coches selon les fichiers detectes.</p>
@@ -2271,15 +2271,15 @@
   <span class="code-function">FT-BT KO B1L_00003.xlsx</span>       <span class="code-comment">-- MAJ BD</span>
   <span class="code-function">CAP FT/</span>                        <span class="code-comment">-- CAP_FT + C6 browse dir</span>
     CMD 1/
-      FTTH-NGE-ETUDE-B1L-63041-7/  <span class="code-comment">-- Annexe C6 = study xlsx</span>
+      FTTH-*-ETUDE-B1L-63041-7/  <span class="code-comment">-- Annexe C6 = study xlsx</span>
     CMD 2/...
   <span class="code-function">COMAC/</span>                         <span class="code-comment">-- COMAC (ou ETUDE COMAC, ETUDE-COMAC)</span>
   <span class="code-function">C6/</span>                            <span class="code-comment">-- Standalone C6 (si present)</span>
   <span class="code-function">C3A/</span>                           <span class="code-comment">-- Annexe C3A</span>
   <span class="code-function">C7/</span>                            <span class="code-comment">-- Annexe C7</span>
   <span class="code-function">BASE DE DONNEES/</span>
-    <span class="code-function">NGE/</span>                         <span class="code-comment">-- GraceTHD NGE (bpe.shp, t_cheminement.shp)</span>
-  <span class="code-function">GRACE_APD_DTR_*/</span>               <span class="code-comment">-- GraceTHD Axione (SHP+CSV a plat)</span>
+    <span class="code-function">gracethd/</span>                    <span class="code-comment">-- GraceTHD BE standard (bpe.shp, t_cheminement.shp)</span>
+  <span class="code-function">GRACE_APD_DTR_*/</span>               <span class="code-comment">-- GraceTHD BE alternatif (SHP+CSV a plat)</span>
                         </code>
                     </div>
                 </div>
@@ -2470,7 +2470,7 @@
                             <text x="520" y="535" text-anchor="middle" fill="#fef3c7" font-size="8">GraceTHDReader</text>
                             <text x="520" y="545" text-anchor="middle" fill="#fef3c7" font-size="8">SHP+CSV locaux</text>
                             <text x="520" y="555" text-anchor="middle" fill="#fef3c7" font-size="8">Cables, BPE, poteaux</text>
-                            <text x="520" y="570" text-anchor="middle" fill="#fde68a" font-size="7">Pipeline Axione</text>
+                            <text x="520" y="570" text-anchor="middle" fill="#fde68a" font-size="7">Pipeline BE alt.</text>
                         </g>
 
                         <!-- Flèche Règles → Données -->
@@ -2488,7 +2488,7 @@
 
                             <rect x="235" y="645" width="110" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
                             <text x="290" y="662" text-anchor="middle" fill="white" font-size="10" font-weight="600">fddcpiax()</text>
-                            <text x="290" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">NGE + Axione</text>
+                            <text x="290" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">BE std + alt</text>
                             <text x="290" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">ST_Snap 0.70m</text>
 
                             <rect x="355" y="645" width="120" height="55" rx="6" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1"/>
@@ -2509,7 +2509,7 @@
                             <rect x="755" y="645" width="140" height="55" rx="6" fill="rgba(255,255,255,0.25)" stroke="#fbbf24" stroke-width="1.5"/>
                             <text x="825" y="662" text-anchor="middle" fill="#fde68a" font-size="10" font-weight="600">GraceTHD (SHP)</text>
                             <text x="825" y="675" text-anchor="middle" fill="#fee2e2" font-size="8">gracethd_reader.py</text>
-                            <text x="825" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">Axione locaux</text>
+                            <text x="825" y="688" text-anchor="middle" fill="#fee2e2" font-size="7">BE alt. locaux</text>
 
                             <rect x="905" y="645" width="130" height="55" rx="6" fill="rgba(255,255,255,0.25)" stroke="#fbbf24" stroke-width="1.5"/>
                             <text x="970" y="662" text-anchor="middle" fill="#fde68a" font-size="10" font-weight="600">unified_report</text>
@@ -2634,7 +2634,7 @@
                             <rect x="35" y="360" width="150" height="70" rx="12" fill="url(#grad-cyan)" stroke="#22d3ee" stroke-width="2"/>
                             <text x="110" y="385" text-anchor="middle" font-weight="600" fill="#083344" font-size="11">GraceTHD</text>
                             <text x="110" y="403" text-anchor="middle" fill="#164e63" font-size="9">SHP + CSV locaux</text>
-                            <text x="110" y="418" text-anchor="middle" fill="#155e75" font-size="8">Axione (auto-detect)</text>
+                            <text x="110" y="418" text-anchor="middle" fill="#155e75" font-size="8">BE alt. (auto)</text>
                         </g>
 
                         <!-- NEW: Mode Projet BDD input -->
@@ -2848,7 +2848,7 @@
 
                         <rect x="340" y="730" width="125" height="50" rx="8" fill="rgba(6,182,212,0.1)" stroke="#06b6d4" stroke-width="1"/>
                         <text x="402" y="750" text-anchor="middle" fill="#67e8f9" font-size="9" font-weight="600">gracethd_reader</text>
-                        <text x="402" y="768" text-anchor="middle" fill="#06b6d4" font-size="7">SHP+CSV | Axione</text>
+                        <text x="402" y="768" text-anchor="middle" fill="#06b6d4" font-size="7">SHP+CSV | BE alt.</text>
 
                         <rect x="480" y="730" width="125" height="50" rx="8" fill="rgba(168,85,247,0.1)" stroke="#a855f7" stroke-width="1"/>
                         <text x="542" y="750" text-anchor="middle" fill="#c084fc" font-size="9" font-weight="600">db_connection.py</text>
@@ -2884,7 +2884,7 @@
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #a78bfa, #7c3aed);"></div><span style="color: #94a3b8;">Workflows (6)</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #34d399, #10b981);"></div><span style="color: #94a3b8;">Modules + Outputs</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #f59e0b, #d97706);"></div><span style="color: #94a3b8;">Caches inter-modules</span></div>
-                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #22d3ee, #06b6d4);"></div><span style="color: #94a3b8;">GraceTHD Axione</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #22d3ee, #06b6d4);"></div><span style="color: #94a3b8;">GraceTHD BE alternatif</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: linear-gradient(135deg, #fb7185, #e11d48);"></div><span style="color: #94a3b8;">Mode Projet BDD</span></div>
                     </div>
                 </div>
@@ -2893,7 +2893,7 @@
             <!-- Data Flow Diagram - Style Pipeline Moderne -->
             <div id="diagram-dataflow" class="diagram-panel">
                 <div class="diagram-container" style="background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);">
-                    <h3 class="diagram-title">Pipeline de traitement v3.1 - Dual-path NGE/Axione, Caches inter-modules, Preflight</h3>
+                    <h3 class="diagram-title">Pipeline de traitement v3.1 - Dual-path BE standard/BE alternatif, Caches inter-modules, Preflight</h3>
                     <svg class="architecture-svg" viewBox="0 0 1100 600" xmlns="http://www.w3.org/2000/svg">
                         <defs>
                             <linearGradient id="pipe-grad" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -3085,7 +3085,7 @@
                     <div style="margin-top: 1rem; padding: 1rem; background: rgba(59,130,246,0.08); border-radius: 8px; border: 1px solid rgba(59,130,246,0.15);">
                         <p style="margin: 0 0 0.5rem; font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">Ameliorations v3.1 (non visibles sur ce schema generique) :</p>
                         <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.85rem; color: var(--text-secondary);">
-                            <span style="padding: 0.3rem 0.6rem; background: rgba(6,182,212,0.1); border: 1px solid #06b6d4; border-radius: 6px; color: #0891b2;">Dual-path NGE/Axione (fddcpiax auto-detect)</span>
+                            <span style="padding: 0.3rem 0.6rem; background: rgba(6,182,212,0.1); border: 1px solid #06b6d4; border-radius: 6px; color: #0891b2;">Dual-path BE standard/BE alternatif (fddcpiax auto-detect)</span>
                             <span style="padding: 0.3rem 0.6rem; background: rgba(245,158,11,0.1); border: 1px solid #f59e0b; border-radius: 6px; color: #d97706;">Caches: fddcpi2 + SRO + appuis_wkb + CRS</span>
                             <span style="padding: 0.3rem 0.6rem; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 6px; color: #dc2626;">Preflight global avant batch</span>
                             <span style="padding: 0.3rem 0.6rem; background: rgba(16,185,129,0.1); border: 1px solid #10b981; border-radius: 6px; color: #059669;">unified_report.py multi-modules</span>
@@ -3846,7 +3846,7 @@
                         <g class="dag-node">
                             <rect x="620" y="590" width="150" height="50" rx="8" fill="#06b6d4" stroke="#0891b2" stroke-width="1.5"/>
                             <text x="695" y="610" text-anchor="middle" fill="white" font-size="10" font-weight="600">gracethd_reader.py</text>
-                            <text x="695" y="628" text-anchor="middle" fill="#a5f3fc" font-size="8">GraceTHD Axione</text>
+                            <text x="695" y="628" text-anchor="middle" fill="#a5f3fc" font-size="8">GraceTHD BE alt.</text>
                         </g>
                         
                         <!-- Level 5: Data -->
@@ -3901,7 +3901,7 @@
                         <div class="legend-item"><div class="legend-color" style="background: #f97316;"></div><span>Lecteurs donnees</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: #64748b;"></div><span>Donnees (PostgreSQL)</span></div>
                         <div class="legend-item"><div class="legend-color" style="background: #fb7185;"></div><span>db_layer_loader (v3.1)</span></div>
-                        <div class="legend-item"><div class="legend-color" style="background: #06b6d4;"></div><span>GraceTHD Axione (v3.1)</span></div>
+                        <div class="legend-item"><div class="legend-color" style="background: #06b6d4;"></div><span>GraceTHD BE alternatif (v3.1)</span></div>
                     </div>
                 </div>
             </div>
@@ -4026,19 +4026,19 @@
                     <!-- Arrow 3→4 -->
                     <path d="M 720 165 L 745 165" stroke="#7c3aed" stroke-width="2" fill="none" marker-end="url(#arrow-plc)"/>
 
-                    <!-- STAGE 4: EDF Exclusion -->
+                    <!-- STAGE 4: electrical-operator exclusion -->
                     <g filter="url(#shadow-plc)">
                         <rect x="750" y="85" width="220" height="160" rx="12" fill="white" stroke="#ef4444" stroke-width="2"/>
                         <rect x="750" y="85" width="220" height="32" rx="12" fill="#ef4444"/>
-                        <text x="860" y="106" text-anchor="middle" fill="white" font-size="11" font-weight="700">4. EXCLUSION EDF</text>
+                        <text x="860" y="106" text-anchor="middle" fill="white" font-size="11" font-weight="700">4. EXCLUSION ELEC.</text>
                         <text x="765" y="135" fill="#991b1b" font-size="9" font-weight="600">Colonne AB (Effort disponible)</text>
                         <rect x="765" y="145" width="85" height="22" rx="4" fill="#d1fae5"/>
                         <text x="807" y="160" text-anchor="middle" fill="#065f46" font-size="8" font-weight="600">Renseigne=FT</text>
                         <rect x="860" y="145" width="95" height="22" rx="4" fill="#fee2e2"/>
-                        <text x="907" y="160" text-anchor="middle" fill="#991b1b" font-size="8" font-weight="600">Vide=EDF exclu</text>
+                        <text x="907" y="160" text-anchor="middle" fill="#991b1b" font-size="8" font-weight="600">Vide=ELEC. exclu</text>
                         <text x="765" y="184" fill="#dc2626" font-size="8">lire_annexe_c6() L390-427</text>
                         <rect x="765" y="200" width="190" height="30" rx="6" fill="#fee2e2"/>
-                        <text x="860" y="220" text-anchor="middle" fill="#991b1b" font-size="10" font-weight="700">Appuis EDF elimines</text>
+                        <text x="860" y="220" text-anchor="middle" fill="#991b1b" font-size="10" font-weight="700">Appuis elec. exclus</text>
                     </g>
 
                     <!-- Performance comparison: Before vs After -->
@@ -4115,7 +4115,7 @@
                     <div class="legend-item"><div class="legend-color" style="background: #3b82f6;"></div><span>Filtre spatial</span></div>
                     <div class="legend-item"><div class="legend-color" style="background: #f59e0b;"></div><span>Filtre cable CDI</span></div>
                     <div class="legend-item"><div class="legend-color" style="background: #10b981;"></div><span>Filtre posemode</span></div>
-                    <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div><span>Exclusion EDF</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div><span>Exclusion elec.</span></div>
                 </div>
             </div>
 
@@ -4209,7 +4209,7 @@
                     <rect x="410" y="8" width="280" height="4" rx="18" fill="url(#gfl)"/>
 
                     <text x="550" y="38" text-anchor="middle" fill="#fbbf24" font-size="14" font-weight="800" letter-spacing="-0.5">fddcpi2(zasro) / fddcpiax(zasro)</text>
-                    <text x="550" y="52" text-anchor="middle" fill="#64748b" font-size="7.5">rip_avg_nge | plpgsql | AUVERGNE | v3.1: dual-path NGE (0.20m) / Axione (0.70m)</text>
+                    <text x="550" y="52" text-anchor="middle" fill="#64748b" font-size="7.5">rip_avg_nge | plpgsql | base regionale | v3.1: dual-path BE standard (0.20m) / BE alternatif (0.70m)</text>
 
                     <!-- Step 1 -->
                     <rect x="425" y="64" width="250" height="42" rx="10" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.2)" stroke-width="1"/>
@@ -4442,7 +4442,7 @@
                     <text x="570" y="630" fill="#94a3b8" font-size="8">3. <tspan fill="#93c5fd" font-weight="600">ST_Snap</tspan>(cable, infra, 0.70m) → accrochage géométrique</text>
                     <text x="570" y="646" fill="#94a3b8" font-size="8">4. <tspan fill="#6ee7b7" font-weight="600">ST_Split + ST_Dump</tspan> → découpage et extraction des segments</text>
                     <text x="570" y="662" fill="#94a3b8" font-size="8">5. <tspan fill="#fde68a" font-weight="600">Endpoints</tspan> → détermination du posemode (0/1/2/4)</text>
-                    <text x="570" y="680" fill="#475569" font-size="7">Source: fddcpi2(NGE) / fddcpiax(Axione) | Serveur: AUVERGNE (10.241.228.107) | Dépendances: infra(), fdrca()</text>
+                    <text x="570" y="680" fill="#475569" font-size="7">Source: fddcpi2 (BE standard) / fddcpiax (BE alternatif) | Serveur PostgreSQL | Dependances: infra(), fdrca()</text>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 10px; height: 10px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 6px rgba(251,191,36,0.4);"></div><span style="color: #94a3b8; font-size: 0.75rem;">Poteau (pot_)</span></div>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 10px; height: 10px; border-radius: 2px; background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4);"></div><span style="color: #94a3b8; font-size: 0.75rem;">Chambre (chb_)</span></div>
                     <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid #10b981;"></div><span style="color: #94a3b8; font-size: 0.75rem;">Attache (atr_)</span></div>
@@ -4473,7 +4473,7 @@
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
                     <h3>db_connection.py + PostgreSQL</h3>
-                    <p>Connexion psycopg2 auto (credentials QGIS). Fonction SQL <code>fddcpi2()</code> retourne cables decoupes. Schema comac : 591 cables, hypotheses. Serveur AUVERGNE 10.241.228.107.</p>
+                    <p>Connexion psycopg2 auto (credentials QGIS). Fonction SQL <code>fddcpi2()</code> retourne cables decoupes. Schema comac : 591 cables, hypotheses. Serveur PostgreSQL.</p>
                 </article>
             </div>
         </section>
@@ -5122,7 +5122,7 @@
                     <div class="step-number"><img src="image/icon-layers.svg" alt="Layers" width="20" height="20"></div>
                     <div class="step-content">
                         <h4>Charger les couches QGIS + connexion PostgreSQL</h4>
-                        <p>Importez les couches dans votre projet QGIS et vérifiez la connexion PostgreSQL (serveur AUVERGNE, 10.241.228.107).</p>
+                        <p>Importez les couches dans votre projet QGIS et vérifiez la connexion PostgreSQL.</p>
                         <div class="code-block">
                             <code>
 <span class="code-comment"># Couches QGIS requises</span>
@@ -5422,7 +5422,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Le plugin <strong>Pole Aerien v3.0</strong> est compatible avec <strong>QGIS 3.28</strong> et les versions ulterieures (jusqu'a 3.99). Nous recommandons la version <strong>3.28 LTS</strong> pour la stabilite en production. Le plugin utilise <strong>PostgreSQL</strong> comme base de donnees principale (schema comac, AUVERGNE).</p>
+                        <p>Le plugin <strong>Pole Aerien v3.0</strong> est compatible avec <strong>QGIS 3.28</strong> et les versions ulterieures (jusqu'a 3.99). Nous recommandons la version <strong>3.28 LTS</strong> pour la stabilite en production. Le plugin utilise <strong>PostgreSQL</strong> comme base de donnees principale (schema comac).</p>
                         <p style="margin-top: 0.75rem; padding: 0.75rem; background: #fef3c7; border-radius: 6px; border-left: 3px solid #f59e0b;">
                             <strong>Remarque :</strong> Les versions antérieures à 3.28 ne sont plus officiellement prises en charge. Si vous rencontrez des difficultés, vérifiez d'abord votre version de QGIS.
                         </p>
@@ -5513,7 +5513,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                         <p style="margin: 0.75rem 0;">Le processus s'effectue comme suit :</p>
                         <ol style="padding-left: 1.5rem; line-height: 1.8;">
                             <li>Lecture des colonnes <strong>AO</strong> (type de ligne FO) et <strong>AU</strong> (portée en mètres) des fichiers COMAC</li>
-                            <li>Détection de la capacité FO via les codes Prysmian (ex. : <code>L1092-xx-P</code>)</li>
+                            <li>Détection de la capacité FO via les codes constructeur (ex. : <code>L1092-xx-P</code>)</li>
                             <li>Comparaison avec les valeurs maximales autorisées selon la zone climatique (<strong>ZVN</strong> ou <strong>ZVF</strong>)</li>
                         </ol>
                         <p style="margin-top: 0.75rem; padding: 0.75rem; background: #fee2e2; border-radius: 6px; border-left: 3px solid #ef4444;">
@@ -5537,11 +5537,11 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                         <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
                             <li><strong>Couches QGIS :</strong> <code>infra_pt_pot</code>, <code>cables_dc</code> et couches réseau chargées dans le projet</li>
                             <li><strong>Fichier C6 Excel :</strong> Auto-détecté par <code>nom_etudes</code> dans le répertoire de travail</li>
-                            <li><strong>Données COMAC :</strong> Via <strong>PostgreSQL</strong> exclusivement (schéma comac, serveur AUVERGNE)</li>
+                            <li><strong>Données COMAC :</strong> Via <strong>PostgreSQL</strong> exclusivement (schéma comac, serveur PostgreSQL)</li>
                             <li><strong>cable_analyzer.py :</strong> Comptage câbles CDI + posemode(1,2) par appui</li>
                         </ul>
                         <p style="margin-top: 0.75rem; padding: 0.75rem; background: #f3e8ff; border-radius: 6px; border-left: 3px solid #a855f7;">
-                            <strong>v2.3.0 :</strong> Filtres spatiaux bbox, exclusion appuis EDF, cleanup mémoire. Données COMAC via PostgreSQL uniquement (plus de GeoPackage/CSV/SQLite).
+                            <strong>v2.3.0 :</strong> Filtres spatiaux bbox, exclusion appuis du distributeur electrique, cleanup mémoire. Données COMAC via PostgreSQL uniquement (plus de GeoPackage/CSV/SQLite).
                         </p>
                     </div>
                 </div>
@@ -5552,7 +5552,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
-                        <p>Lorsque le dossier projet est selectionne, le <strong>project_detector</strong> identifie automatiquement les fichiers C6 dans le dossier CAP FT. Les annexes C6 sont les Excel d'etude (FTTH-NGE-ETUDE-*.xlsx) situes dans les sous-dossiers CMD du dossier CAP FT.</p>
+                        <p>Lorsque le dossier projet est selectionne, le <strong>project_detector</strong> identifie automatiquement les fichiers C6 dans le dossier CAP FT. Les annexes C6 sont les Excel d'etude (FTTH-*-ETUDE-*.xlsx) situes dans les sous-dossiers CMD du dossier CAP FT.</p>
                         <p style="margin: 0.75rem 0;"><strong>Motifs de recherche utilises :</strong></p>
                         <div style="display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0;">
                             <code style="padding: 0.4rem 0.8rem; background: #f1f5f9; border-radius: 4px; font-size: 0.85rem;">*nom_etudes*.xlsx</code>
@@ -5597,7 +5597,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                             <li><strong>Dossier projet :</strong> Un dossier projet valide doit etre selectionne</li>
                             <li><strong>Modules coches :</strong> Au moins un module doit etre selectionne (coche)</li>
                             <li><strong>Couches QGIS :</strong> Les couches requises (infra_pt_pot, etude_cap_ft, etude_comac) doivent etre chargees dans le projet QGIS</li>
-                            <li><strong>Connexion PostgreSQL :</strong> La connexion au serveur AUVERGNE doit etre active pour les modules Police C6 et COMAC</li>
+                            <li><strong>Connexion PostgreSQL :</strong> La connexion au serveur PostgreSQL doit etre active pour les modules Police C6 et COMAC</li>
                         </ul>
                     </div>
                 </div>
@@ -5616,24 +5616,24 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                             <li><strong>Cleanup auto :</strong> les couches temporaires sont supprimees apres le batch (sauf si "Charger dans le projet" coche)</li>
                         </ul>
                         <p style="margin-top: 0.75rem; padding: 0.75rem; background: #e0f2fe; border-radius: 6px; border-left: 3px solid #3b82f6;">
-                            <strong>Prerequis :</strong> La connexion PostgreSQL au serveur AUVERGNE doit etre configuree dans QGIS. Le nom du dossier projet doit suivre le format SRO (segments separes par des tirets).
+                            <strong>Prerequis :</strong> La connexion PostgreSQL cible doit etre configuree dans QGIS. Le nom du dossier projet doit suivre le format SRO (segments separes par des tirets).
                         </p>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <h4>Quelle est la difference entre NGE et Axione (GraceTHD) ?</h4>
+                        <h4>Quelle est la difference entre le BE standard et le BE alternatif (GraceTHD) ?</h4>
                         <span class="accordion-icon">+</span>
                     </div>
                     <div class="accordion-content">
                         <p>Le plugin detecte automatiquement le type de bureau d'etudes (BE) via la table <code>comac.sro_nge_axione</code> :</p>
                         <ul style="margin: 0.75rem 0; padding-left: 1.5rem; line-height: 1.8;">
-                            <li><strong>NGE :</strong> Pipeline classique via <code>fddcpi2</code> PostgreSQL. Cables deja recales sur l'infrastructure. Match par endpoints.</li>
-                            <li><strong>Axione :</strong> Pipeline <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Cables decales par rapport aux poteaux. Utilise aussi GraceTHD local (fichiers SHP+CSV) si present.</li>
+                            <li><strong>BE standard :</strong> Pipeline classique via <code>fddcpi2</code> PostgreSQL. Cables deja recales sur l'infrastructure. Match par endpoints.</li>
+                            <li><strong>BE alternatif :</strong> Pipeline <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Cables decales par rapport aux poteaux. Utilise aussi GraceTHD local (fichiers SHP+CSV) si present.</li>
                         </ul>
                         <p style="margin-top: 0.75rem; padding: 0.75rem; background: #f0fdf4; border-radius: 6px; border-left: 3px solid #10b981;">
-                            <strong>Important :</strong> Les modifications GraceTHD/Axione n'impactent jamais le code NGE. Les chemins sont proteges par des conditions <code>if be_type == 'axione'</code>.
+                            <strong>Important :</strong> Les modifications GraceTHD du BE alternatif n'impactent jamais le code du BE standard. Les chemins sont proteges par des conditions <code>if be_type == 'axione'</code>.
                         </p>
                     </div>
                 </div>
@@ -5652,9 +5652,9 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                             <li>Captures d'écran si pertinent</li>
                         </ul>
                         <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
-                            <a href="mailto:yadda@nge-es.fr" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: #3b82f6; color: white; border-radius: 6px; text-decoration: none; font-weight: 500;">
+                            <a href="mailto:contact@example.com" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: #3b82f6; color: white; border-radius: 6px; text-decoration: none; font-weight: 500;">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                                yadda@nge-es.fr
+                                contact@example.com
                             </a>
                             <a href="https://www.linkedin.com/in/youcef-adda/" target="_blank" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: #0077b5; color: white; border-radius: 6px; text-decoration: none; font-weight: 500;">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
@@ -5670,7 +5670,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
         <section id="nouveautes" style="background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%); padding: 3rem 2rem; border-radius: var(--radius); margin-top: 3rem;">
             <div class="section-header">
                 <h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 8px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> Nouveautes v3.1</h2>
-                <p>GraceTHD Axione, Mode Projet BDD, 4 sprints d'optimisation, ameliorations Police C6, COMAC et UX</p>
+                <p>GraceTHD (BE alternatif), Mode Projet BDD, 4 sprints d'optimisation, ameliorations Police C6, COMAC et UX</p>
             </div>
 
             <div class="cards-grid" style="max-width: 1000px; margin: 0 auto;">
@@ -5678,10 +5678,10 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                     <div class="card-icon green">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     </div>
-                    <h3>GraceTHD Axione</h3>
-                    <p><strong>Pipeline alternatif complet</strong> pour SRO Axione via fichiers locaux SHP+CSV. Detection auto NGE vs Axione via <code>comac.sro_nge_axione</code>. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Match mode ligne pour cables BPE-to-BPE.</p>
+                    <h3>GraceTHD (BE alternatif)</h3>
+                    <p><strong>Pipeline alternatif complet</strong> pour les SRO du BE alternatif via fichiers locaux SHP+CSV. Detection auto BE standard vs BE alternatif via <code>comac.sro_nge_axione</code>. Fonction SQL <code>fddcpiax</code> avec ST_Snap tolerance elargie (0.70m). Match mode ligne pour cables BPE-to-BPE.</p>
                     <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border-left: 4px solid #10b981;">
-                        <p style="margin: 0; font-size: 0.9rem; color: #065f46;"><strong>Fichiers :</strong> gracethd_reader.py, fddcpiax (SQL), db_connection.py (routage auto NGE/Axione)</p>
+                        <p style="margin: 0; font-size: 0.9rem; color: #065f46;"><strong>Fichiers :</strong> gracethd_reader.py, fddcpiax (SQL), db_connection.py (routage auto BE standard/BE alternatif)</p>
                     </div>
                 </article>
 
@@ -5717,7 +5717,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                     <h3>Police C6 avancee</h3>
                     <p><strong>Bold-only C6 :</strong> seuls les cables en gras (nouveaux) sont compares. <strong>Attaches-aware :</strong> verification cables et BPE de chaque cote des attaches. Compteur [i/N] par etude. Bilan post-boucle.</p>
                     <div style="margin-top: 1rem; padding: 1rem; background: rgba(168, 85, 247, 0.1); border-radius: 8px; border-left: 4px solid #a855f7;">
-                        <p style="margin: 0; font-size: 0.9rem; color: #5b21b6;"><strong>Fix :</strong> Liaison vs cable confusion (re.match L+digit), fddcpiax routage auto NGE/Axione</p>
+                        <p style="margin: 0; font-size: 0.9rem; color: #5b21b6;"><strong>Fix :</strong> Liaison vs cable confusion (re.match L+digit), fddcpiax routage auto BE standard/BE alternatif</p>
                     </div>
                 </article>
 
@@ -5748,7 +5748,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
 
             <!-- Schéma détaillé du workflow Police C6 v3.1 -->
             <div class="diagram-container" style="margin-top: 3rem;">
-                <h3 class="diagram-title">Workflow Police C6 - v3.1 : bold-only, attaches-aware, dual-path NGE/Axione, compteur [i/N]</h3>
+                <h3 class="diagram-title">Workflow Police C6 - v3.1 : bold-only, attaches-aware, dual-path BE standard/BE alternatif, compteur [i/N]</h3>
                 <svg class="architecture-svg" viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg">
                     <defs>
                         <marker id="arrow-workflow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5769,7 +5769,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                         <rect x="50" y="150" width="160" height="100" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
                         <text x="130" y="180" text-anchor="middle" font-weight="600" fill="#1e40af" font-size="14">1. Sélection étude</text>
                         <text x="130" y="200" text-anchor="middle" fill="#1d4ed8" font-size="11">Filtre Valeur:</text>
-                        <text x="130" y="215" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="600">NGE-63A2D-73463-PA-21</text>
+                        <text x="130" y="215" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="600">ETUDE-63A2D-73463-PA-21</text>
                         <circle cx="130" cy="235" r="8" fill="#10b981" opacity="0.8"/>
                         <polyline points="125,235 128,238 135,231" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(0, 0)"/>
                     </g>
@@ -5864,7 +5864,7 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
 
             <div style="text-align: center; margin-top: 2rem;">
                 <div style="display: inline-block; padding: 1rem 2rem; background: white; border-radius: var(--radius); box-shadow: var(--shadow);">
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> <strong>Architecture v3.1</strong> : 26 fichiers Python • ~10 500 lignes • 6 workflows • PostgreSQL natif • GraceTHD Axione • Mode Projet BDD • 4 sprints optimisation</p>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> <strong>Architecture v3.1</strong> : 26 fichiers Python • ~10 500 lignes • 6 workflows • PostgreSQL natif • GraceTHD (BE alternatif) • Mode Projet BDD • 4 sprints optimisation</p>
                 </div>
             </div>
         </section>
@@ -5878,14 +5878,14 @@ cables_dc       <span class="code-comment"># Câbles découpés (via fddcpi2)</s
                 <span>Pole Aerien - Plugin QGIS</span>
             </div>
             <ul class="footer-links">
-                <li><a href="mailto:yadda@nge-es.fr">Contact</a></li>
+                <li><a href="mailto:contact@example.com">Contact</a></li>
                 <li><a href="https://www.linkedin.com/in/youcef-adda/" target="_blank">LinkedIn</a></li>
                 <li><a href="#">Documentation</a></li>
                 <li><a href="#">Licence GPL v2</a></li>
             </ul>
             <div style="display: flex; align-items: center; gap: 16px; margin-top: 1rem;">
-                <img src="image/logo_NGE.svg" alt="NGE" width="80" height="28">
-                <p style="margin: 0;">&copy; 2022-2026 NGE Energie Solutions. Tous droits reserves.</p>
+                <img src="image/logo.svg" alt="Pole Aerien" width="80" height="28">
+                <p style="margin: 0;">&copy; 2022-2026. Tous droits reserves.</p>
             </div>
         </div>
     </footer>
