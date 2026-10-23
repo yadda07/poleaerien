@@ -7,10 +7,10 @@ qgisMinimumVersion=3.28
 qgisMaximumVersion=4.99
 description=Contrôle qualité, comparaison et MAJ des poteaux aériens FTTH (FT/BT). Rapport unifié multi-modules.
 version=3.1.0
-author=NGE-ES
-email=yadda@nge-es.fr
+author=Editeur
+email=contact@example.com
 
-about=Plugin QGIS de contrôle qualité, comparaison et mise à jour des données de poteaux aériens dans le cadre des projets FTTH. Supporte NGE (BDD PostgreSQL) et Axione (GraceTHD).
+about=Plugin QGIS de contrôle qualité, comparaison et mise à jour des données de poteaux aériens dans le cadre des projets FTTH. Supporte un BE standard (BDD PostgreSQL) et un BE alternatif (GraceTHD).
 
     7 modules d'analyse :
     - MAJ BD : Import Excel FT-BT KO, MAJ SQL directe PostgreSQL
@@ -23,7 +23,7 @@ about=Plugin QGIS de contrôle qualité, comparaison et mise à jour des donnée
 
     Rapport Excel unifié avec tableau de bord, glossaire et dictionnaire de données ISO/IEC 11179.
 
-    Tables requises : infra_pt_pot, etude_cap_ft, etude_comac. GraceTHD pour Axione.
+    Tables requises : infra_pt_pot, etude_cap_ft, etude_comac. GraceTHD pour le BE alternatif.
 
 tracker=https://github.com/asoumare/PoleAerien/issues
 repository=https://github.com/asoumare/PoleAerien
@@ -56,7 +56,7 @@ changelog=
         - Rapport unifié en tâche background (UnifiedReportExportTask)
     2.5.0 (2026-02) - GraceTHD, mode projet, interface V2
         - Pipeline GraceTHD complet (poteaux, câbles, BPE depuis SHP+CSV)
-        - Détection auto BE type (NGE/Axione) via GraceTHD ou BDD
+        - Détection auto BE type (standard/alternatif) via GraceTHD ou BDD
         - Mode projet : SRO depuis nom dossier, couches PostgreSQL directes
         - Chargement couches asynchrone (background thread)
         - SRO éditable dans l'interface
@@ -67,7 +67,7 @@ changelog=
         - Interface V2 : remplacement complet ancienne UI, thème natif Qt
         - Suppression ancienne interface (11 fichiers)
         - Fix comptage câbles physiques COMAC (GROUP BY GID)
-        - Fix routage fddcpi2 -> fddcpiax pour Axione
+        - Fix routage fddcpi2 -> fddcpiax pour le BE alternatif
     2.3.0 (2026-02) - Corrections performance, architecture workflows
         - Déconstruction God Object PoleAerien.py (2700 -> 128 lignes)
         - Couche workflows/ : 6 orchestrateurs dédiés
@@ -85,7 +85,7 @@ changelog=
         - Version initiale (Vérification COMAC/CAP_FT)
 
 # Tags are comma separated with spaces allowed
-tags=poteau, poteaux, ENEDIS, FTTH, fibre optique, CAP_FT, COMAC, C6, C3A, contrôle qualité, BT, FT, GraceTHD, aérien, sous-traitant, Excel, analyse
+tags=poteau, poteaux, FTTH, fibre optique, CAP_FT, COMAC, C6, C3A, contrôle qualité, BT, FT, GraceTHD, aérien, sous-traitant, Excel, analyse
 
 homepage=https://github.com/asoumare/PoleAerien
 category=Vector

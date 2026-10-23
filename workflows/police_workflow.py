@@ -206,7 +206,7 @@ class PoliceWorkflow(QObject):
                 # Fallback: scanner les dossiers d'etude + fichiers C6
                 self.message_received.emit("Scan des fichiers C6...", "grey")
                 etudes_set = set()
-                # 1. Chercher les dossiers d'etude (FTTH-*-ETUDE-*, NGE-*, etc.)
+                # 1. Chercher les dossiers d'etude (FTTH-*-ETUDE-*, prefixe BE historique + chiffre)
                 import re as _re
                 _etude_dir_re = _re.compile(
                     r'(FTTH.*ETUDE|NGE-\d)', _re.IGNORECASE
@@ -215,7 +215,7 @@ class PoliceWorkflow(QObject):
                     for d in dirnames:
                         if _etude_dir_re.search(d):
                             etudes_set.add(d)
-                # 2. Aussi chercher les fichiers *C6*.xlsx (pattern classique NGE)
+                # 2. Aussi chercher les fichiers *C6*.xlsx (pattern classique du BE standard)
                 c6_files = glob.glob(os.path.join(repertoire_c6, "**", "*C6*.xlsx"), recursive=True)
                 c6_files = [f for f in c6_files if not is_plugin_output_file(os.path.basename(f))]
                 for f in c6_files:
@@ -576,7 +576,7 @@ class PoliceWorkflow(QObject):
         if not sro:
             self.message_received.emit("  [!] SRO non trouvé, tentative depuis nom étude", "orange")
             # Essayer de construire le SRO depuis le nom de l'étude
-            # Format: FTTH-NGE-ETUDE-B1L-63041-14 -> 63041/B1L/PMZ/xxxxx
+            # Format: FTTH-*-ETUDE-B1L-63041-14 -> 63041/B1L/PMZ/xxxxx
             sro = self._extract_sro_from_etude_name(filterValeur)
         
         if not sro:
@@ -621,7 +621,7 @@ class PoliceWorkflow(QObject):
     def _extract_sro_from_etude_name(self, etude_name: str) -> str:
         """Tente d'extraire le SRO depuis le nom de l'étude."""
         import re
-        # Pattern: FTTH-NGE-ETUDE-B1I-63041-14 ou similaire
+        # Pattern: FTTH-*-ETUDE-B1I-63041-14 ou similaire
         match = re.search(r'(\d{5})', etude_name)
         if match:
             code_insee = match.group(1)
@@ -794,7 +794,7 @@ class PoliceWorkflow(QObject):
                 ws_bpe.cell(row=1, column=col).fill = header_fill
             
             for s in stats_globales:
-                # Extraire code commune de l'étude (ex: FTTH-NGE-ETUDE-B1L-63041-1 -> 63041)
+                # Extraire code commune de l'etude (ex: FTTH-*-ETUDE-B1L-63041-1 -> 63041)
                 etude_name = s['etude']
                 etude_commune = ''
                 parts = etude_name.split('-')

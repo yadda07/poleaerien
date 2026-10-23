@@ -47,7 +47,7 @@ class CableSegment:
 
 class DatabaseConnection:
     """
-    Gère la connexion à la base PostgreSQL RIP AVG NGE.
+    Gère la connexion à la base PostgreSQL cible.
     Récupère automatiquement les credentials depuis QGIS.
     """
     
@@ -64,9 +64,9 @@ class DatabaseConnection:
         self._connection_name = None
         self._circuit_open_until = 0.0
     
-    def find_auvergne_connection(self) -> Optional[str]:
+    def find_target_connection(self) -> Optional[str]:
         """
-        Cherche la connexion PostgreSQL "Auvergne" dans les settings QGIS.
+        Cherche la connexion PostgreSQL cible dans les settings QGIS.
         Retourne le nom de la connexion si trouvée.
         """
         settings = QgsSettings()
@@ -86,7 +86,7 @@ class DatabaseConnection:
             if host == TARGET_HOST or database.lower() == TARGET_DATABASE:
                 return conn_name
             
-            # Chercher aussi par nom contenant "Auvergne"
+            # Chercher aussi par le nom technique de la base cible
             if "auvergne" in conn_name.lower():
                 return conn_name
         
@@ -155,10 +155,10 @@ class DatabaseConnection:
             )
             return False
 
-        conn_name = self.find_auvergne_connection()
+        conn_name = self.find_target_connection()
         if not conn_name:
             QgsMessageLog.logMessage(
-                f"Connexion PostgreSQL 'Auvergne' non trouvee. "
+                f"Connexion PostgreSQL cible non trouvee. "
                 f"Veuillez configurer une connexion vers {TARGET_HOST}",
                 "PoleAerien", MSG_WARNING
             )
@@ -457,7 +457,7 @@ class DatabaseConnection:
 
     def query_sro_be(self, sro: str) -> Optional[str]:
         """
-        Determine le bureau d'etudes (NGE ou Axione) pour un SRO.
+        Determine le bureau d'etudes (standard ou alternatif) pour un SRO.
         
         Interroge la table comac.sro_nge_axione pour identifier
         l'ingenierie responsable du SRO.

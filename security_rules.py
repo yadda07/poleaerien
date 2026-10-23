@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Module de règles de sécurité pour câbles aériens.
-Basé sur norme NFC 11201-A1 et spécifications Prysmian.
+Base sur norme NFC 11201-A1 et specifications constructeur de cables.
 
 Sources données:
 - BDD comac_db/ (CSV officiels): cables.csv, comm_XX.csv, hypothese.csv
@@ -49,10 +49,10 @@ PORTEES_MAX_ZVF = {
 }
 
 # =============================================================================
-# CONSTANTES - Distances câble/BT selon type câble Enedis (mètres)
+# CONSTANTES - Distances cable/BT selon type de cable electrique (metres)
 # =============================================================================
 
-# Distance min/max câble FO / câble BT Enedis
+# Distance min/max cable FO / cable BT du distributeur electrique
 DIST_CABLE_BT = {
     'fil_nu': (1.0, 1.2),      # Conducteur commence par "CU"
     'sans_cuivre': (0.5, 0.7)  # Conducteur commence par "BT" ou autre
@@ -62,11 +62,11 @@ DIST_CABLE_BT = {
 DIST_CABLE_SOL_MIN = 4.0
 
 # =============================================================================
-# CONSTANTES - Mapping codes câbles Prysmian -> Capacité FO
+# CONSTANTES - Mapping codes cables constructeur -> Capacite FO
 # =============================================================================
 
 # Codes L1092-xx-P (Excel Comac, colonne Type de ligne FIBRE OPTIQUE)
-CODES_CABLE_PRYSMIAN = {
+CODES_CABLE_FO = {
     'L1092-1-P': 12,
     'L1092-2-P': 36,
     'L1092-3-P': 72,
@@ -185,7 +185,7 @@ def get_capacites_possibles(code_cable: str) -> list:
 
 def get_capacite_fo_from_code(code_cable: str, debug: bool = False) -> int:
     """
-    Extrait la capacité FO depuis un code câble Prysmian.
+    Extrait la capacite FO depuis un code cable constructeur.
     Utilise la BD officielle comac_db si disponible, sinon fallback local.
     
     Args:
@@ -216,7 +216,7 @@ def get_capacite_fo_from_code(code_cable: str, debug: bool = False) -> int:
     if debug:
         print(f"[COMAC_CAPA] Code nettoyé: '{code_clean}'")
     
-    for code, capa in CODES_CABLE_PRYSMIAN.items():
+    for code, capa in CODES_CABLE_FO.items():
         if code in code_clean:
             if debug:
                 print(f"[COMAC_CAPA] -> MATCH local: '{code}' in '{code_clean}' => capacité={capa}")
@@ -227,9 +227,9 @@ def get_capacite_fo_from_code(code_cable: str, debug: bool = False) -> int:
     return 0
 
 
-def get_type_cable_enedis(conducteur: str) -> str:
+def get_type_cable_bt(conducteur: str) -> str:
     """
-    Détermine le type de câble Enedis depuis la colonne Conducteur.
+    Determine le type de cable BT depuis la colonne Conducteur.
     
     Args:
         conducteur: Valeur colonne Conducteur (ex: "CU 12 1+3+1", "BT 4*25")
@@ -248,7 +248,7 @@ def get_type_cable_enedis(conducteur: str) -> str:
 
 def get_distance_cable_bt(type_cable: str) -> tuple:
     """
-    Retourne la distance min/max câble FO / câble BT selon type Enedis.
+    Retourne la distance min/max cable FO / cable BT selon le type de conducteur.
     
     Args:
         type_cable: 'fil_nu' ou 'sans_cuivre'
@@ -349,7 +349,7 @@ def verifier_distance_cable_bt(distance: float, conducteur: str) -> dict:
     Returns:
         dict avec 'valide', 'type_cable', 'distance_min', 'message'
     """
-    type_cable = get_type_cable_enedis(conducteur)
+    type_cable = get_type_cable_bt(conducteur)
     dist_min, dist_max = get_distance_cable_bt(type_cable)
     
     valide = distance >= dist_min
@@ -432,7 +432,7 @@ def valider_liaison(
         capacite_fo: Capacité FO du câble
         zone: Zone climatique ('ZVN' ou 'ZVF')
         distance_bt: Distance câble FO / câble BT (optionnel)
-        conducteur: Type conducteur Enedis (optionnel)
+        conducteur: Type conducteur BT (optionnel)
         distance_sol: Distance câble / sol (optionnel)
     
     Returns:

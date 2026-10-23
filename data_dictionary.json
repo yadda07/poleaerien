@@ -5,7 +5,7 @@
     "description": "Registre ISO/IEC 11179. 7 modules + tableau de bord.",
     "version": "1.1.0",
     "language": "fr",
-    "organization": "NGE - Pole Aerien",
+    "organization": "Pole Aerien",
     "creation_date": "2026-03-18",
     "scope": "Rapport de diagnostic unifie et rapports individuels"
   },
@@ -24,7 +24,7 @@
     },
     {
       "term": "POT-FT",
-      "definition": "Poteau France Telecom (reseau cuivre). Gere par CAP FT, C6 vs BD, Police C6."
+      "definition": "Poteau reseau cuivre (FT). Gere par CAP FT, C6 vs BD, Police C6."
     },
     {
       "term": "POT-BT",
@@ -68,7 +68,7 @@
     },
     {
       "term": "GraceTHD",
-      "definition": "Format d'echange standardise reseaux THD (SHP+CSV). Utilise par Axione."
+      "definition": "Format d'echange standardise reseaux THD (SHP+CSV). Utilise par le BE alternatif."
     },
     {
       "term": "fddcpiax",
@@ -83,11 +83,11 @@
       "definition": "ZVN = Zone Vent Normal, ZVF = Zone Vent Fort. Affecte portees maximales."
     },
     {
-      "term": "NGE",
+      "term": "BE standard",
       "definition": "Bureau d'etudes principal. Donnees conformes en BDD PostgreSQL."
     },
     {
-      "term": "Axione",
+      "term": "BE alternatif",
       "definition": "Bureau d'etudes secondaire. Donnees via GraceTHD (fichiers locaux)."
     },
     {
@@ -124,7 +124,7 @@
     },
     {
       "term": "POT-TI",
-      "definition": "Poteau Tiers. Poteau appartenant a un operateur tiers (ex: Axione/ATHD). Proprietaire: ATHD."
+      "definition": "Poteau Tiers. Poteau appartenant a un operateur tiers. Proprietaire: ATHD."
     },
     {
       "term": "RAUV",
@@ -176,11 +176,11 @@
     },
     {
       "term": "EDF BT",
-      "definition": "Type d'appui dans l'Annexe C6 designant un poteau bois du distributeur electrique (Enedis). Correspond aux poteaux de classe A, D, S dans le PCM COMAC avec Nature=BE."
+      "definition": "Type d'appui dans l'Annexe C6 designant un poteau bois du distributeur electrique. Correspond aux poteaux de classe A, D, S dans le PCM COMAC avec Nature=BE."
     },
     {
       "term": "ORT",
-      "definition": "Operateur Reseau Tiers. Type d'appui GESPOT designant un poteau n'appartenant ni a Enedis ni a France Telecom. Source: feuille Bases."
+      "definition": "Operateur Reseau Tiers. Type d'appui GESPOT designant un poteau n'appartenant ni au distributeur electrique ni au reseau cuivre. Source: feuille Bases."
     },
     {
       "term": "Hypothese climatique",
@@ -212,7 +212,7 @@
     }
   ],
   "reference_values": {
-    "source": "Feuille 'Bases' des fichiers CAPFT (ex: NGE_S05_PMZ_74109_ARTERE_008.xlsx). Referentiel officiel GESPOT/CAPFT.",
+    "source": "Feuille 'Bases' des fichiers CAPFT (ex: ETUDE_S05_PMZ_74109_ARTERE_008.xlsx). Referentiel officiel GESPOT/CAPFT.",
     "nature_travaux": {
       "description": "Nature des travaux prevus sur l'appui (colonne I de la feuille Bases).",
       "values": ["Remplacement", "Renforcement", "Recalage"]
@@ -384,7 +384,7 @@
         {"col": "Y", "name": "N. appui destination", "description": "Numero du poteau a l'autre bout de la portee"},
         {"col": "Z", "name": "Forfait cuivre", "description": "Branchement cuivre Oui/Non"},
         {"col": "AA", "name": "Forfait optique", "description": "Branchement optique Oui/Non"},
-        {"col": "AB", "name": "Effort disponible avant ajout cable", "description": "Effort disponible en daN (vide = appui EDF)"},
+        {"col": "AB", "name": "Effort disponible avant ajout cable", "description": "Effort disponible en daN (vide = appui du distributeur electrique)"},
         {"col": "AC", "name": "Effort disponible apres ajout cable", "description": "Effort residuel apres pose cable FO"}
       ]
     }
@@ -1518,12 +1518,12 @@
                   },
                   {
                     "value": "ABSENT_BDD",
-                    "definition": "Aucun cable BDD pour cet appui (NGE)",
+                    "definition": "Aucun cable BDD pour cet appui (BE standard)",
                     "color": "#FFEB9C"
                   },
                   {
                     "value": "ABSENT_GRACETHD",
-                    "definition": "Aucun cable GraceTHD (Axione)",
+                    "definition": "Aucun cable GraceTHD (BE alternatif)",
                     "color": "#FFEB9C"
                   },
                   {
@@ -2077,7 +2077,7 @@
               "definition": "Nom du fichier Excel C6 source dont ce poteau a ete extrait.",
               "data_type": "string",
               "nullable": false,
-              "example": "FTTH-NGE-ETUDE-B1L-63041-7.xlsx"
+              "example": "FTTH-ETUDE-B1L-63041-7.xlsx"
             },
             {
               "element_id": "c6bd_etudes",
@@ -2148,7 +2148,7 @@
               "nullable": true
             }
           ],
-          "notes": "Couleur fond: bleu #D6E4F0 si Axione (normal pour GraceTHD, zone elargie), rouge #FF6B6B sinon (anomalie a verifier)."
+          "notes": "Couleur fond: bleu #D6E4F0 si BE alternatif (normal pour GraceTHD, zone elargie), rouge #FF6B6B sinon (anomalie a verifier)."
         },
         {
           "sheet_id": "C6BD_VERIF_ETUDES",
@@ -2178,7 +2178,7 @@
       "module_id": "mod_5_police_c6",
       "module_name": "5. POLICE C6",
       "tab_color": "#A855F7",
-      "description": "Pour chaque etude C6, compare le nombre et les capacites des cables FO declares dans l'Annexe C6 (en gras uniquement) avec les cables reels en BDD (fddcpiax) ou GraceTHD. Verifie les boitiers (BPE). Exclut les appuis EDF.",
+      "description": "Pour chaque etude C6, compare le nombre et les capacites des cables FO declares dans l'Annexe C6 (en gras uniquement) avec les cables reels en BDD (fddcpiax) ou GraceTHD. Verifie les boitiers (BPE). Exclut les appuis du distributeur electrique.",
       "input_files": "Fichiers Annexe C6 (Excel) + donnees BDD/GraceTHD",
       "filters": [
         {
@@ -2186,8 +2186,8 @@
           "description": "Seuls les cables avec police gras dans la colonne 'Nom du cable' sont compares. Les cables en police normale sont existants (non compares)."
         },
         {
-          "filter": "Appuis EDF exclus",
-          "description": "Les appuis sans valeur dans la colonne 'Effort disponible avant ajout cable' sont des appuis EDF et sont exclus de l'analyse."
+          "filter": "Appuis du distributeur electrique exclus",
+          "description": "Les appuis sans valeur dans la colonne 'Effort disponible avant ajout cable' sont des appuis du distributeur electrique et sont exclus de l'analyse."
         },
         {
           "filter": "Cables L[digit]",
@@ -2217,7 +2217,7 @@
             {
               "element_id": "plc6_appuis",
               "name": "APPUIS C6",
-              "definition": "Nombre total d'appuis Orange (hors EDF) trouves dans le fichier C6 pour cette etude.",
+              "definition": "Nombre total d'appuis reseau cuivre (hors distributeur electrique) trouves dans le fichier C6 pour cette etude.",
               "data_type": "integer"
             },
             {
@@ -2342,12 +2342,12 @@
                   },
                   {
                     "value": "ABSENT_BDD",
-                    "definition": "Appui non trouve en BDD (NGE)",
+                    "definition": "Appui non trouve en BDD (BE standard)",
                     "color": "#FFEB9C"
                   },
                   {
                     "value": "ABSENT_GRACETHD",
-                    "definition": "Appui non trouve dans GraceTHD (Axione)",
+                    "definition": "Appui non trouve dans GraceTHD (BE alternatif)",
                     "color": "#FFEB9C"
                   }
                 ]
@@ -2604,7 +2604,7 @@
             {
               "section_id": "resume_executif",
               "row": 4,
-              "description": "Ligne synthetique avec: SRO (si projet), type BE (NGE/AXIONE), nombre de modules, bilan par module (OK/total)."
+              "description": "Ligne synthetique avec: SRO (si projet), type BE (standard/alternatif), nombre de modules, bilan par module (OK/total)."
             }
           ],
           "data_elements": [

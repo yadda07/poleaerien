@@ -1,5 +1,5 @@
 -- ============================================================
--- Detection des infrastructures isolees pour les SRO Axione
+-- Detection des infrastructures isolees pour les SRO du BE alternatif
 -- Tables: infra_pt_pot, infra_pt_chb, infra_pt_autres, bpe
 -- Reference cables: rip_avg_nge.cables
 -- ============================================================
@@ -187,7 +187,7 @@ CREATE INDEX ON _controles.chambres_isolees_axione USING GIST (geom);
 
 -- ============================================================
 -- 4. RESUME PAR SRO (comptage rapide)
--- Nombre de poteaux/BPE/chambres isoles par SRO Axione
+-- Nombre de poteaux/BPE/chambres isoles par SRO du BE alternatif
 -- ============================================================
 DROP TABLE IF EXISTS _controles.resume_poteaux_bpe_chambres_isolees_axione;
 CREATE TABLE _controles.resume_poteaux_bpe_chambres_isolees_axione AS

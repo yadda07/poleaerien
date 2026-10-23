@@ -385,7 +385,7 @@ class PoliceC6:
                     font = row[col_nom_cable].font
                     cable_is_bold = bool(font and font.bold)
                 
-                # Détecter appui EDF: colonne "Effort disponible avant ajout câble" renseignée
+                # Detecter appui du distributeur electrique: colonne "Effort disponible avant ajout cable"
                 effort_val = None
                 if col_effort_dispo >= 0 and col_effort_dispo < len(row):
                     effort_val = row[col_effort_dispo].value
@@ -401,7 +401,7 @@ class PoliceC6:
                     current_appui = normalize_appui_num(raw_num)
                     if current_appui not in donnees_par_appui:
                         donnees_par_appui[current_appui] = []
-                    # Appui EDF = effort disponible NON renseigné (pas de valeur)
+                    # Appui du distributeur electrique = effort disponible NON renseigne (pas de valeur)
                     # Appui Orange = effort disponible renseigné (a une valeur)
                     if col_effort_dispo >= 0 and (effort_val is None or str(effort_val).strip() == ''):
                         appuis_edf.add(current_appui)
@@ -425,7 +425,7 @@ class PoliceC6:
                         'is_edf': current_appui in appuis_edf
                     })
             
-            # Exclure les appuis EDF (ceux SANS effort disponible)
+            # Exclure les appuis du distributeur electrique (ceux SANS effort disponible)
             if appuis_edf:
                 for appui_edf in appuis_edf:
                     donnees_par_appui.pop(appui_edf, None)

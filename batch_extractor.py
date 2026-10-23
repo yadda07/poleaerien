@@ -85,7 +85,7 @@ class BatchDataExtractor:
             lyr_com: QgsVectorLayer etude_comac
             sro: SRO code string
             be_type: 'nge' | 'axione'
-            gracethd_dir: GraceTHD directory path (Axione only)
+            gracethd_dir: GraceTHD directory path (BE alternatif only)
             capft_col: field name for CAP_FT study column
             comac_col: field name for COMAC study column
             c6bd_col: field name for C6BD study column

@@ -12,8 +12,8 @@ Produit un rapport Excel unifie multi-modules avec tableau de bord, glossaire
 et dictionnaire de donnees.
 
 Supporte deux bureaux d'etudes :
-- NGE : donnees conformes en BDD PostgreSQL (fddcpiax, infra_pt_pot)
-- Axione : donnees via GraceTHD (fichiers locaux SHP+CSV)
+- BE standard : donnees conformes en BDD PostgreSQL (fddcpiax, infra_pt_pot)
+- BE alternatif : donnees via GraceTHD (fichiers locaux SHP+CSV)
 
 COMPATIBILITE
 -------------
@@ -75,7 +75,7 @@ MODE PROJET
 -----------
 Selection d'un dossier projet -> SRO derive du nom de dossier -> couches
 chargees directement depuis PostgreSQL avec filtre SRO. Detection automatique
-du type BE (NGE/Axione) via GraceTHD ou table comac.sro_nge_axione.
+du type BE (standard/alternatif) via GraceTHD ou table comac.sro_nge_axione.
 
 COUCHES QGIS REQUISES
 ----------------------
@@ -83,12 +83,12 @@ COUCHES QGIS REQUISES
 - etude_cap_ft : polygones zones d'etude CAP_FT
 - etude_comac : polygones zones d'etude COMAC
 
-Pour Axione, les poteaux sont charges depuis GraceTHD (t_ptech + t_noeud).
+Pour le BE alternatif, les poteaux sont charges depuis GraceTHD (t_ptech + t_noeud).
 
 BASE DE DONNEES
 ---------------
 - Serveur PostgreSQL (schema rip_avg_nge) : infra_pt_pot, cables, attaches, BPE
-- Fonction SQL fddcpiax(sro) : decoupage cables par appui (NGE + Axione)
+- Fonction SQL fddcpiax(sro) : decoupage cables par appui (BE standard + BE alternatif)
 - Schema comac : supports, cables, hypotheses, armements, communes
 
 STRUCTURE DU PLUGIN
@@ -173,7 +173,7 @@ Email: abdoulayisoumare@gmail.com
 EDITEUR / MAINTENEUR
 --------------------
 Youcef ADDA
-Email: yadda@nge-es.fr
+Email: contact@example.com
 LinkedIn: https://www.linkedin.com/in/youcef-adda/
 
 LICENCE
@@ -213,7 +213,7 @@ v3.0.0 (2026-03) - Rapport unifie, schemas techniques, dictionnaire de donnees
 
 v2.5.0 (2026-02) - GraceTHD, mode projet, interface V2
   - [FEAT] Pipeline GraceTHD complet (poteaux, cables, BPE depuis SHP+CSV)
-  - [FEAT] Detection auto BE type (NGE/Axione) via GraceTHD ou BDD
+  - [FEAT] Detection auto BE type (standard/alternatif) via GraceTHD ou BDD
   - [FEAT] Mode projet : SRO depuis nom dossier, couches PostgreSQL directes
   - [FEAT] Chargement couches asynchrone (background thread)
   - [FEAT] SRO editable dans l'interface
@@ -227,7 +227,7 @@ v2.5.0 (2026-02) - GraceTHD, mode projet, interface V2
   - [ARCH] Theme-aware : rendu natif Qt, compatible dark/light
   - [ARCH] Suppression ancienne interface (11 fichiers)
   - [FIX] Comptage cables physiques COMAC (GROUP BY GID)
-  - [FIX] Routage fddcpi2 -> fddcpiax pour Axione
+  - [FIX] Routage fddcpi2 -> fddcpiax pour le BE alternatif
   - [FIX] Liaison vs cable confusion Police C6 (regex L\d)
 
 v2.3.0 (2026-02) - Corrections performance, architecture workflows

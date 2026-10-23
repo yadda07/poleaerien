@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 PoleAerien - QGIS Plugin
-Controle qualite et mise a jour des poteaux aeriens ENEDIS (FT/BT)
+Controle qualite et mise a jour des poteaux aeriens (FT/BT)
 
-Copyright (C) 2022-2026 NGE ES
+Copyright (C) 2022-2026
 License: GNU GPL v2+
 """
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication

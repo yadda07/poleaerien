@@ -663,7 +663,10 @@ def _write_dashboard(wb, batch_results):
     if sro:
         summary_parts.append(f"SRO {sro}")
     if be_label:
-        summary_parts.append(be_label.upper())
+        summary_parts.append({
+            'nge': 'BE standard',
+            'axione': 'BE alternatif',
+        }.get(str(be_label).lower(), be_label))
     summary_parts.append(f"{len(batch_results)} module(s)")
     for key, kpi_fn in _KPI.items():
         res = batch_results.get(key)

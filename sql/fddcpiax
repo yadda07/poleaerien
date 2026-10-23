@@ -16,7 +16,7 @@ DECLARE
     v_be text;
 BEGIN
     -- =========================================================================
-    -- 0. Detection du bureau d'etudes (NGE ou Axione)
+    -- 0. Detection du bureau d'etudes (BE standard ou BE alternatif)
     --    Table comac.sro_nge_axione : colonne 'be' identifie l'ingenierie
     -- =========================================================================
     SELECT lower(s.be) INTO v_be
@@ -24,7 +24,7 @@ BEGIN
     WHERE s.sro ILIKE '%' || zasro || '%'
     LIMIT 1;
 
-    -- Si pas Axione -> deleguer a fddcpi2 standard (pipeline NGE avec attaches)
+    -- Si pas BE alternatif -> deleguer a fddcpi2 standard (pipeline BE standard avec attaches)
     IF v_be IS NULL OR v_be != 'axione' THEN
         RETURN QUERY SELECT * FROM rip_avg_nge.fddcpi2(zasro);
         RETURN;
@@ -56,7 +56,7 @@ BEGIN
     
     -- =========================================================================
     -- 2. Cables depuis FDDCPFA directement (bypass fdrca - pas d'attaches)
-    --    Donnees Axione : cables avec decalage ~0.70m par rapport a l'infra,
+    --    Donnees BE alternatif : cables avec decalage ~0.70m par rapport a l'infra,
     --    pas de relation spatiale directe (ni intersection, ni attache).
     -- =========================================================================
     DROP TABLE IF EXISTS temp_cables;
@@ -104,7 +104,7 @@ BEGIN
 
     -- =========================================================================
     -- 3. Snap + Split + Posemode
-    --    ST_Snap avec tolerance elargie gere les 2 cas Axione :
+    --    ST_Snap avec tolerance elargie gere les 2 cas du BE alternatif :
     --    a) Vertex du cable proche du poteau -> deplacement du vertex
     --    b) Segment qui passe a cote du poteau -> ajout d'un vertex + deplacement
     -- =========================================================================
@@ -265,12 +265,12 @@ GRANT EXECUTE ON FUNCTION rip_avg_nge.fddcpiax(text, double precision) TO sdupay
 
 COMMENT ON FUNCTION rip_avg_nge.fddcpiax(text, double precision)
     IS '
-FDDCPI2_ACTION - Variante de FDDCPI2 adaptee aux donnees Axione (sans attaches).
+FDDCPI2_ACTION - Variante de FDDCPI2 adaptee aux donnees du BE alternatif (sans attaches).
 
 Differences avec fddcpi2 :
 - Bypass de FDRCA : les cables sont pris directement depuis FDDCPFA (pas d''attaches a traiter)
 - Tolerance de snap elargie (defaut 0.70m) pour compenser le decalage systematique
-  entre les cables et l''infrastructure dans l''ingenierie Axione
+  entre les cables et l''infrastructure dans l''ingenierie du BE alternatif
 - ST_Snap gere 2 cas :
   (a) vertex du cable proche du poteau -> deplacement du vertex sur le poteau
   (b) segment qui passe a cote du poteau sans vertex -> ajout d''un vertex + deplacement
