@@ -1087,19 +1087,19 @@ class ComacTask(AsyncTaskBase):
                 )
                 reverse_map = {v: k for k, v in name_map.items()}
 
-                # === Routage NGE / Axione ===
+                # === Routage BE standard / BE alternatif ===
                 be_type = self.params.get('be_type', 'nge')
                 gracethd_dir = self.params.get('gracethd_dir', '')
 
                 if be_type == 'axione' and gracethd_dir:
-                    # Axione: charger cables depuis GraceTHD
+                    # BE alternatif: charger cables depuis GraceTHD
                     from .gracethd_reader import GraceTHDReader
                     self.emit_message(f"Vérif câbles: GraceTHD ({gracethd_dir})...", "grey")
                     reader = GraceTHDReader(gracethd_dir)
                     cables_all = reader.load_cables_as_segments('DI')
                     bpe_list = reader.load_bpe()
                 else:
-                    # NGE: pipeline fddcpi2 standard
+                    # BE standard: pipeline fddcpi2 standard
                     cables_all = self.params.get('fddcpi_cables_cache')
 
                     if cables_all is not None:
@@ -2292,13 +2292,13 @@ class PoliceC6Task(AsyncTaskBase):
 
         try:
 
-            # === Routage NGE / Axione ===
+            # === Routage BE standard / BE alternatif ===
             be_type = self.params.get('be_type', 'nge')
             gracethd_dir = self.params.get('gracethd_dir', '')
             attaches_raw = []
 
             if be_type == 'axione' and gracethd_dir:
-                # Axione: charger cables et BPE depuis GraceTHD
+                # BE alternatif: charger cables et BPE depuis GraceTHD
                 from .gracethd_reader import GraceTHDReader
                 self.emit_message(f"GraceTHD: chargement ({gracethd_dir})...", "grey")
                 reader = GraceTHDReader(gracethd_dir)
@@ -2311,7 +2311,7 @@ class PoliceC6Task(AsyncTaskBase):
                 )
 
             else:
-                # NGE: pipeline fddcpi2 standard
+                # BE standard: pipeline fddcpi2 standard
                 cables_all = self.params.get('fddcpi_cables_cache')
 
                 if cables_all is not None:
@@ -2366,7 +2366,7 @@ class PoliceC6Task(AsyncTaskBase):
             
 
             if be_type != 'axione' or not gracethd_dir:
-                # NGE: utiliser le cache P-02 si disponible, sinon query PG
+                # BE standard: utiliser le cache P-02 si disponible, sinon query PG
                 bpe_list_cache = self.params.get('bpe_list_cache')
                 attaches_cache = self.params.get('attaches_cache')
 

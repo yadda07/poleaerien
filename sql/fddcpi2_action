@@ -16,7 +16,7 @@ DECLARE
     v_be text;
 BEGIN
     -- =========================================================================
-    -- 0. Detection du bureau d'etudes (NGE ou Axione)
+    -- 0. Detection du bureau d'etudes (BE standard ou BE alternatif)
     --    Table comac.sro_nge_axione : colonne 'be' identifie l'ingenierie
     -- =========================================================================
     SELECT lower(s.be) INTO v_be
@@ -24,7 +24,7 @@ BEGIN
     WHERE s.sro ILIKE '%' || zasro || '%'
     LIMIT 1;
 
-    -- Si pas Axione -> deleguer a fddcpi2 standard (pipeline NGE avec attaches)
+    -- Si pas BE alternatif -> deleguer a fddcpi2 standard (pipeline BE standard avec attaches)
     IF v_be IS NULL OR v_be != 'axione' THEN
         RETURN QUERY SELECT * FROM rip_avg_nge.fddcpi2(zasro);
         RETURN;
@@ -71,7 +71,7 @@ BEGIN
 
     -- =========================================================================
     -- 2. Cables depuis FDDCPFA directement (bypass fdrca - pas d'attaches)
-    --    Donnees Axione : cables avec decalage ~0.70m par rapport a l'infra,
+    --    Donnees BE alternatif : cables avec decalage ~0.70m par rapport a l'infra,
     --    pas de relation spatiale directe (ni intersection, ni attache).
     -- =========================================================================
     DROP TABLE IF EXISTS temp_cables;
@@ -355,10 +355,10 @@ GRANT EXECUTE ON FUNCTION rip_avg_nge.fddcpiax(text, double precision) TO sdupay
 
 COMMENT ON FUNCTION rip_avg_nge.fddcpiax(text, double precision)
     IS '
-FDDCPIAX - Variante intelligente de FDDCPI2 adaptee aux donnees Axione (sans attaches).
+FDDCPIAX - Variante intelligente de FDDCPI2 adaptee aux donnees du BE alternatif (sans attaches).
 
 Detection automatique : verifie comac.sro_nge_axione (colonne be).
-Si le SRO n''est pas Axione, delegue a fddcpi2 standard (pipeline NGE).
+Si le SRO n''est pas du BE alternatif, delegue a fddcpi2 standard (pipeline BE standard).
 
 Intelligence contextuelle :
 - Collecte infra traditionnelle (poteaux, chambres, autres) + BPE isoles

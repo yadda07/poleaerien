@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Lecteur de la base de données COMAC.
-Source: PostgreSQL (schéma 'comac' dans la BDD Auvergne)
+Source: PostgreSQL (schéma 'comac' dans la base cible)
 
 Fournit les références câbles, supports, zones de vent par commune,
 et les capacités FO possibles par référence câble.
@@ -614,7 +614,7 @@ def get_all_armements() -> List[str]:
 def get_codes_cable_capacites() -> Dict[str, int]:
     """
     Retourne mapping code câble -> capacité FO.
-    Compatible avec format CODES_CABLE_PRYSMIAN de security_rules.py
+    Compatible avec format CODES_CABLE_FO de security_rules.py
     """
     _ensure_loaded()
     

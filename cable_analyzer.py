@@ -1630,7 +1630,7 @@ def write_ecart_log(
                 code_connu = bool(capas_for_code)
                 if not code_connu:
                     lines.append(f'  DIAGNOSTIC: code BDD "{code_bdd}" non reconnu par get_capacites_possibles')
-                    lines.append(f'  => Code troncon NGE (pas code cable Prysmian) - verification manuelle requise')
+                    lines.append(f'  => Code troncon interne (pas code cable constructeur) - verification manuelle requise')
                     lines.append(f'  => Question: le cable GID {gid} (capa={capa_bdd}) correspond-il a la ref COMAC {comac_refs} ?')
                 elif capa_bdd in capas_for_code:
                     lines.append(f'  DIAGNOSTIC: capa BDD {capa_bdd} COHERENTE avec code "{code_bdd}" ({capas_for_code})')
